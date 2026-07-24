@@ -755,14 +755,38 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
           </div>
         </Panel>
 
-        <Panel title="Regra de faltas" subtitle="Controle por periodo da empresa">
+        <Panel title="Politica de faltas" subtitle="Configuravel conforme a regra do cliente">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label="Tipo de controle">
+              <select className="input">
+                <option>Por periodo</option>
+                <option>Por dia</option>
+                <option>Personalizado</option>
+              </select>
+            </Field>
+            <Field label="Aprovacao de ajuste">
+              <select className="input">
+                <option>Obrigatoria</option>
+                <option>Opcional</option>
+                <option>Bloqueada</option>
+              </select>
+            </Field>
+            <Field label="Valor falta manha"><input className="input" placeholder="1" /></Field>
+            <Field label="Valor falta tarde"><input className="input" placeholder="1" /></Field>
+            <Field label="Valor falta dia inteiro"><input className="input" placeholder="2" /></Field>
+            <Field label="Trabalho externo">
+              <select className="input">
+                <option>Permitir com justificativa</option>
+                <option>Permitir com foto</option>
+                <option>Permitir com geolocalizacao</option>
+                <option>Nao permitir</option>
+              </select>
+            </Field>
+          </div>
           <CheckList
             items={[
-              "Manha sem nenhuma batida: 1 falta",
-              "Tarde sem nenhuma batida: 1 falta",
-              "Manha + tarde sem batida: 2 faltas",
-              "Se bateu saida almoco, pode ser esquecimento da entrada",
-              "Trabalho externo pode ser lancado pelo gestor com justificativa",
+              "As faltas e esquecimentos seguem a politica salva para este cliente",
+              "Mudancas devem ficar registradas em log de auditoria",
             ]}
           />
         </Panel>
@@ -783,13 +807,13 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
           </ActionRow>
         </Panel>
 
-        <Panel title="Ajuste permitido" subtitle="Substitui a caneta por log digital">
+        <Panel title="Ajuste permitido" subtitle="Configurado pela politica do cliente">
           <CheckList
             items={[
-              "Esquecimento de batida exige evidencia no mesmo periodo",
+              "Esquecimento pode exigir evidencia no mesmo periodo",
               "Ajuste manual exige motivo e responsavel",
-              "Batida do gestor para externo fica marcada como G",
-              "Relatorio mostra falta, esquecimento e trabalho externo",
+              "Batida do gestor pode ser permitida para trabalho externo",
+              "Relatorio mostra a classificacao conforme a politica ativa",
             ]}
           />
         </Panel>
@@ -1067,22 +1091,22 @@ function PunchesScreen({
           <button className="secondary-button" onClick={() => onAction("Anexo de comprovante")} type="button">Anexar comprovante</button>
         </ActionRow>
       </Panel>
-      <Panel title="Regra operacional da empresa" subtitle="Como o sistema interpreta ausencia de batida">
+      <Panel title="Politica operacional ativa" subtitle="A interpretacao depende da configuracao da empresa">
         <div className="grid gap-3 md:grid-cols-2">
           <CheckList
             items={[
-              "Nao bateu entrada, mas bateu saida almoco: possivel esquecimento",
-              "Nao bateu entrada nem saida almoco: falta manha",
-              "Nao bateu volta almoco, mas bateu saida: possivel esquecimento",
-              "Nao bateu volta almoco nem saida: falta tarde",
+              "O cliente escolhe se a falta sera por dia ou por periodo",
+              "O cliente define o peso de cada falta",
+              "Esquecimento pode ser aceito, bloqueado ou exigir aprovacao",
+              "Trabalho externo pode ser permitido conforme a politica",
             ]}
           />
           <CheckList
             items={[
-              "Funcionario externo pode ter batida lancada pelo gestor",
-              "Lancamento do gestor aparece marcado no relatorio",
+              "Lancamento do gestor aparece marcado no relatorio quando permitido",
               "Todo ajuste exige justificativa",
               "A batida original nunca e apagada",
+              "Mudancas de politica ficam em log de auditoria",
             ]}
           />
         </div>

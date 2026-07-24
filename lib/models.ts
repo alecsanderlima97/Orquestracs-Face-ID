@@ -17,11 +17,17 @@ export type AdjustmentType =
   | "operational_error";
 
 export type AbsenceRule = {
-  morningAbsenceValue: 1;
-  afternoonAbsenceValue: 1;
-  fullDayAbsenceValue: 2;
-  allowForgottenEntryWhenLunchOutExists: boolean;
-  allowForgottenLunchBackWhenExitExists: boolean;
+  mode: "by_day" | "by_period" | "custom";
+  morningAbsenceValue?: number;
+  afternoonAbsenceValue?: number;
+  fullDayAbsenceValue?: number;
+  forgottenPunchPolicy: "allow_with_evidence" | "requires_approval" | "blocked";
+  externalWorkPolicy:
+    | "allow_with_reason"
+    | "allow_with_photo"
+    | "allow_with_geolocation"
+    | "blocked";
+  requireManagerApproval: boolean;
 };
 
 export type RetentionPolicy = {
