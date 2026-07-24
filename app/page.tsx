@@ -301,6 +301,62 @@ function applyMask(value: string, mask: MaskType) {
   return masks[mask](value);
 }
 
+function collectVisibleFormData() {
+  const labels = Array.from(document.querySelectorAll("main label"));
+  const fields: Record<string, string> = {};
+
+  labels.forEach((label) => {
+    const control = label.querySelector("input, select, textarea") as
+      | HTMLInputElement
+      | HTMLSelectElement
+      | HTMLTextAreaElement
+      | null;
+    const labelText = Array.from(label.childNodes)
+      .find((node) => node.nodeType === Node.TEXT_NODE)
+      ?.textContent?.trim();
+
+    if (control && labelText) {
+      fields[labelText] = control.value;
+    }
+  });
+
+  return fields;
+}
+
+function appendLocalRecord(action: string, section: Section, fields: Record<string, string>) {
+  const key = "orquestracs-face-id-local-records";
+  const current = JSON.parse(window.localStorage.getItem(key) || "[]") as unknown[];
+  const record = {
+    action,
+    fields,
+    id: crypto.randomUUID(),
+    savedAt: new Date().toISOString(),
+    section,
+  };
+
+  window.localStorage.setItem(key, JSON.stringify([record, ...current]));
+  return record;
+}
+
+function downloadTextFile(filename: string, content: string, type = "text/plain") {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getLocalRecords() {
+  return JSON.parse(
+    window.localStorage.getItem("orquestracs-face-id-local-records") || "[]",
+  ) as unknown[];
+}
+
 export default function Home() {
   const [active, setActive] = useState<Section>("Painel");
   const [assistantOpen, setAssistantOpen] = useState(false);
@@ -346,7 +402,76 @@ export default function Home() {
   }
 
   function demoAction(action: string) {
-    setNotice(`${action} preparado. Integracao real sera conectada somente depois.`);
+    const fields = collectVisibleFormData();
+    appendLocalRecord(action, active, fields);
+
+    if (action === "Upload de logo da empresa" || action === "Anexo de comprovante") {
+      document.getElementById("local-file-picker")?.click();
+      setNotice(`${action}: selecione um arquivo para anexar em modo local.`);
+      return;
+    }
+
+    if (action === "Backup local completo") {
+      downloadTextFile(
+        `backup-orquestracs-face-id-${new Date().toISOString().slice(0, 10)}.json`,
+        JSON.stringify(
+          {
+            createdAt: new Date().toISOString(),
+            mode: "local-demo",
+            records: getLocalRecords(),
+            system: "Orquestracs Face ID",
+          },
+          null,
+          2,
+        ),
+        "application/json",
+      );
+      setNotice("Backup local gerado em JSON com os registros salvos neste navegador.");
+      return;
+    }
+
+    if (action === "Geracao de PDF") {
+      downloadTextFile(
+        `relatorio-jornada-${new Date().toISOString().slice(0, 10)}.txt`,
+        `Orquestracs Face ID\nRelatorio de jornada demonstrativo\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\n${JSON.stringify(fields, null, 2)}`,
+      );
+      setNotice("Relatorio demonstrativo gerado localmente. O PDF real sera conectado depois.");
+      return;
+    }
+
+    if (action === "Exportacao fiscal") {
+      downloadTextFile(
+        `exportacao-fiscal-${new Date().toISOString().slice(0, 10)}.csv`,
+        "campo,valor\n" +
+          Object.entries(fields)
+            .map(([key, value]) => `"${key}","${value}"`)
+            .join("\n"),
+        "text/csv",
+      );
+      setNotice("Exportacao fiscal demonstrativa gerada em CSV.");
+      return;
+    }
+
+    if (action === "Termo LGPD" || action === "Relatorio de impacto") {
+      downloadTextFile(
+        `${action.toLowerCase().replace(/\s+/g, "-")}.txt`,
+        `${action}\nOrquestracs Face ID\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\nDocumento demonstrativo para revisao juridica.`,
+      );
+      setNotice(`${action} gerado localmente em formato demonstrativo.`);
+      return;
+    }
+
+    if (action === "Validacao de CNPJ") {
+      const cnpj = fields.CNPJ?.replace(/\D/g, "") || "";
+      setNotice(
+        cnpj.length === 14
+          ? "CNPJ com formato valido. Validacao oficial sera conectada depois."
+          : "CNPJ incompleto. Preencha 14 digitos.",
+      );
+      return;
+    }
+
+    setNotice(`${action} salvo localmente neste navegador. Firebase sera conectado depois.`);
   }
 
   function registerPunch(kind: string) {
@@ -506,6 +631,17 @@ export default function Home() {
           onNavigate={go}
         />
       )}
+      <input
+        className="hidden"
+        id="local-file-picker"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) {
+            setNotice(`Arquivo selecionado: ${file.name}. Upload real sera conectado depois.`);
+          }
+        }}
+        type="file"
+      />
     </main>
   );
 }
@@ -1505,6 +1641,11 @@ function AssistantPanel({
   };
 
   const current = help[active];
+  const [selectedQuestion, setSelectedQuestion] = useState(current.questions[0]);
+
+  useEffect(() => {
+    setSelectedQuestion(current.questions[0]);
+  }, [active]);
 
   return (
     <div className="assistant-shell">
@@ -1540,11 +1681,20 @@ function AssistantPanel({
                 <button
                   className="rounded-md border border-[#d9e0e7] bg-white px-3 py-2 text-left text-sm font-semibold text-[#26323f] hover:border-[#18594c] hover:text-[#18594c]"
                   key={question}
+                  onClick={() => setSelectedQuestion(question)}
                   type="button"
                 >
                   {question}
                 </button>
               ))}
+            </div>
+            <div className="mt-3 rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-3 text-sm leading-6 text-[#24594d]">
+              <p className="font-semibold">{selectedQuestion}</p>
+              <p className="mt-1">
+                Siga o passo a passo desta tela. Quando a integracao real estiver
+                conectada, o assistente tambem podera abrir o modulo certo e validar
+                os dados preenchidos.
+              </p>
             </div>
           </section>
 
