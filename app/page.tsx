@@ -14,7 +14,7 @@ type Section =
   | "LGPD e auditoria"
   | "Admin";
 
-type MaskType = "name" | "cpf" | "cnpj" | "phone" | "time" | "pin" | "date";
+type MaskType = "name" | "cpf" | "cnpj" | "phone" | "time" | "pin" | "date" | "cep";
 
 const employees = [
   {
@@ -167,6 +167,11 @@ function maskDate(value: string) {
     .replace(/^(\d{2})\/(\d{2})(\d)/, "$1/$2/$3");
 }
 
+function maskCep(value: string) {
+  const digits = onlyDigits(value).slice(0, 8);
+  return digits.replace(/^(\d{5})(\d)/, "$1-$2");
+}
+
 function maskTime(value: string) {
   const digits = onlyDigits(value).slice(0, 4);
   if (digits.length <= 2) return digits;
@@ -290,6 +295,7 @@ function applyMask(value: string, mask: MaskType) {
     time: maskTime,
     pin: (current: string) => onlyDigits(current).slice(0, 6),
     date: maskDate,
+    cep: maskCep,
   };
 
   return masks[mask](value);
@@ -602,14 +608,39 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
   return (
     <>
       <TwoColumn>
-        <Panel title="Empresa do sistema" subtitle="Este sistema usa apenas um CNPJ principal">
-          <div className="grid gap-3 md:grid-cols-2">
+        <Panel title="Perfil da empresa" subtitle="Dados fiscais, contato e endereco do CNPJ principal">
+          <div className="grid gap-3 md:grid-cols-3">
             <MaskedField label="Razao social" mask="name" placeholder="Mult Pecas Itaboa" />
+            <MaskedField label="Nome fantasia" mask="name" placeholder="Mult Pecas" />
             <MaskedField label="CNPJ" mask="cnpj" placeholder="00.000.000/0000-00" />
+            <Field label="Inscricao estadual"><input className="input" placeholder="000.000.000.000" /></Field>
+            <Field label="Inscricao municipal"><input className="input" placeholder="000000" /></Field>
             <MaskedField label="Responsavel" mask="name" placeholder="Nome Do Responsavel" />
             <MaskedField label="Celular" mask="phone" placeholder="(00) 00000-0000" />
             <Field label="E-mail"><input className="input" placeholder="contato@empresa.com" /></Field>
             <Field label="Plano"><select className="input"><option>Essencial</option><option>Profissional</option><option>Enterprise</option></select></Field>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-4">
+            <MaskedField label="CEP" mask="cep" placeholder="00000-000" />
+            <Field label="Logradouro"><input className="input" placeholder="Rua, avenida ou estrada" /></Field>
+            <Field label="Numero"><input className="input" placeholder="123" /></Field>
+            <Field label="Complemento"><input className="input" placeholder="Galpao, sala, lote" /></Field>
+            <Field label="Bairro"><input className="input" placeholder="Centro" /></Field>
+            <Field label="Cidade"><input className="input" placeholder="Cidade" /></Field>
+            <Field label="UF">
+              <select className="input">
+                <option>SP</option>
+                <option>MG</option>
+                <option>RJ</option>
+                <option>PR</option>
+                <option>SC</option>
+                <option>RS</option>
+                <option>GO</option>
+                <option>BA</option>
+              </select>
+            </Field>
+            <Field label="Data e hora local"><input className="input" readOnly value="24/07/2026 18:00" /></Field>
           </div>
           <ActionRow>
             <button className="primary-button" onClick={() => onAction("Cadastro da empresa principal")} type="button">Salvar empresa</button>
@@ -617,15 +648,27 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
           </ActionRow>
         </Panel>
 
-        <Panel title="Como essa aba funciona" subtitle="Um sistema para um CNPJ">
-          <CheckList
-            items={[
-              "Somente um CNPJ fica vinculado a este sistema",
-              "A jornada coletiva vira a regra padrao",
-              "Usuarios entram por convite e permissao",
-              "Fotos seguem politica de retencao configurada",
-            ]}
-          />
+        <Panel title="Foto e backup" subtitle="Identidade visual e seguranca local">
+          <div className="grid gap-4">
+            <div className="grid min-h-[180px] place-items-center rounded-md border border-dashed border-[#aeb9c5] bg-[#fbfcfd] p-4 text-center">
+              <div>
+                <div className="mx-auto grid h-20 w-20 place-items-center rounded-md bg-[#edf5f2] text-2xl font-black text-[#18594c]">
+                  O
+                </div>
+                <p className="mt-3 text-sm font-semibold text-[#26323f]">Logo ou foto da empresa</p>
+                <p className="mt-1 text-xs leading-5 text-[#667085]">Usada em perfil, relatorios e tela do tablet.</p>
+              </div>
+            </div>
+            <button className="secondary-button" onClick={() => onAction("Upload de logo da empresa")} type="button">Selecionar imagem</button>
+            <button className="primary-button" onClick={() => onAction("Backup local completo")} type="button">Gerar backup local</button>
+            <CheckList
+              items={[
+                "Backup inclui dados, relatorios e referencias das fotos",
+                "Fotos ficam na nuvem e podem entrar no pacote quando disponivel",
+                "Use backup mensal como camada extra de seguranca",
+              ]}
+            />
+          </div>
         </Panel>
       </TwoColumn>
 
