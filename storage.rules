@@ -1,0 +1,43 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return request.auth.token.role;
+    }
+
+    function companyId() {
+      return request.auth.token.companyId;
+    }
+
+    function isDeveloper() {
+      return signedIn() && role() == "developer";
+    }
+
+    function canReadCompany(targetCompanyId) {
+      return isDeveloper() || (
+        signedIn() &&
+        companyId() == targetCompanyId &&
+        (role() == "owner" || role() == "admin" || role() == "reader")
+      );
+    }
+
+    function canWriteCompany(targetCompanyId) {
+      return isDeveloper() || (
+        signedIn() &&
+        companyId() == targetCompanyId &&
+        (role() == "owner" || role() == "admin")
+      );
+    }
+
+    match /companies/{targetCompanyId}/{allPaths=**} {
+      allow read: if canReadCompany(targetCompanyId);
+      allow write: if canWriteCompany(targetCompanyId);
+      allow delete: if isDeveloper();
+    }
+  }
+}

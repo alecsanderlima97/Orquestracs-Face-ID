@@ -1,0 +1,57 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return request.auth.token.role;
+    }
+
+    function companyId() {
+      return request.auth.token.companyId;
+    }
+
+    function isDeveloper() {
+      return signedIn() && role() == "developer";
+    }
+
+    function isCompanyMember(targetCompanyId) {
+      return signedIn() && companyId() == targetCompanyId;
+    }
+
+    function canWriteCompany(targetCompanyId) {
+      return isDeveloper() || (
+        isCompanyMember(targetCompanyId) &&
+        (role() == "owner" || role() == "admin")
+      );
+    }
+
+    function canReadCompany(targetCompanyId) {
+      return isDeveloper() || (
+        isCompanyMember(targetCompanyId) &&
+        (role() == "owner" || role() == "admin" || role() == "reader")
+      );
+    }
+
+    match /companies/{targetCompanyId} {
+      allow read: if canReadCompany(targetCompanyId);
+      allow create, update: if canWriteCompany(targetCompanyId);
+      allow delete: if isDeveloper();
+
+      match /{document=**} {
+        allow read: if canReadCompany(targetCompanyId);
+        allow create, update: if canWriteCompany(targetCompanyId);
+        allow delete: if isDeveloper();
+      }
+    }
+
+    match /invites/{inviteId} {
+      allow read, create, update: if signedIn() &&
+        (role() == "developer" || role() == "owner" || role() == "admin");
+      allow delete: if isDeveloper();
+    }
+  }
+}
