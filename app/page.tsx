@@ -1692,8 +1692,9 @@ function CheckList({ items }: { items: string[] }) {
   return (
     <div className="grid gap-3">
       {items.map((item) => (
-        <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3 text-sm font-medium text-[#26323f]" key={item}>
-          {item}
+        <div className="info-note" key={item}>
+          <span className="info-note-icon">i</span>
+          <span>{item}</span>
         </div>
       ))}
     </div>
