@@ -691,7 +691,7 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
 
       <Panel title="Escalas da empresa" subtitle="Cadastre uma ou mais jornadas coletivas">
         <div className="grid gap-3 md:grid-cols-4">
-          <Field label="Nome da escala"><input className="input" placeholder="Serraria 07h as 17h15" /></Field>
+          <Field label="Nome da escala"><input className="input" placeholder="Operacional 07h as 17h15" /></Field>
           <TimeStepper label="Entrada" onChange={(value) => updateCompanyJourney("start", value)} value={companyJourney.start} />
           <TimeStepper label="Saida almoco" onChange={(value) => updateCompanyJourney("lunchOut", value)} value={companyJourney.lunchOut} />
           <TimeStepper label="Volta almoco" onChange={(value) => updateCompanyJourney("lunchBack", value)} value={companyJourney.lunchBack} />
@@ -755,7 +755,7 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
           </div>
         </Panel>
 
-        <Panel title="Regra de faltas" subtitle="Controle por periodo da serraria">
+        <Panel title="Regra de faltas" subtitle="Controle por periodo da empresa">
           <CheckList
             items={[
               "Manha sem nenhuma batida: 1 falta",
@@ -1067,7 +1067,7 @@ function PunchesScreen({
           <button className="secondary-button" onClick={() => onAction("Anexo de comprovante")} type="button">Anexar comprovante</button>
         </ActionRow>
       </Panel>
-      <Panel title="Regra operacional da serraria" subtitle="Como o sistema interpreta ausencia de batida">
+      <Panel title="Regra operacional da empresa" subtitle="Como o sistema interpreta ausencia de batida">
         <div className="grid gap-3 md:grid-cols-2">
           <CheckList
             items={[
