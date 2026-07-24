@@ -2,6 +2,12 @@
 
 Esta estrutura nao importa dados demonstrativos para o Firebase.
 
+## Regra do produto
+
+Cada instalacao do Orquestracs Face ID deve ter apenas um CNPJ principal ativo.
+A colecao `companies` existe por organizacao tecnica e futura portabilidade, mas
+a interface deve permitir somente uma empresa por sistema.
+
 ## Colecoes
 
 - `companies`

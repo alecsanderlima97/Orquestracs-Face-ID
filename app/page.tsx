@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 
 type Section =
   | "Painel"
-  | "Empresas"
+  | "Empresa"
   | "Colaboradores"
   | "Escalas"
   | "Sala de ponto"
@@ -66,7 +66,7 @@ const journeyRows = [
 
 const navItems: Section[] = [
   "Painel",
-  "Empresas",
+  "Empresa",
   "Colaboradores",
   "Escalas",
   "Sala de ponto",
@@ -304,7 +304,7 @@ export default function Home() {
   const title = useMemo(() => {
     const subtitles: Record<Section, string> = {
       Painel: "Visao geral da operacao",
-      Empresas: "Cadastro e configuracao da empresa",
+      Empresa: "Cadastro e configuracao do CNPJ do sistema",
       Colaboradores: "Equipe, documentos, turnos e biometria",
       Escalas: "Jornadas, tolerancias e banco de horas",
       "Sala de ponto": "Tablet de reconhecimento facial",
@@ -439,7 +439,7 @@ export default function Home() {
             </>
           )}
 
-          {active === "Empresas" && <CompaniesScreen onAction={demoAction} />}
+          {active === "Empresa" && <CompaniesScreen onAction={demoAction} />}
           {active === "Colaboradores" && <EmployeesScreen onAction={demoAction} />}
           {active === "Escalas" && <ShiftsScreen onAction={demoAction} />}
           {active === "Sala de ponto" && (
@@ -602,7 +602,7 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
   return (
     <>
       <TwoColumn>
-        <Panel title="Cadastrar empresa" subtitle="Primeiro passo para liberar o sistema">
+        <Panel title="Empresa do sistema" subtitle="Este sistema usa apenas um CNPJ principal">
           <div className="grid gap-3 md:grid-cols-2">
             <MaskedField label="Razao social" mask="name" placeholder="Mult Pecas Itaboa" />
             <MaskedField label="CNPJ" mask="cnpj" placeholder="00.000.000/0000-00" />
@@ -612,15 +612,15 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
             <Field label="Plano"><select className="input"><option>Essencial</option><option>Profissional</option><option>Enterprise</option></select></Field>
           </div>
           <ActionRow>
-            <button className="primary-button" onClick={() => onAction("Cadastro de empresa")} type="button">Cadastrar empresa</button>
+            <button className="primary-button" onClick={() => onAction("Cadastro da empresa principal")} type="button">Salvar empresa</button>
             <button className="secondary-button" onClick={() => onAction("Validacao de CNPJ")} type="button">Validar CNPJ</button>
           </ActionRow>
         </Panel>
 
-        <Panel title="Como essa aba funciona" subtitle="A empresa e a raiz dos dados">
+        <Panel title="Como essa aba funciona" subtitle="Um sistema para um CNPJ">
           <CheckList
             items={[
-              "Cada empresa tem seus proprios funcionarios",
+              "Somente um CNPJ fica vinculado a este sistema",
               "A jornada coletiva vira a regra padrao",
               "Usuarios entram por convite e permissao",
               "Fotos seguem politica de retencao configurada",
@@ -652,7 +652,7 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
         </div>
         <ActionRow>
           <button className="primary-button" onClick={() => onAction("Jornada coletiva da empresa")} type="button">Salvar jornada coletiva</button>
-          <button className="secondary-button" onClick={() => onAction("Duplicar jornada para filial")} type="button">Duplicar para filial</button>
+          <button className="secondary-button" onClick={() => onAction("Previa da jornada coletiva")} type="button">Ver previa</button>
         </ActionRow>
       </Panel>
 
@@ -1182,8 +1182,8 @@ function AdminScreen({ onAction }: { onAction: (action: string) => void }) {
             <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4">
               <p className="text-sm font-semibold text-[#26323f]">Controle do SaaS</p>
               <p className="mt-1 text-xs leading-5 text-[#667085]">
-                Visao para acompanhar empresas, usuarios, planos, acessos e auditoria
-                geral da plataforma.
+                Visao para acompanhar o CNPJ ativo, usuarios, plano, acessos e
+                auditoria geral da instalacao.
               </p>
             </div>
             <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4">
@@ -1196,7 +1196,7 @@ function AdminScreen({ onAction }: { onAction: (action: string) => void }) {
           </div>
           <ActionRow>
             <button className="primary-button" onClick={() => onAction("Painel interno Orquestracs")} type="button">
-              Ver empresas
+              Ver empresa
             </button>
             <button className="secondary-button" onClick={() => onAction("Auditoria global")} type="button">
               Logs globais
@@ -1225,7 +1225,6 @@ function AdminScreen({ onAction }: { onAction: (action: string) => void }) {
           <Field label="Empresa">
             <select className="input">
               <option>MULT PECAS ITABOA</option>
-              <option>Nova empresa</option>
             </select>
           </Field>
           <Field label="Permissao">
@@ -1305,14 +1304,14 @@ function AssistantPanel({
       ],
       questions: ["Como vejo atrasos?", "Como confiro banco de horas?", "Como gero relatorio?"],
     },
-    Empresas: {
+    Empresa: {
       title: "Cadastro da empresa",
       steps: [
         "Cadastre razao social, CNPJ, responsavel e contato.",
         "Depois configure a jornada coletiva padrao da empresa.",
         "A empresa pode convidar proprietario, administrador e leitor.",
       ],
-      questions: ["O que e jornada coletiva?", "Quem deve ser proprietario?", "Posso ter filiais?"],
+      questions: ["O que e jornada coletiva?", "Quem deve ser proprietario?", "Posso trocar o CNPJ?"],
     },
     Colaboradores: {
       title: "Cadastro de funcionarios",
@@ -1381,7 +1380,7 @@ function AssistantPanel({
       title: "Admin Orquestracs",
       steps: [
         "Use esta area para controle interno da plataforma.",
-        "Gerencie convites, empresas, usuarios e permissoes.",
+        "Gerencie convites, usuarios e permissoes do CNPJ ativo.",
         "Separe perfis: proprietario, administrador, leitor e desenvolvedor.",
       ],
       questions: ["Como convidar usuario?", "Quem tem acesso total?", "O leitor pode editar?"],
@@ -1435,7 +1434,7 @@ function AssistantPanel({
           <section>
             <p className="text-sm font-semibold text-[#26323f]">Atalhos guiados</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              {(["Empresas", "Colaboradores", "Sala de ponto", "Relatorios"] as Section[]).map((section) => (
+              {(["Empresa", "Colaboradores", "Sala de ponto", "Relatorios"] as Section[]).map((section) => (
                 <button
                   className="secondary-button"
                   key={section}
