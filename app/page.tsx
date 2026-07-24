@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Section =
   | "Painel"
@@ -304,8 +304,24 @@ function applyMask(value: string, mask: MaskType) {
 export default function Home() {
   const [active, setActive] = useState<Section>("Painel");
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [currentDateTime, setCurrentDateTime] = useState("");
   const [notice, setNotice] = useState("Modo demonstrativo: nenhum dado sera enviado ao Firebase.");
   const [pin, setPin] = useState("");
+
+  useEffect(() => {
+    function refreshClock() {
+      setCurrentDateTime(
+        new Intl.DateTimeFormat("pt-BR", {
+          dateStyle: "short",
+          timeStyle: "medium",
+        }).format(new Date()),
+      );
+    }
+
+    refreshClock();
+    const timer = window.setInterval(refreshClock, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const title = useMemo(() => {
     const subtitles: Record<Section, string> = {
@@ -406,7 +422,11 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2 xl:justify-end">
+              <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                <div className="rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-3 py-2 text-right">
+                  <p className="text-xs font-semibold uppercase text-[#667085]">Data e hora</p>
+                  <p className="text-sm font-bold text-[#101923]">{currentDateTime}</p>
+                </div>
                 <button
                   className="h-10 rounded-md bg-[#18594c] px-4 text-sm font-semibold text-white shadow-sm"
                   onClick={() => go("Sala de ponto")}
@@ -608,20 +628,18 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
   return (
     <>
       <TwoColumn>
-        <Panel title="Perfil da empresa" subtitle="Dados fiscais, contato e endereco do CNPJ principal">
+        <Panel title="Perfil da empresa" subtitle="Dados principais do CNPJ">
           <div className="grid gap-3 md:grid-cols-3">
             <MaskedField label="Razao social" mask="name" placeholder="Mult Pecas Itaboa" />
             <MaskedField label="Nome fantasia" mask="name" placeholder="Mult Pecas" />
             <MaskedField label="CNPJ" mask="cnpj" placeholder="00.000.000/0000-00" />
             <Field label="Inscricao estadual"><input className="input" placeholder="000.000.000.000" /></Field>
-            <Field label="Inscricao municipal"><input className="input" placeholder="000000" /></Field>
             <MaskedField label="Responsavel" mask="name" placeholder="Nome Do Responsavel" />
             <MaskedField label="Celular" mask="phone" placeholder="(00) 00000-0000" />
             <Field label="E-mail"><input className="input" placeholder="contato@empresa.com" /></Field>
-            <Field label="Plano"><select className="input"><option>Essencial</option><option>Profissional</option><option>Enterprise</option></select></Field>
           </div>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-4">
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
             <MaskedField label="CEP" mask="cep" placeholder="00000-000" />
             <Field label="Logradouro"><input className="input" placeholder="Rua, avenida ou estrada" /></Field>
             <Field label="Numero"><input className="input" placeholder="123" /></Field>
@@ -640,7 +658,6 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
                 <option>BA</option>
               </select>
             </Field>
-            <Field label="Data e hora local"><input className="input" readOnly value="24/07/2026 18:00" /></Field>
           </div>
           <ActionRow>
             <button className="primary-button" onClick={() => onAction("Cadastro da empresa principal")} type="button">Salvar empresa</button>
@@ -672,8 +689,9 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
         </Panel>
       </TwoColumn>
 
-      <Panel title="Jornada coletiva da empresa" subtitle="Regra padrao usada pelos colaboradores">
+      <Panel title="Escalas da empresa" subtitle="Cadastre uma ou mais jornadas coletivas">
         <div className="grid gap-3 md:grid-cols-4">
+          <Field label="Nome da escala"><input className="input" placeholder="Serraria 07h as 17h15" /></Field>
           <TimeStepper label="Entrada" onChange={(value) => updateCompanyJourney("start", value)} value={companyJourney.start} />
           <TimeStepper label="Saida almoco" onChange={(value) => updateCompanyJourney("lunchOut", value)} value={companyJourney.lunchOut} />
           <TimeStepper label="Volta almoco" onChange={(value) => updateCompanyJourney("lunchBack", value)} value={companyJourney.lunchBack} />
@@ -694,9 +712,19 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
           />
         </div>
         <ActionRow>
-          <button className="primary-button" onClick={() => onAction("Jornada coletiva da empresa")} type="button">Salvar jornada coletiva</button>
+          <button className="primary-button" onClick={() => onAction("Escala coletiva da empresa")} type="button">Salvar escala</button>
           <button className="secondary-button" onClick={() => onAction("Previa da jornada coletiva")} type="button">Ver previa</button>
         </ActionRow>
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          {initialShifts.map((shift) => (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={shift.name}>
+              <p className="text-sm font-semibold text-[#26323f]">{shift.name}</p>
+              <p className="mt-1 text-xs text-[#667085]">
+                {shift.start} - {shift.breakStart} / {shift.breakEnd} - {shift.end}
+              </p>
+            </div>
+          ))}
+        </div>
       </Panel>
 
       <TwoColumn>
@@ -786,15 +814,35 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
 
   return (
     <>
-      <Panel title="Novo colaborador" subtitle="Cadastro preparado para PIN, foto e biometria">
-        <div className="grid gap-3 md:grid-cols-3">
+      <Panel title="Novo colaborador" subtitle="Dados para ponto, holerite e relatorio mensal">
+        <p className="text-sm font-semibold text-[#26323f]">Dados pessoais</p>
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
           <MaskedField label="Nome" mask="name" placeholder="Primeira Letra Maiuscula" />
           <MaskedField label="CPF" mask="cpf" placeholder="000.000.000-00" />
           <MaskedField label="PIN" mask="pin" placeholder="0000" />
-          <MaskedField label="Data de admissao" mask="date" placeholder="00/00/0000" />
           <MaskedField label="Celular" mask="phone" placeholder="(00) 00000-0000" />
+        </div>
+
+        <p className="mt-5 text-sm font-semibold text-[#26323f]">Dados trabalhistas</p>
+        <div className="mt-3 grid gap-3 md:grid-cols-4">
+          <MaskedField label="Data de admissao" mask="date" placeholder="00/00/0000" />
           <MaskedField label="Cargo" mask="name" placeholder="Vendedor" />
           <MaskedField label="Departamento" mask="name" placeholder="Loja" />
+          <Field label="CBO"><input className="input" placeholder="0000-00" /></Field>
+          <Field label="N. carteira trabalho"><input className="input" placeholder="0000000" /></Field>
+          <Field label="Serie CTPS"><input className="input" placeholder="0000" /></Field>
+          <Field label="UF CTPS">
+            <select className="input">
+              <option>SP</option>
+              <option>MG</option>
+              <option>RJ</option>
+              <option>PR</option>
+              <option>SC</option>
+              <option>RS</option>
+              <option>GO</option>
+              <option>BA</option>
+            </select>
+          </Field>
           <Field label="Tolerancia"><input className="input" placeholder="10 min" /></Field>
         </div>
 
@@ -803,8 +851,8 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             <div>
               <p className="text-sm font-semibold text-[#26323f]">Jornada do colaborador</p>
               <p className="mt-1 text-xs leading-5 text-[#667085]">
-                Use a jornada coletiva da empresa ou defina horarios individuais
-                para validar atrasos, adiantamentos e batidas fora da jornada.
+                Escolha uma escala cadastrada na empresa. Use individual apenas
+                quando este funcionario tiver excecao.
               </p>
             </div>
             <div className="grid grid-cols-2 rounded-md border border-[#cbd5df] bg-white p-1 text-xs font-semibold">
@@ -829,9 +877,11 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               <Field label="Jornada coletiva da empresa">
                 <select className="input">
-                  <option>Escala 07:00 - 11:30 / 13:00 - 17:15</option>
-                  <option>Escala 08:00 - 13:00 / 15:00 - 18:00</option>
-                  <option>Escala 09:00 - 13:00 / 15:00 - 19:00</option>
+                  {initialShifts.map((shift) => (
+                    <option key={shift.name}>
+                      {shift.name} - {shift.start} as {shift.breakStart} / {shift.breakEnd} as {shift.end}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <div className="rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-3 text-sm text-[#24594d]">
@@ -1351,10 +1401,10 @@ function AssistantPanel({
       title: "Cadastro da empresa",
       steps: [
         "Cadastre razao social, CNPJ, responsavel e contato.",
-        "Depois configure a jornada coletiva padrao da empresa.",
+        "Depois cadastre uma ou mais escalas coletivas da empresa.",
         "A empresa pode convidar proprietario, administrador e leitor.",
       ],
-      questions: ["O que e jornada coletiva?", "Quem deve ser proprietario?", "Posso trocar o CNPJ?"],
+      questions: ["Como cadastrar escala?", "Quem deve ser proprietario?", "Posso trocar o CNPJ?"],
     },
     Colaboradores: {
       title: "Cadastro de funcionarios",
@@ -1736,7 +1786,7 @@ function CheckList({ items }: { items: string[] }) {
     <div className="grid gap-3">
       {items.map((item) => (
         <div className="info-note" key={item}>
-          <span className="info-note-icon">i</span>
+          <span className="info-note-icon" aria-hidden="true" />
           <span>{item}</span>
         </div>
       ))}
