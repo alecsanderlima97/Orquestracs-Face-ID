@@ -560,15 +560,15 @@ function PunchCard({
             />
           </Field>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="punch-actions">
             {["Entrada", "Intervalo", "Retorno", "Saida"].map((label) => (
-              <button className="secondary-button" key={label} onClick={() => onRegister(label)} type="button">
+              <button className="secondary-button punch-action-button" key={label} onClick={() => onRegister(label)} type="button">
                 {label}
               </button>
             ))}
           </div>
 
-          <div className="grid gap-3 rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-4 text-sm text-[#24594d] md:grid-cols-3">
+          <div className="grid gap-3 rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-4 text-sm text-[#24594d] sm:grid-cols-3">
             <span>Foto obrigatoria</span>
             <span>Horario do servidor</span>
             <span>Hash de auditoria</span>

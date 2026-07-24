@@ -108,6 +108,18 @@ a {
   transform: translateY(-1px);
 }
 
+.punch-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: 10px;
+}
+
+.punch-action-button {
+  min-width: 0;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
 .primary-button:active,
 .secondary-button:active,
 .mini-button:active,
