@@ -7,6 +7,7 @@ type Section =
   | "Empresas"
   | "Colaboradores"
   | "Escalas"
+  | "Sala de ponto"
   | "Batidas"
   | "Banco de horas"
   | "Relatorios"
@@ -68,6 +69,7 @@ const navItems: Section[] = [
   "Empresas",
   "Colaboradores",
   "Escalas",
+  "Sala de ponto",
   "Batidas",
   "Banco de horas",
   "Relatorios",
@@ -305,6 +307,7 @@ export default function Home() {
       Empresas: "Cadastro e configuracao da empresa",
       Colaboradores: "Equipe, documentos, turnos e biometria",
       Escalas: "Jornadas, tolerancias e banco de horas",
+      "Sala de ponto": "Tablet de reconhecimento facial",
       Batidas: "Registro por PIN, foto e evidencias",
       "Banco de horas": "Saldos, faltantes, extras e abonos",
       Relatorios: "Espelho de ponto e jornada detalhada",
@@ -400,7 +403,7 @@ export default function Home() {
               <div className="flex flex-wrap gap-2 xl:justify-end">
                 <button
                   className="h-10 rounded-md bg-[#18594c] px-4 text-sm font-semibold text-white shadow-sm"
-                  onClick={() => go("Batidas")}
+                  onClick={() => go("Sala de ponto")}
                   type="button"
                 >
                   Nova batida
@@ -439,6 +442,14 @@ export default function Home() {
           {active === "Empresas" && <CompaniesScreen onAction={demoAction} />}
           {active === "Colaboradores" && <EmployeesScreen onAction={demoAction} />}
           {active === "Escalas" && <ShiftsScreen onAction={demoAction} />}
+          {active === "Sala de ponto" && (
+            <KioskScreen
+              onAction={demoAction}
+              onRegister={registerPunch}
+              pin={pin}
+              setPin={setPin}
+            />
+          )}
           {active === "Batidas" && (
             <PunchesScreen
               onAction={demoAction}
@@ -987,6 +998,131 @@ function PunchesScreen({
   );
 }
 
+function KioskScreen({
+  onAction,
+  onRegister,
+  pin,
+  setPin,
+}: {
+  onAction: (action: string) => void;
+  onRegister: (kind: string) => void;
+  pin: string;
+  setPin: (value: string) => void;
+}) {
+  const [recognized, setRecognized] = useState(false);
+  const [selectedPunch, setSelectedPunch] = useState("Entrada");
+
+  function identifyFace() {
+    setRecognized(true);
+    onAction("Reconhecimento facial no tablet");
+  }
+
+  function confirmPunch() {
+    onAction(`Presenca confirmada por ${recognized ? "Face ID" : "PIN + foto"}`);
+  }
+
+  return (
+    <section className="kiosk-screen rounded-lg border border-[#d9e0e7] bg-[#101923] p-5 text-white shadow-sm">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b7d7ce]">
+                Sala de ponto
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold">Tablet em modo reconhecimento</h2>
+              <p className="mt-2 text-sm text-white/60">
+                Funcionarios chegam, ficam em frente a camera e confirmam a presenca.
+              </p>
+            </div>
+            <span className="w-fit rounded-full bg-[#dcebe6] px-3 py-1 text-xs font-bold text-[#143f37]">
+              Camera ativa
+            </span>
+          </div>
+
+          <div className="mt-6 grid min-h-[430px] place-items-center rounded-lg border border-white/10 bg-[#0b121a] p-6">
+            <div className="text-center">
+              <div className="mx-auto grid h-52 w-52 place-items-center rounded-full border-[10px] border-[#dcebe6] bg-[#172632] shadow-[0_0_0_16px_rgba(220,235,230,0.06)]">
+                <div className="h-32 w-24 rounded-[42%] border-4 border-[#b7d7ce]" />
+              </div>
+              <p className="mt-6 text-lg font-semibold">
+                {recognized ? "Funcionario identificado" : "Aguardando rosto"}
+              </p>
+              <p className="mt-2 text-sm text-white/55">
+                {recognized
+                  ? "Elivelton Aparecido - pronto para confirmar batida"
+                  : "Posicione o rosto no centro da camera"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <aside className="grid gap-4">
+          <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+            <p className="text-sm font-semibold text-[#b7d7ce]">Confirmacao</p>
+            <div className="mt-4 grid gap-3">
+              <Field label="Tipo da batida">
+                <select
+                  className="input"
+                  onChange={(event) => setSelectedPunch(event.target.value)}
+                  value={selectedPunch}
+                >
+                  <option>Entrada</option>
+                  <option>Saida almoco</option>
+                  <option>Volta almoco</option>
+                  <option>Fim do dia</option>
+                </select>
+              </Field>
+              <button className="primary-button" onClick={identifyFace} type="button">
+                Simular Face ID
+              </button>
+              <button className="secondary-button" onClick={confirmPunch} type="button">
+                Confirmar presenca
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-white/10 bg-white p-5 text-[#17202a]">
+            <p className="text-sm font-semibold text-[#26323f]">Fallback PIN + foto</p>
+            <p className="mt-1 text-xs leading-5 text-[#667085]">
+              Use quando o rosto nao reconhecer, funcionario for novo ou a luz estiver ruim.
+            </p>
+            <div className="mt-4 grid gap-3">
+              <Field label="PIN do colaborador">
+                <input
+                  className="input"
+                  maxLength={6}
+                  onChange={(event) => setPin(event.target.value.replace(/\D/g, ""))}
+                  placeholder="0000"
+                  value={pin}
+                />
+              </Field>
+              <button
+                className="secondary-button"
+                onClick={() => onRegister(selectedPunch)}
+                type="button"
+              >
+                Registrar por PIN + foto
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-[#cfe3dc] bg-[#f1faf7] p-4 text-[#24594d]">
+            <p className="text-sm font-semibold">O que sera registrado</p>
+            <div className="mt-3 grid gap-2 text-xs leading-5">
+              <span>Funcionario identificado</span>
+              <span>Foto da batida</span>
+              <span>Horario do servidor</span>
+              <span>Status: no horario, atraso ou fora da jornada</span>
+              <span>Log inviolavel</span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
 function HoursBankScreen({ onAction }: { onAction: (action: string) => void }) {
   return (
     <>
@@ -1196,6 +1332,15 @@ function AssistantPanel({
       ],
       questions: ["Como editar turno?", "Como funciona tolerancia?", "Qual regra vale para feriado?"],
     },
+    "Sala de ponto": {
+      title: "Tablet da sala de ponto",
+      steps: [
+        "Deixe esta tela aberta no tablet da sala de ponto.",
+        "O funcionario fica em frente a camera para o Face ID identificar.",
+        "Se o reconhecimento falhar, use PIN + foto como contingencia.",
+      ],
+      questions: ["Como confirmar presenca?", "Quando usar PIN + foto?", "O que fica registrado?"],
+    },
     Batidas: {
       title: "Sala de ponto",
       steps: [
@@ -1290,7 +1435,7 @@ function AssistantPanel({
           <section>
             <p className="text-sm font-semibold text-[#26323f]">Atalhos guiados</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              {(["Empresas", "Colaboradores", "Batidas", "Relatorios"] as Section[]).map((section) => (
+              {(["Empresas", "Colaboradores", "Sala de ponto", "Relatorios"] as Section[]).map((section) => (
                 <button
                   className="secondary-button"
                   key={section}
