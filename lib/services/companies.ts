@@ -1,8 +1,9 @@
-import { addDoc, collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import type { Company } from "@/lib/models";
 
 const companiesRef = collection(db, "companies");
+export const MAIN_COMPANY_ID = "main";
 
 export async function createCompany(company: Omit<Company, "id">) {
   return addDoc(companiesRef, company);
@@ -20,4 +21,16 @@ export async function listCompanies() {
 
 export async function updateCompany(companyId: string, data: Partial<Company>) {
   return updateDoc(doc(db, "companies", companyId), data);
+}
+
+export async function saveMainCompany(data: Record<string, unknown>) {
+  return setDoc(
+    doc(db, "companies", MAIN_COMPANY_ID),
+    {
+      ...data,
+      id: MAIN_COMPANY_ID,
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true },
+  );
 }

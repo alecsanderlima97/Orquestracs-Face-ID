@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
+import { saveMainCompany } from "@/lib/services/companies";
 
 type Section =
   | "Painel"
@@ -530,9 +531,43 @@ export default function Home() {
     setNotice(`Tela "${section}" aberta em modo demonstrativo.`);
   }
 
-  function demoAction(action: string) {
+  async function demoAction(action: string) {
     const fields = collectVisibleFormData();
     appendLocalRecord(action, active, fields);
+
+    if (action === "Cadastro da empresa principal") {
+      const cnpj = fields.CNPJ?.replace(/\D/g, "") || "";
+      if (cnpj.length !== 14) {
+        setNotice("CNPJ incompleto. Preencha 14 digitos antes de salvar.");
+        return;
+      }
+
+      try {
+        await saveMainCompany({
+          address: {
+            city: fields.Cidade || "",
+            complement: fields.Complemento || "",
+            district: fields.Bairro || "",
+            number: fields.Numero || "",
+            state: fields.UF || "",
+            street: fields.Logradouro || "",
+            zipCode: fields.CEP || "",
+          },
+          cnpj: fields.CNPJ || "",
+          contactEmail: fields["E-mail"] || "",
+          contactName: fields.Responsavel || "",
+          contactPhone: fields.Celular || "",
+          legalName: fields["Razao social"] || "",
+          stateRegistration: fields["Inscricao estadual"] || "",
+          tradeName: fields["Nome fantasia"] || "",
+        });
+        setNotice("Empresa salva no Firebase em companies/main.");
+      } catch (error) {
+        console.error(error);
+        setNotice("Nao foi possivel salvar no Firebase. Verifique Auth/Regras do Firestore.");
+      }
+      return;
+    }
 
     if (action === "Upload de logo da empresa" || action === "Anexo de comprovante") {
       document.getElementById("local-file-picker")?.click();
