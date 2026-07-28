@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   GoogleAuthProvider,
+  browserLocalPersistence,
+  getRedirectResult,
   onAuthStateChanged,
+  setPersistence,
   signInWithEmailAndPassword,
-  signInWithPopup,
+  signInWithRedirect,
   signOut,
   type User,
 } from "firebase/auth";
@@ -523,10 +526,26 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    void setPersistence(auth, browserLocalPersistence);
     return onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
     });
+  }, []);
+
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          setUser(result.user);
+          setLoginMessage("");
+        }
+      })
+      .catch((error: { code?: string; message?: string }) => {
+        console.error(error);
+        setLoginMessage(`Erro no Google: ${error.code || error.message || "falha ao autenticar"}.`);
+      })
+      .finally(() => setAuthLoading(false));
   }, []);
 
   async function handleLogin() {
@@ -542,12 +561,12 @@ export default function Home() {
   }
 
   async function handleGoogleLogin() {
-    setLoginMessage("Abrindo login do Google...");
+    setLoginMessage("Redirecionando para o Google...");
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
-      await signInWithPopup(auth, provider);
-      setLoginMessage("");
+      await setPersistence(auth, browserLocalPersistence);
+      await signInWithRedirect(auth, provider);
     } catch (error: unknown) {
       console.error(error);
       const authError = error as { code?: string; message?: string };
