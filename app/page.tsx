@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 
 type Section =
   | "Painel"
@@ -54,6 +55,35 @@ const employees = [
     lastPunch: "Marcacao incluida",
   },
 ];
+
+type EmployeeRow = (typeof employees)[number] & {
+  employeeId?: string;
+  faceIdStatus?: "not_registered" | "registered";
+};
+
+type LocalEmployee = EmployeeRow & {
+  employeeId: string;
+  faceIdStatus: "not_registered" | "registered";
+  pin: string;
+  punchMode: "automatic" | "manual";
+  schedule: {
+    breakEnd: string;
+    breakStart: string;
+    end: string;
+    start: string;
+    toleranceMinutes: number;
+  };
+};
+
+const LOCAL_EMPLOYEES_KEY = "orquestracs-face-id-local-employees";
+
+function getLocalEmployees() {
+  try {
+    return JSON.parse(window.localStorage.getItem(LOCAL_EMPLOYEES_KEY) || "[]") as LocalEmployee[];
+  } catch {
+    return [];
+  }
+}
 
 const journeyRows = [
   ["01/06/26", "Seg", "08:00", "13:03", "15:07", "18:00", "07:56", "00:00", "Normal"],
@@ -351,10 +381,99 @@ function downloadTextFile(filename: string, content: string, type = "text/plain"
   URL.revokeObjectURL(url);
 }
 
+type LocalRecord = {
+  action: string;
+  fields: Record<string, string>;
+  id: string;
+  savedAt: string;
+  section: Section;
+};
+
+type PunchException = {
+  currentTime: string;
+  differenceMinutes: number;
+  expectedTime: string;
+};
+
 function getLocalRecords() {
   return JSON.parse(
     window.localStorage.getItem("orquestracs-face-id-local-records") || "[]",
-  ) as unknown[];
+  ) as LocalRecord[];
+}
+
+function inferNextPunch(employeeId: string) {
+  const today = new Date().toDateString();
+  const punches = getLocalRecords()
+    .filter((record) => {
+      const timestamp = record.fields.Horário || record.savedAt;
+      return (
+        record.action.startsWith("Batida:") &&
+        record.fields["ID do colaborador"] === employeeId &&
+        new Date(timestamp).toDateString() === today
+      );
+    })
+    .sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt));
+
+  if (!punches.length) return "Entrada 1";
+
+  const nextByLastPunch: Record<string, string | null> = {
+    Entrada: "Saída 1",
+    "Entrada 1": "Saída 1",
+    "Saída almoço": "Entrada 2",
+    "Saída 1": "Entrada 2",
+    "Volta almoço": "Saída 2",
+    "Entrada 2": "Saída 2",
+    "Fim do dia": null,
+    "Saída 2": null,
+  };
+
+  return nextByLastPunch[punches[0].fields.Tipo] ?? "Entrada 1";
+}
+
+function minutesFromTime(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function getPunchTiming(employee: RecognizedFace, punchType: string) {
+  const schedule = employee.schedule || {
+    breakEnd: "13:00",
+    breakStart: "11:30",
+    end: "17:15",
+    start: "07:00",
+    toleranceMinutes: 10,
+  };
+  const expectedByPunch: Record<string, string> = {
+    Entrada: schedule.start,
+    "Entrada 1": schedule.start,
+    "Saída almoço": schedule.breakStart,
+    "Saída 1": schedule.breakStart,
+    "Volta almoço": schedule.breakEnd,
+    "Entrada 2": schedule.breakEnd,
+    "Fim do dia": schedule.end,
+    "Saída 2": schedule.end,
+  };
+  const expectedTime = expectedByPunch[punchType];
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const differenceMinutes = currentMinutes - minutesFromTime(expectedTime);
+
+  return {
+    currentTime: now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+    differenceMinutes,
+    expectedTime,
+    outsideTolerance: Math.abs(differenceMinutes) > schedule.toleranceMinutes,
+  };
+}
+
+function getLastEmployeePunch(employeeId: string) {
+  return getLocalRecords()
+    .filter(
+      (record) =>
+        record.action.startsWith("Batida:") &&
+        record.fields["ID do colaborador"] === employeeId,
+    )
+    .sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt))[0];
 }
 
 export default function Home() {
@@ -474,13 +593,34 @@ export default function Home() {
     setNotice(`${action} salvo localmente neste navegador. Firebase sera conectado depois.`);
   }
 
-  function registerPunch(kind: string) {
-    if (!pin.trim()) {
+  function registerPunch(kind: string, employee?: RecognizedFace, exception?: PunchException) {
+    if (!employee && !pin.trim()) {
       setNotice("Informe um PIN para simular a batida.");
-      return;
+      return false;
     }
 
-    setNotice(`Batida de ${kind.toLowerCase()} simulada para o PIN ${pin}. Nada foi salvo fora da tela.`);
+    const occurredAt = new Date();
+    const employeeName = employee?.name || "Colaborador identificado por PIN";
+
+    appendLocalRecord(`Batida: ${kind}`, "Sala de ponto", {
+      Colaborador: employeeName,
+      "ID do colaborador": employee?.employeeId || "Identificação por PIN",
+      Horário: occurredAt.toISOString(),
+      Método: employee ? "Face ID" : "PIN + foto",
+      Tipo: kind,
+      ...(exception
+        ? {
+            "Confirmação de exceção": "Sim",
+            "Diferença em minutos": String(exception.differenceMinutes),
+            "Horário previsto": exception.expectedTime,
+          }
+        : {}),
+    });
+    setNotice(
+      `${employeeName}: ${kind.toLowerCase()} registrada às ${occurredAt.toLocaleTimeString("pt-BR")}.`,
+    );
+    setPin("");
+    return true;
   }
 
   return (
@@ -668,7 +808,7 @@ function PunchCard({
   pin,
   setPin,
 }: {
-  onRegister: (kind: string) => void;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => boolean;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -711,23 +851,9 @@ function PunchCard({
           </div>
         </div>
 
-        <CameraMock />
+        <FaceCamera compact />
       </div>
     </section>
-  );
-}
-
-function CameraMock() {
-  return (
-    <div className="rounded-lg border border-[#d9e0e7] bg-[#f8fafb] p-4 text-center">
-      <div className="grid min-h-[190px] place-items-center rounded-md border border-dashed border-[#aeb9c5] bg-white">
-        <div>
-          <div className="mx-auto h-24 w-24 rounded-full border-[6px] border-[#18594c] bg-[#edf5f2]" />
-          <p className="mt-3 text-sm font-semibold text-[#101923]">Camera pronta</p>
-          <p className="mt-1 text-xs text-[#667085]">Captura no ato da marcacao</p>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -960,6 +1086,16 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
 
 function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   const [journeyMode, setJourneyMode] = useState<"coletiva" | "individual">("coletiva");
+  const [employeeForm, setEmployeeForm] = useState({
+    cpf: "",
+    name: "",
+    pin: "",
+    punchMode: "automatic" as "automatic" | "manual",
+    role: "",
+  });
+  const [localEmployees, setLocalEmployees] = useState<LocalEmployee[]>([]);
+  const [selectedEmployee, setSelectedEmployee] = useState<LocalEmployee | null>(null);
+  const [showFaceCamera, setShowFaceCamera] = useState(false);
   const [employeeJourney, setEmployeeJourney] = useState({
     start: "07:00",
     lunchOut: "11:30",
@@ -972,22 +1108,111 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setEmployeeJourney((current) => ({ ...current, [field]: value }));
   }
 
+  useEffect(() => {
+    setLocalEmployees(getLocalEmployees());
+  }, []);
+
+  function updateEmployeeForm(field: keyof typeof employeeForm, value: string) {
+    setEmployeeForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function saveEmployee() {
+    if (!employeeForm.name.trim() || employeeForm.pin.length < 4) {
+      onAction("Informe o nome e um PIN de pelo menos 4 números.");
+      return;
+    }
+
+    const companyShift = initialShifts[0];
+    const schedule =
+      journeyMode === "individual"
+        ? {
+            breakEnd: employeeJourney.lunchBack,
+            breakStart: employeeJourney.lunchOut,
+            end: employeeJourney.end,
+            start: employeeJourney.start,
+            toleranceMinutes: 10,
+          }
+        : {
+            breakEnd: companyShift.breakEnd,
+            breakStart: companyShift.breakStart,
+            end: companyShift.end,
+            start: companyShift.start,
+            toleranceMinutes: Number.parseInt(companyShift.tolerance, 10) || 10,
+          };
+    const employee: LocalEmployee = {
+      bank: "00:00",
+      cpf: employeeForm.cpf || "Não informado",
+      employeeId: crypto.randomUUID(),
+      faceIdStatus: "not_registered",
+      lastPunch: "Sem batida hoje",
+      name: employeeForm.name.trim(),
+      pin: employeeForm.pin,
+      punchMode: employeeForm.punchMode,
+      role: employeeForm.role || "Não informado",
+      schedule,
+      shift: "Jornada da empresa",
+      status: "Cadastrado",
+    };
+    const updated = [employee, ...localEmployees];
+
+    window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
+    setLocalEmployees(updated);
+    setSelectedEmployee(employee);
+    setShowFaceCamera(true);
+    onAction(`${employee.name} cadastrado. Agora faça as capturas do Face ID.`);
+  }
+
+  function openFaceRegistration() {
+    if (!selectedEmployee) {
+      onAction("Cadastre primeiro o colaborador para vincular o Face ID.");
+      return;
+    }
+    setShowFaceCamera(true);
+  }
+
+  function markFaceRegistered(captureCount: number) {
+    if (!selectedEmployee) return;
+
+    const updated = localEmployees.map((employee) =>
+      employee.employeeId === selectedEmployee.employeeId
+        ? { ...employee, faceIdStatus: "registered" as const }
+        : employee,
+    );
+    const current = updated.find((employee) => employee.employeeId === selectedEmployee.employeeId) || null;
+    window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
+    setLocalEmployees(updated);
+    setSelectedEmployee(current);
+    onAction(`${selectedEmployee.name}: ${captureCount} captura(s) facial(is) cadastrada(s).`);
+  }
+
   return (
     <>
       <Panel title="Novo colaborador" subtitle="Dados para ponto, holerite e relatorio mensal">
         <p className="text-sm font-semibold text-[#26323f]">Dados pessoais</p>
         <div className="mt-3 grid gap-3 md:grid-cols-4">
-          <MaskedField label="Nome" mask="name" placeholder="Primeira Letra Maiuscula" />
-          <MaskedField label="CPF" mask="cpf" placeholder="000.000.000-00" />
-          <MaskedField label="PIN" mask="pin" placeholder="0000" />
+          <MaskedField label="Nome" mask="name" onChange={(value) => updateEmployeeForm("name", value)} placeholder="Primeira Letra Maiuscula" value={employeeForm.name} />
+          <MaskedField label="CPF" mask="cpf" onChange={(value) => updateEmployeeForm("cpf", value)} placeholder="000.000.000-00" value={employeeForm.cpf} />
+          <MaskedField label="PIN" mask="pin" onChange={(value) => updateEmployeeForm("pin", value)} placeholder="0000" value={employeeForm.pin} />
           <MaskedField label="Celular" mask="phone" placeholder="(00) 00000-0000" />
         </div>
 
         <p className="mt-5 text-sm font-semibold text-[#26323f]">Dados trabalhistas</p>
         <div className="mt-3 grid gap-3 md:grid-cols-4">
           <MaskedField label="Data de admissao" mask="date" placeholder="00/00/0000" />
-          <MaskedField label="Cargo" mask="name" placeholder="Vendedor" />
+          <MaskedField label="Cargo" mask="name" onChange={(value) => updateEmployeeForm("role", value)} placeholder="Vendedor" value={employeeForm.role} />
           <MaskedField label="Departamento" mask="name" placeholder="Loja" />
+          <Field label="Modo da batida">
+            <select
+              className="input"
+              onChange={(event) =>
+                updateEmployeeForm("punchMode", event.target.value as "automatic" | "manual")
+              }
+              value={employeeForm.punchMode}
+            >
+              <option value="automatic">Automático - escala normal</option>
+              <option value="manual">Manual - horário irregular</option>
+            </select>
+          </Field>
           <Field label="CBO"><input className="input" placeholder="0000-00" /></Field>
           <Field label="N. carteira trabalho"><input className="input" placeholder="0000000" /></Field>
           <Field label="Serie CTPS"><input className="input" placeholder="0000" /></Field>
@@ -1073,11 +1298,36 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           )}
         </div>
         <ActionRow>
-          <button className="primary-button" onClick={() => onAction("Cadastro de colaborador")} type="button">Cadastrar colaborador</button>
-          <button className="secondary-button" onClick={() => onAction("Captura facial")} type="button">Cadastrar Face ID</button>
+          <button className="primary-button" onClick={saveEmployee} type="button">Cadastrar colaborador</button>
+          <button className="secondary-button" onClick={openFaceRegistration} type="button">Cadastrar Face ID</button>
         </ActionRow>
+        {showFaceCamera && selectedEmployee && (
+          <div className="mt-5 grid gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white lg:grid-cols-[minmax(0,1fr)_280px]">
+            <FaceCamera
+              compact
+              employee={{
+                employeeId: selectedEmployee.employeeId,
+                name: selectedEmployee.name,
+                punchMode: selectedEmployee.punchMode || "automatic",
+                schedule: selectedEmployee.schedule,
+              }}
+              onProfileUpdated={markFaceRegistered}
+              onStatus={onAction}
+            />
+            <div>
+              <p className="text-sm font-semibold text-[#b7d7ce]">Face ID de {selectedEmployee.name}</p>
+              <p className="mt-2 text-xs leading-5 text-white/65">
+                Faça de 3 a 5 capturas, olhando para frente e virando levemente o rosto.
+                Isso melhora o reconhecimento neste aparelho.
+              </p>
+              <p className="mt-3 text-xs font-semibold text-white">
+                Status: {selectedEmployee.faceIdStatus === "registered" ? "Face ID cadastrado" : "Aguardando captura"}
+              </p>
+            </div>
+          </div>
+        )}
       </Panel>
-      <EmployeesTable onAction={onAction} />
+      <EmployeesTable employeesList={[...localEmployees, ...employees]} onAction={onAction} />
     </>
   );
 }
@@ -1198,7 +1448,7 @@ function PunchesScreen({
   setPin,
 }: {
   onAction: (action: string) => void;
-  onRegister: (kind: string) => void;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => boolean;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -1258,21 +1508,126 @@ function KioskScreen({
   setPin,
 }: {
   onAction: (action: string) => void;
-  onRegister: (kind: string) => void;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => boolean;
   pin: string;
   setPin: (value: string) => void;
 }) {
-  const [recognized, setRecognized] = useState(false);
-  const [selectedPunch, setSelectedPunch] = useState("Entrada");
+  const [recognizedEmployee, setRecognizedEmployee] = useState<RecognizedFace | null>(null);
+  const [selectedPunch, setSelectedPunch] = useState("Entrada 1");
+  const [journeyFinished, setJourneyFinished] = useState(false);
+  const [timingWarning, setTimingWarning] = useState<PunchException | null>(null);
+  const [blockingMessage, setBlockingMessage] = useState("");
+  const [confirmation, setConfirmation] = useState<{
+    employeeName: string;
+    time: string;
+    type: string;
+  } | null>(null);
+  const resetTimerRef = useRef<number | null>(null);
 
-  function identifyFace() {
-    setRecognized(true);
-    onAction("Reconhecimento facial no tablet");
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) window.clearTimeout(resetTimerRef.current);
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
+
+  function speak(message: string) {
+    if (!("speechSynthesis" in window)) return;
+
+    window.speechSynthesis.cancel();
+    const voiceMessage = new SpeechSynthesisUtterance(message);
+    voiceMessage.lang = "pt-BR";
+    const portugueseVoices = window.speechSynthesis
+      .getVoices()
+      .filter((voice) => voice.lang.toLowerCase().startsWith("pt"));
+    const naturalVoice =
+      portugueseVoices.find((voice) => /natural|online|francisca|luciana|maria/i.test(voice.name)) ||
+      portugueseVoices[0];
+    if (naturalVoice) voiceMessage.voice = naturalVoice;
+    voiceMessage.rate = 0.98;
+    voiceMessage.pitch = 1.03;
+    voiceMessage.volume = 0.92;
+    window.speechSynthesis.speak(voiceMessage);
+  }
+
+  function identifyFace(employee: RecognizedFace) {
+    const nextPunch = inferNextPunch(employee.employeeId);
+    setTimingWarning(null);
+    setBlockingMessage("");
+    setRecognizedEmployee(employee);
+    setJourneyFinished(nextPunch === null);
+    if (employee.punchMode !== "manual" && nextPunch) setSelectedPunch(nextPunch);
+    onAction(`${employee.name} reconhecido experimentalmente neste aparelho`);
+    if (nextPunch === null) {
+      speak(`${employee.name}, jornada encerrada.`);
+    } else if (employee.punchMode === "manual") {
+      speak(`${employee.name}, escolha a marcação.`);
+    } else {
+      speak(`${employee.name}. ${nextPunch}. Confirme.`);
+    }
   }
 
   function confirmPunch() {
-    onAction(`Presenca confirmada por ${recognized ? "Face ID" : "PIN + foto"}`);
+    if (!recognizedEmployee || confirmation) {
+      if (!recognizedEmployee) {
+        onAction("Faça o reconhecimento do rosto antes de confirmar.");
+        speak("Primeiro faça o reconhecimento do rosto.");
+      }
+      return;
+    }
+
+    const lastPunch = getLastEmployeePunch(recognizedEmployee.employeeId);
+    if (lastPunch && Date.now() - Date.parse(lastPunch.savedAt) < 2 * 60 * 1000) {
+      setBlockingMessage("A última batida foi realizada há menos de 2 minutos.");
+      speak("Batida já registrada. Aguarde um pouco.");
+      return;
+    }
+
+    const timing = getPunchTiming(recognizedEmployee, selectedPunch);
+    if (!timingWarning && timing.outsideTolerance) {
+      const warning = {
+        currentTime: timing.currentTime,
+        differenceMinutes: timing.differenceMinutes,
+        expectedTime: timing.expectedTime,
+      };
+      setTimingWarning(warning);
+      const direction = timing.differenceMinutes < 0 ? "antes" : "depois";
+      speak(`${selectedPunch} fora do horário. ${Math.abs(timing.differenceMinutes)} minutos ${direction}. Confirme novamente.`);
+      return;
+    }
+
+    if (!onRegister(selectedPunch, recognizedEmployee, timingWarning || undefined)) return;
+
+    const time = new Date().toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    setConfirmation({
+      employeeName: recognizedEmployee.name,
+      time,
+      type: selectedPunch,
+    });
+    speak(`${selectedPunch} registrada com sucesso, ${recognizedEmployee.name}, às ${time}.`);
+
+    resetTimerRef.current = window.setTimeout(() => {
+      setConfirmation(null);
+      setRecognizedEmployee(null);
+      setSelectedPunch("Entrada 1");
+      setJourneyFinished(false);
+      setTimingWarning(null);
+      setBlockingMessage("");
+    }, 6000);
   }
+
+  const punchOptions = [
+    { description: "Início da jornada", icon: "👋", label: "Entrada 1", value: "Entrada 1" },
+    { description: "Início do intervalo", icon: "🍽️", label: "Saída 1", value: "Saída 1" },
+    { description: "Retorno ao trabalho", icon: "↩️", label: "Entrada 2", value: "Entrada 2" },
+    { description: "Fim da jornada", icon: "🏠", label: "Saída 2", value: "Saída 2" },
+  ];
+  const selectedPresentation =
+    punchOptions.find((option) => option.value === selectedPunch) || punchOptions[0];
+  const manualSelection = recognizedEmployee?.punchMode === "manual";
 
   return (
     <section className="kiosk-screen rounded-lg border border-[#d9e0e7] bg-[#101923] p-5 text-white shadow-sm">
@@ -1293,47 +1648,102 @@ function KioskScreen({
             </span>
           </div>
 
-          <div className="mt-6 grid min-h-[430px] place-items-center rounded-lg border border-white/10 bg-[#0b121a] p-6">
-            <div className="text-center">
-              <div className="mx-auto grid h-52 w-52 place-items-center rounded-full border-[10px] border-[#dcebe6] bg-[#172632] shadow-[0_0_0_16px_rgba(220,235,230,0.06)]">
-                <div className="h-32 w-24 rounded-[42%] border-4 border-[#b7d7ce]" />
-              </div>
-              <p className="mt-6 text-lg font-semibold">
-                {recognized ? "Funcionario identificado" : "Aguardando rosto"}
-              </p>
-              <p className="mt-2 text-sm text-white/55">
-                {recognized
-                  ? "Elivelton Aparecido - pronto para confirmar batida"
-                  : "Posicione o rosto no centro da camera"}
-              </p>
-            </div>
+          <div className="mt-6">
+            <FaceCamera onRecognized={identifyFace} onStatus={onAction} />
+            <p className="mt-3 text-center text-sm text-white/55">
+              {recognizedEmployee
+                ? `${recognizedEmployee.name} reconhecido - pronto para confirmar a batida`
+                : "Teste experimental: cadastre e reconheça o rosto neste aparelho"}
+            </p>
           </div>
         </div>
 
         <aside className="grid gap-4">
           <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
-            <p className="text-sm font-semibold text-[#b7d7ce]">Confirmacao</p>
+            <p className="text-lg font-semibold text-white">
+              {manualSelection ? "Escolha a marcação" : "Marcação identificada"}
+            </p>
             <div className="mt-4 grid gap-3">
-              <Field label="Tipo da batida">
-                <select
-                  className="input"
-                  onChange={(event) => setSelectedPunch(event.target.value)}
-                  value={selectedPunch}
-                >
-                  <option>Entrada</option>
-                  <option>Saida almoco</option>
-                  <option>Volta almoco</option>
-                  <option>Fim do dia</option>
-                </select>
-              </Field>
-              <button className="primary-button" onClick={identifyFace} type="button">
-                Simular Face ID
-              </button>
-              <button className="secondary-button" onClick={confirmPunch} type="button">
-                Confirmar presenca
+              {manualSelection ? (
+                <div className="grid grid-cols-2 gap-3">
+                  {punchOptions.map((option) => (
+                    <button
+                      aria-pressed={selectedPunch === option.value}
+                      className={`min-h-24 rounded-xl border-2 p-3 text-center transition ${
+                        selectedPunch === option.value
+                          ? "border-[#7ee2c4] bg-[#dcebe6] text-[#143f37]"
+                          : "border-white/20 bg-white/[0.06] text-white"
+                      }`}
+                      key={option.value}
+                      onClick={() => {
+                        setSelectedPunch(option.value);
+                        setTimingWarning(null);
+                        setBlockingMessage("");
+                        speak(option.label);
+                      }}
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="block text-3xl">{option.icon}</span>
+                      <span className="mt-2 block text-sm font-bold">{option.label}</span>
+                      <span className="mt-1 block text-[11px] opacity-75">{option.description}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl border-2 border-[#7ee2c4] bg-[#dcebe6] p-5 text-center text-[#143f37]">
+                  <span aria-hidden="true" className="block text-6xl">
+                    {journeyFinished ? "✅" : selectedPresentation.icon}
+                  </span>
+                  <span className="mt-3 block text-2xl font-black">
+                    {journeyFinished ? "JORNADA ENCERRADA" : selectedPunch.toUpperCase()}
+                  </span>
+                  <span className="mt-2 block text-sm font-semibold">
+                    {journeyFinished
+                      ? "Todas as marcações de hoje já foram realizadas."
+                      : `${selectedPresentation.description}. Calculado pela sequência do dia.`}
+                  </span>
+                </div>
+              )}
+              {timingWarning && (
+                <div aria-live="assertive" className="rounded-xl border-4 border-[#f5b942] bg-[#fff4d6] p-5 text-center text-[#6b4500]">
+                  <span aria-hidden="true" className="block text-5xl">⚠️</span>
+                  <p className="mt-2 text-xl font-black">HORÁRIO DIFERENTE</p>
+                  <p className="mt-3 text-base font-bold">
+                    Previsto: {timingWarning.expectedTime} • Agora: {timingWarning.currentTime}
+                  </p>
+                  <p className="mt-2 text-sm">
+                    {Math.abs(timingWarning.differenceMinutes)} minutos{" "}
+                    {timingWarning.differenceMinutes < 0 ? "antes" : "depois"} do horário.
+                  </p>
+                  <p className="mt-3 text-sm font-bold">Toque novamente para registrar mesmo assim.</p>
+                </div>
+              )}
+              {blockingMessage && (
+                <div aria-live="assertive" className="rounded-xl border-4 border-[#ef6b6b] bg-[#ffe5e5] p-5 text-center text-[#7a2020]">
+                  <span aria-hidden="true" className="block text-5xl">✋</span>
+                  <p className="mt-2 text-xl font-black">BATIDA NÃO REGISTRADA</p>
+                  <p className="mt-2 text-sm font-semibold">{blockingMessage}</p>
+                </div>
+              )}
+              <button
+                className="min-h-20 rounded-xl bg-[#38c793] px-5 text-xl font-black text-[#082c22] shadow-lg disabled:cursor-not-allowed disabled:bg-[#52616f] disabled:text-white/50"
+                disabled={!recognizedEmployee || journeyFinished || Boolean(confirmation) || Boolean(blockingMessage)}
+                onClick={confirmPunch}
+                type="button"
+              >
+                {timingWarning ? "⚠ CONFIRMAR MESMO ASSIM" : "✓ CONFIRMAR PONTO"}
               </button>
             </div>
           </div>
+
+          {confirmation && (
+            <div aria-live="assertive" className="rounded-xl border-4 border-[#7ee2c4] bg-[#dff8ee] p-6 text-center text-[#0b4939] shadow-lg">
+              <span aria-hidden="true" className="block text-6xl">✓</span>
+              <p className="mt-3 text-2xl font-black">PONTO REGISTRADO</p>
+              <p className="mt-2 text-lg font-bold">{confirmation.employeeName}</p>
+              <p className="mt-1 text-base">{confirmation.type} • {confirmation.time}</p>
+            </div>
+          )}
 
           <div className="rounded-lg border border-white/10 bg-white p-5 text-[#17202a]">
             <p className="text-sm font-semibold text-[#26323f]">Fallback PIN + foto</p>
@@ -1352,7 +1762,15 @@ function KioskScreen({
               </Field>
               <button
                 className="secondary-button"
-                onClick={() => onRegister(selectedPunch)}
+                onClick={() => {
+                  if (onRegister(selectedPunch)) {
+                    const time = new Date().toLocaleTimeString("pt-BR", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    });
+                    speak(`${selectedPunch} registrada com sucesso às ${time}.`);
+                  }
+                }}
                 type="button"
               >
                 Registrar por PIN + foto
@@ -1720,9 +2138,11 @@ function AssistantPanel({
 }
 
 function EmployeesTable({
+  employeesList = employees,
   onAction,
   compact = false,
 }: {
+  employeesList?: EmployeeRow[];
   onAction: (action: string) => void;
   compact?: boolean;
 }) {
@@ -1751,8 +2171,8 @@ function EmployeesTable({
             </tr>
           </thead>
           <tbody>
-            {employees.map((employee) => (
-              <tr className="border-t border-[#e3e8ee]" key={employee.name}>
+            {employeesList.map((employee) => (
+              <tr className="border-t border-[#e3e8ee]" key={employee.employeeId || employee.name}>
                 <td className="px-5 py-4 font-semibold text-[#101923]">{employee.name}</td>
                 <td className="px-5 py-4 text-[#667085]">{employee.cpf}</td>
                 <td className="px-5 py-4 text-[#667085]">{employee.role}</td>
@@ -1760,7 +2180,7 @@ function EmployeesTable({
                 <td className="px-5 py-4 font-semibold text-[#101923]">{employee.bank}</td>
                 <td className="px-5 py-4">
                   <span className="rounded-full border border-[#d8e1ff] bg-[#f2f5ff] px-3 py-1 text-xs font-semibold text-[#3446a3]">
-                    {employee.status}
+                    {employee.faceIdStatus === "registered" ? "Face ID cadastrado" : employee.status}
                   </span>
                 </td>
                 <td className="px-5 py-4">
@@ -1876,19 +2296,28 @@ function Field({ children, label }: { children: React.ReactNode; label: string }
 function MaskedField({
   label,
   mask,
+  onChange,
   placeholder,
+  value: controlledValue,
 }: {
   label: string;
   mask: MaskType;
+  onChange?: (value: string) => void;
   placeholder: string;
+  value?: string;
 }) {
-  const [value, setValue] = useState("");
+  const [internalValue, setInternalValue] = useState("");
+  const value = controlledValue ?? internalValue;
 
   return (
     <Field label={label}>
       <input
         className="input"
-        onChange={(event) => setValue(applyMask(event.target.value, mask))}
+        onChange={(event) => {
+          const nextValue = applyMask(event.target.value, mask);
+          if (controlledValue === undefined) setInternalValue(nextValue);
+          onChange?.(nextValue);
+        }}
         placeholder={placeholder}
         value={value}
       />
