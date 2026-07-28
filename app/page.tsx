@@ -3,10 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   GoogleAuthProvider,
-  getRedirectResult,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signInWithRedirect,
+  signInWithPopup,
   signOut,
   type User,
 } from "firebase/auth";
@@ -530,14 +529,6 @@ export default function Home() {
     });
   }, []);
 
-  useEffect(() => {
-    getRedirectResult(auth).catch((error: { code?: string; message?: string }) => {
-      console.error(error);
-      setLoginMessage(`Erro no Google: ${error.code || error.message || "falha ao autenticar"}.`);
-      setAuthLoading(false);
-    });
-  }, []);
-
   async function handleLogin() {
     setLoginMessage("Entrando...");
     try {
@@ -551,11 +542,12 @@ export default function Home() {
   }
 
   async function handleGoogleLogin() {
-    setLoginMessage("Redirecionando para o Google...");
+    setLoginMessage("Abrindo login do Google...");
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
-      await signInWithRedirect(auth, provider);
+      await signInWithPopup(auth, provider);
+      setLoginMessage("");
     } catch (error: unknown) {
       console.error(error);
       const authError = error as { code?: string; message?: string };
