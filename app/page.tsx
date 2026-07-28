@@ -2211,7 +2211,7 @@ function AdminScreen({ onAction }: { onAction: (action: string) => void }) {
             </p>
             <div className="mt-4 grid gap-3">
               <Field label="E-mail Orquestracs">
-                <input className="input" placeholder="admin@orquestracs.com" type="email" />
+                <input className="input" placeholder="orquestracs@gmail.com" type="email" />
               </Field>
               <Field label="Nivel">
                 <select className="input">
