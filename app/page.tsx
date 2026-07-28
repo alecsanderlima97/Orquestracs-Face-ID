@@ -2118,111 +2118,184 @@ function AuditScreen({ onAction }: { onAction: (action: string) => void }) {
 }
 
 function AdminScreen({ onAction }: { onAction: (action: string) => void }) {
+  const saasClients = [
+    ["Orquestracs Face ID", "CNPJ principal", "Ativo", "Essencial", "25 colaboradores", "150 creditos IA"],
+    ["Novo cliente", "Aguardando convite", "Implantacao", "A definir", "0 colaboradores", "0 creditos IA"],
+  ];
+
+  const adminMetrics = [
+    ["Clientes", "1", "instalacao ativa"],
+    ["Usuarios", "1", "developer configurado"],
+    ["Convites", "0", "pendentes"],
+    ["IA", "150", "creditos do plano"],
+  ];
+
+  const permissionRows = [
+    ["Developer", "Orquestracs", "Todos os clientes, suporte, bloqueios e auditoria"],
+    ["Proprietario", "Cliente", "Empresa, usuarios, jornadas, ponto e relatorios"],
+    ["Administrador", "Cliente", "Operacao, colaboradores, escalas e fechamento mensal"],
+    ["Leitor", "Cliente", "Consulta de relatorios e espelho de ponto"],
+  ];
+
   return (
     <>
-      <TwoColumn>
-        <Panel title="Admin Orquestracs" subtitle="Area interna do desenvolvedor">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4">
-              <p className="text-sm font-semibold text-[#26323f]">Controle do SaaS</p>
-              <p className="mt-1 text-xs leading-5 text-[#667085]">
-                Visao para acompanhar o CNPJ ativo, usuarios, plano, acessos e
-                auditoria geral da instalacao.
-              </p>
+      <Panel title="Admin Orquestracs" subtitle="Central interna do desenvolvedor">
+        <div className="grid gap-3 md:grid-cols-4">
+          {adminMetrics.map(([label, value, detail]) => (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4" key={label}>
+              <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
+              <p className="mt-2 text-2xl font-semibold text-[#101923]">{value}</p>
+              <p className="mt-1 text-xs text-[#667085]">{detail}</p>
             </div>
-            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4">
-              <p className="text-sm font-semibold text-[#26323f]">Acesso protegido</p>
-              <p className="mt-1 text-xs leading-5 text-[#667085]">
-                Essa area deve existir apenas para usuarios internos Orquestracs com
-                permissao de desenvolvedor/suporte.
-              </p>
+          ))}
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-[1.3fr_0.7fr]">
+          <div className="rounded-md border border-[#e3e8ee] bg-white">
+            <div className="border-b border-[#e3e8ee] px-4 py-3">
+              <p className="text-sm font-semibold text-[#26323f]">Clientes do SaaS</p>
+              <p className="mt-1 text-xs text-[#667085]">Controle comercial e operacional das empresas contratantes.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+                <thead className="bg-[#f6f8fa] text-xs uppercase text-[#667085]">
+                  <tr>
+                    {["Cliente", "CNPJ", "Status", "Plano", "Uso", "IA"].map((head) => (
+                      <th className="px-4 py-3 font-semibold" key={head}>{head}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {saasClients.map((row) => (
+                    <tr className="border-t border-[#e3e8ee]" key={row[0]}>
+                      {row.map((cell, index) => (
+                        <td className={`px-4 py-3 ${index === 0 ? "font-semibold text-[#101923]" : "text-[#667085]"}`} key={`${row[0]}-${cell}`}>
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
-          <ActionRow>
-            <button className="primary-button" onClick={() => onAction("Painel interno Orquestracs")} type="button">
-              Ver empresa
-            </button>
-            <button className="secondary-button" onClick={() => onAction("Auditoria global")} type="button">
-              Logs globais
-            </button>
-          </ActionRow>
-        </Panel>
 
-        <Panel title="Perfis de acesso" subtitle="Mesma logica de permissoes por convite">
-          <CheckList
-            items={[
-              "Proprietario: acesso total da empresa",
-              "Administrador: gerencia funcionarios, jornadas e relatorios",
-              "Leitor: visualiza dados e relatorios sem alterar",
-              "Desenvolvedor: acesso interno Orquestracs",
-            ]}
-          />
-        </Panel>
-      </TwoColumn>
-
-      <Panel title="Convites de acesso" subtitle="Empresa e usuarios entram somente por convite">
-        <div className="grid gap-3 md:grid-cols-4">
-          <MaskedField label="Nome" mask="name" placeholder="Nome Do Convidado" />
-          <Field label="E-mail">
-            <input className="input" placeholder="usuario@empresa.com" />
-          </Field>
-          <Field label="Empresa">
-            <select className="input">
-              <option>MULT PECAS ITABOA</option>
-            </select>
-          </Field>
-          <Field label="Permissao">
-            <select className="input">
-              <option>Proprietario</option>
-              <option>Administrador</option>
-              <option>Leitor</option>
-            </select>
-          </Field>
+          <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4">
+            <p className="text-sm font-semibold text-[#26323f]">Acesso developer</p>
+            <p className="mt-1 text-xs leading-5 text-[#667085]">
+              A conta interna Orquestracs deve receber permissao developer via Firebase Admin/claims.
+            </p>
+            <div className="mt-4 grid gap-3">
+              <Field label="E-mail Orquestracs">
+                <input className="input" placeholder="admin@orquestracs.com" type="email" />
+              </Field>
+              <Field label="Nivel">
+                <select className="input">
+                  <option>Developer</option>
+                  <option>Suporte</option>
+                </select>
+              </Field>
+            </div>
+          </div>
         </div>
+
         <ActionRow>
-          <button className="primary-button" onClick={() => onAction("Convite por e-mail")} type="button">
-            Enviar convite
+          <button className="primary-button" onClick={() => onAction("Salvar configuracao Admin SaaS")} type="button">
+            Salvar Admin
           </button>
-          <button className="secondary-button" onClick={() => onAction("Reenviar convite")} type="button">
-            Reenviar pendentes
+          <button className="secondary-button" onClick={() => onAction("Auditoria global")} type="button">
+            Logs globais
+          </button>
+          <button className="secondary-button" onClick={() => onAction("Bloqueio de cliente")} type="button">
+            Bloquear cliente
           </button>
         </ActionRow>
       </Panel>
 
-      <Panel title="Matriz de permissoes" subtitle="Base para Auth, Firestore Rules e telas">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] border-collapse text-left text-sm">
-            <thead className="bg-[#101923] text-xs uppercase text-white">
-              <tr>
-                <th className="px-4 py-3 font-semibold">Recurso</th>
-                <th className="px-4 py-3 font-semibold">Proprietario</th>
-                <th className="px-4 py-3 font-semibold">Administrador</th>
-                <th className="px-4 py-3 font-semibold">Leitor</th>
-                <th className="px-4 py-3 font-semibold">Desenvolvedor</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[
-                ["Empresa", "Criar/editar", "Editar", "Ver", "Suporte"],
-                ["Funcionarios", "Total", "Criar/editar", "Ver", "Suporte"],
-                ["Jornadas", "Total", "Criar/editar", "Ver", "Suporte"],
-                ["Batidas", "Ver/ajustar", "Ver/ajustar", "Ver", "Auditar"],
-                ["Relatorios", "Gerar/exportar", "Gerar/exportar", "Ver/exportar", "Auditar"],
-                ["Usuarios", "Convidar/remover", "Convidar", "Sem acesso", "Suporte"],
-              ].map((row) => (
-                <tr className="border-b border-[#e3e8ee]" key={row[0]}>
-                  {row.map((cell, index) => (
-                    <td
-                      className={`px-4 py-3 ${index === 0 ? "font-semibold text-[#101923]" : "text-[#667085]"}`}
-                      key={`${row[0]}-${cell}`}
-                    >
-                      {cell}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <TwoColumn>
+        <Panel title="Convites" subtitle="Entrada por convite, como no Orquestra Hub">
+          <div className="grid gap-3">
+            <MaskedField label="Nome" mask="name" placeholder="Nome Do Convidado" />
+            <Field label="E-mail">
+              <input className="input" placeholder="usuario@empresa.com" type="email" />
+            </Field>
+            <Field label="Cliente">
+              <select className="input">
+                <option>CNPJ principal</option>
+                <option>Novo cliente</option>
+              </select>
+            </Field>
+            <Field label="Perfil">
+              <select className="input">
+                <option>Proprietario</option>
+                <option>Administrador</option>
+                <option>Leitor</option>
+              </select>
+            </Field>
+          </div>
+          <ActionRow>
+            <button className="primary-button" onClick={() => onAction("Convite por e-mail")} type="button">
+              Enviar convite
+            </button>
+            <button className="secondary-button" onClick={() => onAction("Reenviar convite")} type="button">
+              Reenviar
+            </button>
+          </ActionRow>
+        </Panel>
+
+        <Panel title="Creditos do agente IA" subtitle="Cota por cliente e por plano">
+          <div className="grid gap-3">
+            <Field label="Plano">
+              <select className="input">
+                <option>Essencial</option>
+                <option>Profissional</option>
+                <option>Enterprise</option>
+              </select>
+            </Field>
+            <Field label="Creditos mensais">
+              <input className="input" inputMode="numeric" placeholder="150" />
+            </Field>
+            <Field label="Limite de uso">
+              <select className="input">
+                <option>Bloquear ao acabar</option>
+                <option>Avisar e permitir</option>
+                <option>Permitir excedente faturavel</option>
+              </select>
+            </Field>
+          </div>
+          <div className="mt-4 rounded-md border border-[#d9e0e7] bg-[#fbfcfd] p-4">
+            <p className="text-sm font-semibold text-[#26323f]">Assistente interno</p>
+            <p className="mt-1 text-xs leading-5 text-[#667085]">
+              Ajuda guiada por tela, consumo de IA, historico e bloqueio por cota entram nesta camada.
+            </p>
+          </div>
+        </Panel>
+      </TwoColumn>
+
+      <Panel title="Permissoes" subtitle="Matriz base para Auth, Firestore Rules e telas">
+        <div className="grid gap-3 md:grid-cols-4">
+          {permissionRows.map(([profile, scope, description]) => (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4" key={profile}>
+              <p className="text-sm font-semibold text-[#101923]">{profile}</p>
+              <p className="mt-1 text-xs font-semibold uppercase text-[#18594c]">{scope}</p>
+              <p className="mt-2 text-xs leading-5 text-[#667085]">{description}</p>
+            </div>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel title="Governanca" subtitle="Base comercial, suporte e seguranca">
+        <div className="grid gap-3 md:grid-cols-3">
+          {[
+            ["Clientes", "Ativar, pausar, cancelar e acompanhar limite contratado."],
+            ["Auditoria", "Logs globais para suporte sem alterar batidas originais."],
+            ["Cobranca", "Plano, funcionarios ativos, vencimento e recorrencia."],
+          ].map(([title, text]) => (
+            <div className="rounded-md border border-[#e3e8ee] bg-white p-4" key={title}>
+              <p className="text-sm font-semibold text-[#26323f]">{title}</p>
+              <p className="mt-1 text-xs leading-5 text-[#667085]">{text}</p>
+            </div>
+          ))}
         </div>
       </Panel>
     </>
