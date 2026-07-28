@@ -11,6 +11,7 @@ type Section =
   | "Sala de ponto"
   | "Batidas"
   | "Banco de horas"
+  | "Fechamento mensal"
   | "Relatorios"
   | "LGPD e auditoria"
   | "Admin";
@@ -102,6 +103,7 @@ const navItems: Section[] = [
   "Sala de ponto",
   "Batidas",
   "Banco de horas",
+  "Fechamento mensal",
   "Relatorios",
   "LGPD e auditoria",
   "Admin",
@@ -119,6 +121,13 @@ const metrics = [
   ["Horas previstas", "200:00", "48 horas semanais"],
   ["Horas trabalhadas", "185:24", "total consolidado"],
   ["Saldo do banco", "+02:07", "periodo 01/06 a 30/06"],
+];
+
+const monthlyClosingRows = [
+  ["Elivelton Aparecido", "471.073.068-71", "Instalador de som", "26", "1", "0", "00:45", "02:07", "Conferir esquecimento"],
+  ["Fatima Luana", "542.203.118-07", "Auxiliar administrativo", "27", "0", "1", "00:22", "04:59", "OK"],
+  ["Gideao do Amaral", "570.853.648-90", "Vendedor", "25", "1", "1", "01:10", "04:17", "Trabalho externo"],
+  ["Julia Roberta", "000.000.000-00", "Movimentador financeiro", "26", "0", "0", "00:00", "-01:10", "Ajuste RH"],
 ];
 
 const initialShifts = [
@@ -507,6 +516,7 @@ export default function Home() {
       "Sala de ponto": "Tablet de reconhecimento facial",
       Batidas: "Registro por PIN, foto e evidencias",
       "Banco de horas": "Saldos, faltantes, extras e abonos",
+      "Fechamento mensal": "Conferencia mensal para contador",
       Relatorios: "Espelho de ponto e jornada detalhada",
       "LGPD e auditoria": "Consentimento, logs e trilha inviolavel",
       Admin: "Controle interno, convites e permissoes",
@@ -568,6 +578,41 @@ export default function Home() {
         "text/csv",
       );
       setNotice("Exportacao fiscal demonstrativa gerada em CSV.");
+      return;
+    }
+
+    if (action === "Folha mensal para contador") {
+      const header = [
+        "funcionario",
+        "cpf",
+        "cargo",
+        "dias_trabalhados",
+        "faltas_manha",
+        "faltas_tarde",
+        "atrasos",
+        "banco_horas",
+        "observacao",
+      ];
+      const csv = [
+        header.join(","),
+        ...monthlyClosingRows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
+      ].join("\n");
+
+      downloadTextFile(
+        `folha-mensal-contador-${new Date().toISOString().slice(0, 10)}.csv`,
+        csv,
+        "text/csv",
+      );
+      setNotice("Folha mensal para contador gerada em CSV demonstrativo.");
+      return;
+    }
+
+    if (action === "Ficha individual de ciencia") {
+      downloadTextFile(
+        `ficha-ciencia-funcionario-${new Date().toISOString().slice(0, 10)}.txt`,
+        `Orquestracs Face ID\nFicha individual de ciencia mensal\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\nFuncionario: Elivelton Aparecido\nPeriodo: 01/06/2026 a 30/06/2026\nFaltas manha: 1\nFaltas tarde: 0\nAtrasos: 00:45\nBanco de horas: 02:07\n\nAssinatura do funcionario: ______________________________\nAssinatura do responsavel: ______________________________`,
+      );
+      setNotice("Ficha individual de ciencia gerada em arquivo demonstrativo.");
       return;
     }
 
@@ -750,6 +795,7 @@ export default function Home() {
             />
           )}
           {active === "Banco de horas" && <HoursBankScreen onAction={demoAction} />}
+          {active === "Fechamento mensal" && <MonthlyClosingScreen onAction={demoAction} />}
           {active === "Relatorios" && <ReportsScreen onAction={demoAction} />}
           {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
           {active === "Admin" && <AdminScreen onAction={demoAction} />}
@@ -1809,6 +1855,103 @@ function HoursBankScreen({ onAction }: { onAction: (action: string) => void }) {
   );
 }
 
+function MonthlyClosingScreen({ onAction }: { onAction: (action: string) => void }) {
+  return (
+    <>
+      <Panel title="Fechamento mensal" subtitle="Conferencia antes de enviar para o contador">
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label="Mes"><select className="input"><option>Junho</option><option>Julho</option><option>Agosto</option></select></Field>
+          <Field label="Ano"><input className="input" placeholder="2026" /></Field>
+          <Field label="Status"><select className="input"><option>Em conferencia</option><option>Fechado</option><option>Reaberto</option></select></Field>
+          <Field label="Responsavel"><input className="input" placeholder="Nome do responsavel" /></Field>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-5">
+          {[
+            ["Funcionarios", "25"],
+            ["Faltas manha", "2"],
+            ["Faltas tarde", "2"],
+            ["Atrasos", "02:17"],
+            ["Ajustes", "4"],
+          ].map(([label, value]) => (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
+              <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
+              <strong className="mt-2 block text-lg text-[#101923]">{value}</strong>
+            </div>
+          ))}
+        </div>
+
+        <ActionRow>
+          <button className="primary-button" onClick={() => onAction("Folha mensal para contador")} type="button">Gerar folha do contador</button>
+          <button className="secondary-button" onClick={() => onAction("Ficha individual de ciencia")} type="button">Ficha para assinatura</button>
+          <button className="secondary-button" onClick={() => onAction("Fechamento mensal bloqueado")} type="button">Fechar mes</button>
+        </ActionRow>
+      </Panel>
+
+      <Panel title="Conferencia por funcionario" subtitle="Base do arquivo mensal e da ficha individual">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+            <thead className="bg-[#101923] text-xs uppercase text-white">
+              <tr>
+                {[
+                  "Funcionario",
+                  "CPF",
+                  "Cargo",
+                  "Dias",
+                  "Falta manha",
+                  "Falta tarde",
+                  "Atrasos",
+                  "Banco",
+                  "Observacao",
+                ].map((head) => (
+                  <th className="px-4 py-3 font-semibold" key={head}>{head}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {monthlyClosingRows.map((row) => (
+                <tr className="border-b border-[#e3e8ee]" key={`${row[0]}-${row[1]}`}>
+                  {row.map((cell, index) => (
+                    <td
+                      className={`px-4 py-3 ${index === 0 ? "font-semibold text-[#101923]" : "text-[#667085]"}`}
+                      key={`${row[0]}-${cell}-${index}`}
+                    >
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      <TwoColumn>
+        <Panel title="Pendencias antes do fechamento" subtitle="Itens que o responsavel deve conferir">
+          <CheckList
+            items={[
+              "Ajustes manuais com justificativa preenchida",
+              "Trabalho externo aprovado conforme politica da empresa",
+              "Faltas por periodo revisadas antes do envio",
+              "Banco de horas conferido com o responsavel",
+            ]}
+          />
+        </Panel>
+        <Panel title="Entrega para contador" subtitle="Arquivos previstos">
+          <CheckList
+            items={[
+              "CSV mensal para importacao/conferencia",
+              "PDF geral da empresa",
+              "Ficha individual para ciencia do funcionario",
+              "Historico de ajustes e abonos do periodo",
+            ]}
+          />
+        </Panel>
+      </TwoColumn>
+    </>
+  );
+}
+
 function ReportsScreen({ onAction }: { onAction: (action: string) => void }) {
   return (
     <>
@@ -2028,6 +2171,15 @@ function AssistantPanel({
         "Feche o periodo apenas depois da conferencia.",
       ],
       questions: ["Como abonar horas?", "Como fechar periodo?", "Como ver saldo individual?"],
+    },
+    "Fechamento mensal": {
+      title: "Fechamento mensal",
+      steps: [
+        "Escolha mes, ano e responsavel pela conferencia.",
+        "Confira faltas, atrasos, banco de horas, ajustes e observacoes.",
+        "Gere a folha do contador e a ficha individual para ciencia do funcionario.",
+      ],
+      questions: ["O que enviar ao contador?", "Quando fechar o mes?", "Como gerar ficha individual?"],
     },
     Relatorios: {
       title: "Relatorios",
