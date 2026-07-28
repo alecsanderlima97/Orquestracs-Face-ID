@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
+import {
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut,
+  type User,
+} from "firebase/auth";
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { saveMainCompany } from "@/lib/services/companies";
@@ -534,6 +541,19 @@ export default function Home() {
     }
   }
 
+  async function handleGoogleLogin() {
+    setLoginMessage("Entrando com Google...");
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+      await signInWithPopup(auth, provider);
+      setLoginMessage("");
+    } catch (error) {
+      console.error(error);
+      setLoginMessage("Nao foi possivel entrar com Google. Verifique se o provedor esta ativo no Firebase.");
+    }
+  }
+
   async function handleLogout() {
     await signOut(auth);
   }
@@ -779,6 +799,10 @@ export default function Home() {
             </Field>
             <button className="primary-button" onClick={handleLogin} type="button">
               Entrar
+            </button>
+            <button className="google-button" onClick={handleGoogleLogin} type="button">
+              <span className="google-mark">G</span>
+              Entrar com Google
             </button>
             {loginMessage && (
               <p className="rounded-md border border-[#efd9a8] bg-[#fff8e9] p-3 text-sm font-semibold text-[#8a5a00]">

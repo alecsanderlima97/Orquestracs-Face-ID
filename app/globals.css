@@ -93,6 +93,39 @@ a {
   transform: translateY(-1px);
 }
 
+.google-button {
+  display: inline-flex;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid #cbd5df;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #26323f;
+  font-weight: 800;
+  transition: border-color 160ms ease, box-shadow 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.google-button:hover {
+  border-color: #18594c;
+  box-shadow: 0 8px 18px rgb(16 25 35 / 8%);
+  color: #18594c;
+  transform: translateY(-1px);
+}
+
+.google-mark {
+  display: grid;
+  height: 22px;
+  width: 22px;
+  place-items: center;
+  border: 1px solid #d9e0e7;
+  border-radius: 999px;
+  color: #18594c;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .mini-button {
   height: 32px;
   border: 1px solid #d9e0e7;
@@ -123,6 +156,7 @@ a {
 .primary-button:active,
 .secondary-button:active,
 .mini-button:active,
+.google-button:active,
 .assistant-launcher:active {
   transform: translateY(0);
 }
