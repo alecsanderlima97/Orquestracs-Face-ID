@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   GoogleAuthProvider,
+  getRedirectResult,
   onAuthStateChanged,
   signInWithEmailAndPassword,
-  signInWithPopup,
+  signInWithRedirect,
   signOut,
   type User,
 } from "firebase/auth";
@@ -529,6 +530,14 @@ export default function Home() {
     });
   }, []);
 
+  useEffect(() => {
+    getRedirectResult(auth).catch((error: { code?: string; message?: string }) => {
+      console.error(error);
+      setLoginMessage(`Erro no Google: ${error.code || error.message || "falha ao autenticar"}.`);
+      setAuthLoading(false);
+    });
+  }, []);
+
   async function handleLogin() {
     setLoginMessage("Entrando...");
     try {
@@ -542,15 +551,15 @@ export default function Home() {
   }
 
   async function handleGoogleLogin() {
-    setLoginMessage("Entrando com Google...");
+    setLoginMessage("Redirecionando para o Google...");
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
-      await signInWithPopup(auth, provider);
-      setLoginMessage("");
-    } catch (error) {
+      await signInWithRedirect(auth, provider);
+    } catch (error: unknown) {
       console.error(error);
-      setLoginMessage("Nao foi possivel entrar com Google. Verifique se o provedor esta ativo no Firebase.");
+      const authError = error as { code?: string; message?: string };
+      setLoginMessage(`Erro no Google: ${authError.code || authError.message || "falha ao iniciar login"}.`);
     }
   }
 
