@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
+import { auth } from "@/lib/firebase/client";
 import { saveMainCompany } from "@/lib/services/companies";
 
 type Section =
@@ -489,9 +491,14 @@ function getLastEmployeePunch(employeeId: string) {
 export default function Home() {
   const [active, setActive] = useState<Section>("Painel");
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const [currentDateTime, setCurrentDateTime] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginMessage, setLoginMessage] = useState("");
   const [notice, setNotice] = useState("Modo demonstrativo: nenhum dado sera enviado ao Firebase.");
   const [pin, setPin] = useState("");
+  const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
     function refreshClock() {
@@ -507,6 +514,29 @@ export default function Home() {
     const timer = window.setInterval(refreshClock, 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    return onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+  }, []);
+
+  async function handleLogin() {
+    setLoginMessage("Entrando...");
+    try {
+      await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+      setLoginPassword("");
+      setLoginMessage("");
+    } catch (error) {
+      console.error(error);
+      setLoginMessage("Nao foi possivel entrar. Confira e-mail e senha.");
+    }
+  }
+
+  async function handleLogout() {
+    await signOut(auth);
+  }
 
   const title = useMemo(() => {
     const subtitles: Record<Section, string> = {
@@ -703,6 +733,64 @@ export default function Home() {
     return true;
   }
 
+  if (authLoading) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#f4f6f8] px-4 text-[#17202a]">
+        <div className="rounded-lg border border-[#d9e0e7] bg-white p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#26323f]">Carregando acesso...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#f4f6f8] px-4 text-[#17202a]">
+        <section className="w-full max-w-md rounded-lg border border-[#d9e0e7] bg-white p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2d6c5d]">
+            Orquestracs Face ID
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold text-[#101923]">Entrar no sistema</h1>
+          <p className="mt-2 text-sm leading-6 text-[#667085]">
+            Acesso restrito para usuarios convidados da empresa.
+          </p>
+
+          <div className="mt-6 grid gap-3">
+            <Field label="E-mail">
+              <input
+                className="input"
+                onChange={(event) => setLoginEmail(event.target.value)}
+                placeholder="usuario@empresa.com"
+                type="email"
+                value={loginEmail}
+              />
+            </Field>
+            <Field label="Senha">
+              <input
+                className="input"
+                onChange={(event) => setLoginPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void handleLogin();
+                }}
+                placeholder="Sua senha"
+                type="password"
+                value={loginPassword}
+              />
+            </Field>
+            <button className="primary-button" onClick={handleLogin} type="button">
+              Entrar
+            </button>
+            {loginMessage && (
+              <p className="rounded-md border border-[#efd9a8] bg-[#fff8e9] p-3 text-sm font-semibold text-[#8a5a00]">
+                {loginMessage}
+              </p>
+            )}
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-[#17202a]">
       <div className="mx-auto grid max-w-[1480px] gap-6 px-4 py-4 lg:grid-cols-[292px_1fr] lg:px-6">
@@ -772,6 +860,13 @@ export default function Home() {
                   <p className="text-xs font-semibold uppercase text-[#667085]">Data e hora</p>
                   <p className="text-sm font-bold text-[#101923]">{currentDateTime}</p>
                 </div>
+                <button
+                  className="h-10 rounded-md border border-[#cbd5df] bg-white px-4 text-sm font-semibold text-[#26323f]"
+                  onClick={handleLogout}
+                  type="button"
+                >
+                  Sair
+                </button>
                 <button
                   className="h-10 rounded-md bg-[#18594c] px-4 text-sm font-semibold text-white shadow-sm"
                   onClick={() => go("Sala de ponto")}

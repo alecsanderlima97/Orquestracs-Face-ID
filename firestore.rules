@@ -37,13 +37,13 @@ service cloud.firestore {
     }
 
     match /companies/{targetCompanyId} {
-      allow read: if canReadCompany(targetCompanyId);
-      allow create, update: if canWriteCompany(targetCompanyId);
+      allow read: if targetCompanyId == "main" && signedIn() || canReadCompany(targetCompanyId);
+      allow create, update: if targetCompanyId == "main" && signedIn() || canWriteCompany(targetCompanyId);
       allow delete: if isDeveloper();
 
       match /{document=**} {
-        allow read: if canReadCompany(targetCompanyId);
-        allow create, update: if canWriteCompany(targetCompanyId);
+        allow read: if targetCompanyId == "main" && signedIn() || canReadCompany(targetCompanyId);
+        allow create, update: if targetCompanyId == "main" && signedIn() || canWriteCompany(targetCompanyId);
         allow delete: if isDeveloper();
       }
     }
