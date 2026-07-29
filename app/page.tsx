@@ -16,7 +16,9 @@ import {
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
+import type { PunchStatus, PunchType } from "@/lib/models";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
+import { createPunch } from "@/lib/services/punches";
 import {
   acceptTenantInvite,
   consumeAiCredit,
@@ -929,14 +931,39 @@ export default function Home() {
     setNotice(`${action} salvo localmente neste navegador. Firebase sera conectado depois.`);
   }
 
-  function registerPunch(kind: string, employee?: RecognizedFace, exception?: PunchException) {
+  async function registerPunch(kind: string, employee?: RecognizedFace, exception?: PunchException) {
     if (!employee && !pin.trim()) {
       setNotice("Informe um PIN para simular a batida.");
       return false;
     }
 
     const occurredAt = new Date();
+    const serverRecordedAt = new Date();
     const employeeName = employee?.name || "Colaborador identificado por PIN";
+    const employeeId = employee?.employeeId || `pin-${pin.trim()}`;
+    const punchPayload = {
+      companyId: "main",
+      deviceId: "web-kiosk",
+      employeeId,
+      occurredAt: occurredAt.toISOString(),
+      source: employee ? "face_id" as const : "pin_photo" as const,
+      status: (exception ? "outside_shift" : "on_time") as PunchStatus,
+      type: mapPunchType(kind),
+    };
+
+    try {
+      await createPunch("main", {
+        ...punchPayload,
+        hash: await createAuditHash(punchPayload),
+        occurredAt,
+        photoPath: employee ? "face-id-local-profile" : "pending-storage-photo",
+        serverRecordedAt,
+      });
+    } catch (error) {
+      console.error(error);
+      setNotice("Nao foi possivel salvar a batida no Firebase. Verifique a conexao e tente novamente.");
+      return false;
+    }
 
     appendLocalRecord(`Batida: ${kind}`, "Sala de ponto", {
       Colaborador: employeeName,
@@ -1289,7 +1316,7 @@ function PunchCard({
   pin,
   setPin,
 }: {
-  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => boolean;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -1319,7 +1346,7 @@ function PunchCard({
 
           <div className="punch-actions">
             {["Entrada", "Intervalo", "Retorno", "Saida"].map((label) => (
-              <button className="secondary-button punch-action-button" key={label} onClick={() => onRegister(label)} type="button">
+              <button className="secondary-button punch-action-button" key={label} onClick={() => void onRegister(label)} type="button">
                 {label}
               </button>
             ))}
@@ -2280,7 +2307,7 @@ function PunchesScreen({
   setPin,
 }: {
   onAction: (action: string) => void;
-  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => boolean;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -2344,7 +2371,7 @@ function KioskScreen({
   setPin,
 }: {
   onAction: (action: string) => void;
-  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => boolean;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -2403,7 +2430,7 @@ function KioskScreen({
     }
   }
 
-  function confirmPunch() {
+  async function confirmPunch() {
     if (!recognizedEmployee || confirmation) {
       if (!recognizedEmployee) {
         onAction("Faça o reconhecimento do rosto antes de confirmar.");
@@ -2432,7 +2459,7 @@ function KioskScreen({
       return;
     }
 
-    if (!onRegister(selectedPunch, recognizedEmployee, timingWarning || undefined)) return;
+    if (!(await onRegister(selectedPunch, recognizedEmployee, timingWarning || undefined))) return;
 
     const time = new Date().toLocaleTimeString("pt-BR", {
       hour: "2-digit",
@@ -2564,7 +2591,7 @@ function KioskScreen({
               <button
                 className="min-h-20 rounded-xl bg-[#38c793] px-5 text-xl font-black text-[#082c22] shadow-lg disabled:cursor-not-allowed disabled:bg-[#52616f] disabled:text-white/50"
                 disabled={!recognizedEmployee || journeyFinished || Boolean(confirmation) || Boolean(blockingMessage)}
-                onClick={confirmPunch}
+                onClick={() => void confirmPunch()}
                 type="button"
               >
                 {timingWarning ? "⚠ CONFIRMAR MESMO ASSIM" : "✓ CONFIRMAR PONTO"}
@@ -2599,13 +2626,15 @@ function KioskScreen({
               <button
                 className="secondary-button"
                 onClick={() => {
-                  if (onRegister(selectedPunch)) {
+                  void (async () => {
+                  if (await onRegister(selectedPunch)) {
                     const time = new Date().toLocaleTimeString("pt-BR", {
                       hour: "2-digit",
                       minute: "2-digit",
                     });
                     speak(`${selectedPunch} registrada com sucesso às ${time}.`);
                   }
+                  })();
                 }}
                 type="button"
               >
@@ -3552,6 +3581,23 @@ function TimeStepper({
       />
     </Field>
   );
+}
+
+function mapPunchType(kind: string): PunchType {
+  const normalized = kind.toLowerCase();
+  if (normalized.includes("intervalo") || normalized.includes("almoco") || normalized.includes("almoço")) return "lunch_out";
+  if (normalized.includes("retorno") || normalized.includes("volta")) return "lunch_back";
+  if (normalized.includes("saida") || normalized.includes("saída")) return "exit";
+  return "entry";
+}
+
+async function createAuditHash(payload: Record<string, unknown>) {
+  const value = JSON.stringify(payload);
+  const data = new TextEncoder().encode(value);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function SaveButton({
