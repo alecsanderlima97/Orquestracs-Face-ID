@@ -6,38 +6,16 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function role() {
-      return request.auth.token.role;
+    match /companies/main/profile/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
     }
 
-    function companyId() {
-      return request.auth.token.companyId;
-    }
-
-    function isDeveloper() {
-      return signedIn() && role() == "developer";
-    }
-
-    function canReadCompany(targetCompanyId) {
-      return isDeveloper() || (
-        signedIn() &&
-        companyId() == targetCompanyId &&
-        (role() == "owner" || role() == "admin" || role() == "reader")
-      );
-    }
-
-    function canWriteCompany(targetCompanyId) {
-      return isDeveloper() || (
-        signedIn() &&
-        companyId() == targetCompanyId &&
-        (role() == "owner" || role() == "admin")
-      );
-    }
-
-    match /companies/{targetCompanyId}/{allPaths=**} {
-      allow read: if canReadCompany(targetCompanyId);
-      allow write: if canWriteCompany(targetCompanyId);
-      allow delete: if isDeveloper();
+    match /companies/main/{allPaths=**} {
+      allow read: if signedIn();
+      allow write: if false;
     }
   }
 }

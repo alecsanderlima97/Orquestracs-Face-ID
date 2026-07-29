@@ -1,5 +1,8 @@
 import { addDoc, collection, doc, getDoc, getDocs, setDoc, updateDoc } from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db } from "@/lib/firebase/client";
+import { storage } from "@/lib/firebase/client";
+import { companyLogoPath } from "@/lib/firebase/paths";
 import type { Company } from "@/lib/models";
 
 const companiesRef = collection(db, "companies");
@@ -33,4 +36,23 @@ export async function saveMainCompany(data: Record<string, unknown>) {
     },
     { merge: true },
   );
+}
+
+export async function getMainCompany() {
+  const snapshot = await getDoc(doc(db, "companies", MAIN_COMPANY_ID));
+  return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as Record<string, unknown>) : null;
+}
+
+export async function uploadMainCompanyLogo(file: File) {
+  const extension = file.name.split(".").pop()?.toLowerCase() || "webp";
+  const logoRef = ref(storage, companyLogoPath(MAIN_COMPANY_ID, extension));
+
+  await uploadBytes(logoRef, file, {
+    contentType: file.type || "image/webp",
+  });
+
+  const logoUrl = await getDownloadURL(logoRef);
+  await saveMainCompany({ logoUrl });
+
+  return logoUrl;
 }

@@ -2,6 +2,10 @@ export function companyPath(companyId: string) {
   return `companies/${companyId}`;
 }
 
+export function companyLogoPath(companyId: string, extension = "webp") {
+  return `companies/${companyId}/profile/logo.${extension}`;
+}
+
 export function employeePath(companyId: string, employeeId: string) {
   return `companies/${companyId}/employees/${employeeId}`;
 }

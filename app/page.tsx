@@ -15,7 +15,7 @@ import {
 } from "firebase/auth";
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
-import { saveMainCompany } from "@/lib/services/companies";
+import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
 
 type Section =
   | "Painel"
@@ -124,6 +124,13 @@ const navItems: Section[] = [
 ];
 
 const developerEmails = ["orquestracs@gmail.com"];
+
+type MainCompanyProfile = Record<string, unknown> & {
+  cnpj?: string;
+  legalName?: string;
+  logoUrl?: string;
+  tradeName?: string;
+};
 
 const auditLogs = [
   ["Original imutavel", "Batidas bloqueadas contra edicao direta"],
@@ -506,12 +513,18 @@ export default function Home() {
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [currentDateTime, setCurrentDateTime] = useState("");
+  const [companyProfile, setCompanyProfile] = useState<MainCompanyProfile | null>(null);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginMessage, setLoginMessage] = useState("");
   const [notice, setNotice] = useState("Modo demonstrativo: nenhum dado sera enviado ao Firebase.");
   const [pin, setPin] = useState("");
   const [user, setUser] = useState<User | null>(null);
+
+  async function refreshCompanyProfile() {
+    const company = await getMainCompany();
+    setCompanyProfile(company as MainCompanyProfile | null);
+  }
 
   useEffect(() => {
     function refreshClock() {
@@ -533,6 +546,7 @@ export default function Home() {
     return onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
+      if (currentUser) void refreshCompanyProfile();
     });
   }, []);
 
@@ -655,6 +669,7 @@ export default function Home() {
           stateRegistration: fields["Inscricao estadual"] || "",
           tradeName: fields["Nome fantasia"] || "",
         });
+        await refreshCompanyProfile();
         setNotice("Empresa salva no Firebase em companies/main.");
       } catch (error) {
         console.error(error);
@@ -861,6 +876,9 @@ export default function Home() {
 
   const isDeveloperUser = developerEmails.includes(user.email?.toLowerCase() || "");
   const visibleNavItems = navItems.filter((item) => item !== "Admin" || isDeveloperUser);
+  const companyName =
+    companyProfile?.tradeName || companyProfile?.legalName || "Empresa principal";
+  const companyCnpj = companyProfile?.cnpj || "CNPJ nao cadastrado";
 
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-[#17202a]">
@@ -879,8 +897,23 @@ export default function Home() {
               </div>
               <div className="mt-5 rounded-md border border-white/10 bg-white/[0.04] p-3">
                 <p className="text-xs uppercase tracking-[0.12em] text-white/45">Empresa</p>
-                <h2 className="mt-2 text-sm font-semibold">MULT PECAS ITABOA</h2>
-                <p className="mt-1 text-xs text-white/55">CNPJ 42.838.913/0001-21</p>
+                <div className="mt-2 flex items-center gap-3">
+                  {companyProfile?.logoUrl ? (
+                    <img
+                      alt={`Logo ${companyName}`}
+                      className="h-9 w-9 rounded-md border border-white/10 object-cover"
+                      src={companyProfile.logoUrl}
+                    />
+                  ) : (
+                    <div className="grid h-9 w-9 place-items-center rounded-md bg-[#dcebe6] text-xs font-bold text-[#164d42]">
+                      O
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <h2 className="truncate text-sm font-semibold">{String(companyName)}</h2>
+                    <p className="mt-1 truncate text-xs text-white/55">{String(companyCnpj)}</p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -961,7 +994,13 @@ export default function Home() {
             </>
           )}
 
-          {active === "Empresa" && <CompaniesScreen onAction={demoAction} />}
+          {active === "Empresa" && (
+            <CompaniesScreen
+              company={companyProfile}
+              key={String(companyProfile?.updatedAt || companyProfile?.logoUrl || "empty-company")}
+              onAction={demoAction}
+            />
+          )}
           {active === "Colaboradores" && <EmployeesScreen onAction={demoAction} />}
           {active === "Escalas" && <ShiftsScreen onAction={demoAction} />}
           {active === "Sala de ponto" && (
@@ -1009,7 +1048,15 @@ export default function Home() {
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) {
-            setNotice(`Arquivo selecionado: ${file.name}. Upload real sera conectado depois.`);
+            void uploadMainCompanyLogo(file)
+              .then(async () => {
+                await refreshCompanyProfile();
+                setNotice(`Logo "${file.name}" salva no Firebase Storage.`);
+              })
+              .catch((error) => {
+                console.error(error);
+                setNotice("Nao foi possivel salvar a logo. Verifique regras do Storage.");
+              });
           }
         }}
         type="file"
@@ -1106,7 +1153,13 @@ function ComplianceCard() {
   );
 }
 
-function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
+function CompaniesScreen({
+  company,
+  onAction,
+}: {
+  company: MainCompanyProfile | null;
+  onAction: (action: string) => void;
+}) {
   const [companyJourney, setCompanyJourney] = useState({
     start: "07:00",
     lunchOut: "11:30",
@@ -1119,29 +1172,31 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
     setCompanyJourney((current) => ({ ...current, [field]: value }));
   }
 
+  const address = (company?.address || {}) as Record<string, string>;
+
   return (
     <>
       <TwoColumn>
         <Panel title="Perfil da empresa" subtitle="Dados principais do CNPJ">
           <div className="grid gap-3 md:grid-cols-3">
-            <MaskedField label="Razao social" mask="name" placeholder="Mult Pecas Itaboa" />
-            <MaskedField label="Nome fantasia" mask="name" placeholder="Mult Pecas" />
-            <MaskedField label="CNPJ" mask="cnpj" placeholder="00.000.000/0000-00" />
-            <Field label="Inscricao estadual"><input className="input" placeholder="000.000.000.000" /></Field>
-            <MaskedField label="Responsavel" mask="name" placeholder="Nome Do Responsavel" />
-            <MaskedField label="Celular" mask="phone" placeholder="(00) 00000-0000" />
-            <Field label="E-mail"><input className="input" placeholder="contato@empresa.com" /></Field>
+            <MaskedField label="Razao social" mask="name" placeholder="Razao social da empresa" value={String(company?.legalName || "")} />
+            <MaskedField label="Nome fantasia" mask="name" placeholder="Nome fantasia" value={String(company?.tradeName || "")} />
+            <MaskedField label="CNPJ" mask="cnpj" placeholder="00.000.000/0000-00" value={String(company?.cnpj || "")} />
+            <Field label="Inscricao estadual"><input className="input" defaultValue={String(company?.stateRegistration || "")} placeholder="000.000.000.000" /></Field>
+            <MaskedField label="Responsavel" mask="name" placeholder="Nome Do Responsavel" value={String(company?.contactName || "")} />
+            <MaskedField label="Celular" mask="phone" placeholder="(00) 00000-0000" value={String(company?.contactPhone || "")} />
+            <Field label="E-mail"><input className="input" defaultValue={String(company?.contactEmail || "")} placeholder="contato@empresa.com" /></Field>
           </div>
 
           <div className="mt-5 grid gap-3 md:grid-cols-3">
-            <MaskedField label="CEP" mask="cep" placeholder="00000-000" />
-            <Field label="Logradouro"><input className="input" placeholder="Rua, avenida ou estrada" /></Field>
-            <Field label="Numero"><input className="input" placeholder="123" /></Field>
-            <Field label="Complemento"><input className="input" placeholder="Galpao, sala, lote" /></Field>
-            <Field label="Bairro"><input className="input" placeholder="Centro" /></Field>
-            <Field label="Cidade"><input className="input" placeholder="Cidade" /></Field>
+            <MaskedField label="CEP" mask="cep" placeholder="00000-000" value={address.zipCode || ""} />
+            <Field label="Logradouro"><input className="input" defaultValue={address.street || ""} placeholder="Rua, avenida ou estrada" /></Field>
+            <Field label="Numero"><input className="input" defaultValue={address.number || ""} placeholder="123" /></Field>
+            <Field label="Complemento"><input className="input" defaultValue={address.complement || ""} placeholder="Galpao, sala, lote" /></Field>
+            <Field label="Bairro"><input className="input" defaultValue={address.district || ""} placeholder="Centro" /></Field>
+            <Field label="Cidade"><input className="input" defaultValue={address.city || ""} placeholder="Cidade" /></Field>
             <Field label="UF">
-              <select className="input">
+              <select className="input" defaultValue={address.state || "SP"}>
                 <option>SP</option>
                 <option>MG</option>
                 <option>RJ</option>
@@ -1163,9 +1218,17 @@ function CompaniesScreen({ onAction }: { onAction: (action: string) => void }) {
           <div className="grid gap-4">
             <div className="grid min-h-[180px] place-items-center rounded-md border border-dashed border-[#aeb9c5] bg-[#fbfcfd] p-4 text-center">
               <div>
-                <div className="mx-auto grid h-20 w-20 place-items-center rounded-md bg-[#edf5f2] text-2xl font-black text-[#18594c]">
-                  O
-                </div>
+                {company?.logoUrl ? (
+                  <img
+                    alt="Logo da empresa"
+                    className="mx-auto h-20 w-20 rounded-md border border-[#d9e0e7] object-cover"
+                    src={company.logoUrl}
+                  />
+                ) : (
+                  <div className="mx-auto grid h-20 w-20 place-items-center rounded-md bg-[#edf5f2] text-2xl font-black text-[#18594c]">
+                    O
+                  </div>
+                )}
                 <p className="mt-3 text-sm font-semibold text-[#26323f]">Logo ou foto da empresa</p>
                 <p className="mt-1 text-xs leading-5 text-[#667085]">Usada em perfil, relatorios e tela do tablet.</p>
               </div>
@@ -2717,8 +2780,14 @@ function MaskedField({
   placeholder: string;
   value?: string;
 }) {
-  const [internalValue, setInternalValue] = useState("");
-  const value = controlledValue ?? internalValue;
+  const [internalValue, setInternalValue] = useState(controlledValue || "");
+  const value = onChange && controlledValue !== undefined ? controlledValue : internalValue;
+
+  useEffect(() => {
+    if (!onChange && controlledValue !== undefined) {
+      setInternalValue(controlledValue);
+    }
+  }, [controlledValue, onChange]);
 
   return (
     <Field label={label}>
