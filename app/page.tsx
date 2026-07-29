@@ -3169,7 +3169,7 @@ function MaskedField({
         className="input"
         onChange={(event) => {
           const nextValue = applyMask(event.target.value, mask);
-          if (controlledValue === undefined) setInternalValue(nextValue);
+          if (!onChange) setInternalValue(nextValue);
           onChange?.(nextValue);
         }}
         placeholder={placeholder}
