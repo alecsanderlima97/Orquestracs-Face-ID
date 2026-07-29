@@ -78,6 +78,50 @@ a {
   transform: translateY(-1px);
 }
 
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.9;
+}
+
+.save-button {
+  display: inline-flex;
+  min-width: 138px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.save-button-saved {
+  background: #1f7a62;
+  box-shadow: 0 0 0 4px rgb(31 122 98 / 12%);
+}
+
+.save-button-saved:hover {
+  background: #1f7a62;
+}
+
+.save-button-icon {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.save-button-spinner {
+  border: 2px solid rgb(255 255 255 / 34%);
+  border-top-color: #ffffff;
+  animation: save-spin 720ms linear infinite;
+}
+
+@keyframes save-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .secondary-button {
   height: 40px;
   border: 1px solid #cbd5df;

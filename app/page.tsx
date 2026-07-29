@@ -1372,7 +1372,7 @@ function CompaniesScreen({
             </Field>
           </div>
           <ActionRow>
-            <button className="primary-button" onClick={() => onAction("Cadastro da empresa principal")} type="button">Salvar empresa</button>
+            <SaveButton onClick={() => onAction("Cadastro da empresa principal")}>Salvar empresa</SaveButton>
             <button className="secondary-button" onClick={() => onAction("Validacao de CNPJ")} type="button">Validar CNPJ</button>
           </ActionRow>
         </Panel>
@@ -1397,7 +1397,7 @@ function CompaniesScreen({
               </div>
             </div>
             <button className="secondary-button" onClick={() => onAction("Upload de logo da empresa")} type="button">Selecionar imagem</button>
-            <button className="primary-button" onClick={() => onAction("Backup local completo")} type="button">Gerar backup local</button>
+            <SaveButton onClick={() => onAction("Backup local completo")}>Gerar backup local</SaveButton>
             <CheckList
               items={[
                 "Backup inclui dados, relatorios e referencias das fotos",
@@ -1432,7 +1432,7 @@ function CompaniesScreen({
           />
         </div>
         <ActionRow>
-          <button className="primary-button" onClick={() => onAction("Escala coletiva da empresa")} type="button">Salvar escala</button>
+          <SaveButton onClick={() => onAction("Escala coletiva da empresa")}>Salvar escala</SaveButton>
           <button className="secondary-button" onClick={() => onAction("Previa da jornada coletiva")} type="button">Ver previa</button>
         </ActionRow>
         <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -1522,9 +1522,9 @@ function CompaniesScreen({
               "Convites pendentes podem ser reenviados",
             ]}
           />
-          <ActionRow>
-            <button className="primary-button" onClick={() => onAction("Convidar usuario da empresa")} type="button">Convidar usuario</button>
-          </ActionRow>
+        <ActionRow>
+            <SaveButton onClick={() => onAction("Convidar usuario da empresa")}>Convidar usuario</SaveButton>
+        </ActionRow>
         </Panel>
 
         <Panel title="Ajuste permitido" subtitle="Configurado pela politica do cliente">
@@ -1835,7 +1835,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           )}
         </div>
         <ActionRow>
-          <button className="primary-button" onClick={saveEmployee} type="button">Cadastrar colaborador</button>
+          <SaveButton onClick={saveEmployee}>Cadastrar colaborador</SaveButton>
           <button className="secondary-button" onClick={openFaceRegistration} type="button">Cadastrar Face ID</button>
           <label className="secondary-button cursor-pointer">
             Importar holerite JSON
@@ -1934,7 +1934,7 @@ function ShiftsScreen({ onAction }: { onAction: (action: string) => void }) {
             </Field>
           </div>
           <ActionRow>
-            <button className="primary-button" onClick={saveShift} type="button">Salvar alteracoes</button>
+            <SaveButton onClick={saveShift}>Salvar alteracoes</SaveButton>
             <button className="secondary-button" onClick={() => onAction("Previa de calculo do turno")} type="button">Ver calculo</button>
           </ActionRow>
         </Panel>
@@ -2629,9 +2629,7 @@ function AdminScreen({
         </div>
 
         <ActionRow>
-          <button className="primary-button" onClick={() => onAction("Salvar configuracao Admin SaaS")} type="button">
-            Salvar Admin
-          </button>
+          <SaveButton onClick={() => onAction("Salvar configuracao Admin SaaS")}>Salvar Admin</SaveButton>
           <button className="secondary-button" onClick={() => onAction("Auditoria global")} type="button">
             Logs globais
           </button>
@@ -3257,6 +3255,43 @@ function TimeStepper({
         value={value}
       />
     </Field>
+  );
+}
+
+function SaveButton({
+  children,
+  onClick,
+}: {
+  children: React.ReactNode;
+  onClick: () => Promise<void> | void;
+}) {
+  const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  async function handleClick() {
+    if (status === "saving") return;
+
+    setStatus("saving");
+    try {
+      await onClick();
+      setStatus("saved");
+      window.setTimeout(() => setStatus("idle"), 2200);
+    } catch {
+      setStatus("idle");
+    }
+  }
+
+  return (
+    <button
+      className={`primary-button save-button ${status === "saved" ? "save-button-saved" : ""}`}
+      disabled={status === "saving"}
+      onClick={handleClick}
+      type="button"
+    >
+      <span className={`save-button-icon ${status === "saving" ? "save-button-spinner" : ""}`}>
+        {status === "saved" ? "✓" : ""}
+      </span>
+      {status === "saving" ? "Salvando..." : status === "saved" ? "Salvo" : children}
+    </button>
   );
 }
 
