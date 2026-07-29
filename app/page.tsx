@@ -1651,6 +1651,13 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     document.getElementById("employee-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function cancelEmployeeEdit() {
+    setEmployeeForm(emptyEmployeeForm);
+    setEditingEmployeeId(null);
+    setShowFaceCamera(false);
+    onAction("Edicao cancelada. Nenhuma alteracao foi salva.");
+  }
+
   function viewEmployee(employee: EmployeeRow) {
     const selected = toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name);
     setSelectedEmployee(selected);
@@ -1954,6 +1961,9 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
         </div>
         <ActionRow>
           <SaveButton onClick={saveEmployee}>{editingEmployeeId ? "Salvar alteracoes" : "Cadastrar colaborador"}</SaveButton>
+          {editingEmployeeId && (
+            <button className="secondary-button" onClick={cancelEmployeeEdit} type="button">Cancelar edicao</button>
+          )}
           <button className="secondary-button" onClick={openFaceRegistration} type="button">Cadastrar Face ID do selecionado</button>
           <label className="secondary-button cursor-pointer">
             Importar holerite JSON
