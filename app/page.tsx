@@ -18,6 +18,7 @@ import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
 import {
   acceptTenantInvite,
+  consumeAiCredit,
   createTenantInvite,
   getTenantSaasConfig,
   getUserTenantAccess,
@@ -1183,7 +1184,13 @@ export default function Home() {
       {assistantOpen && (
         <AssistantPanel
           active={active}
+          config={saasConfig}
           onClose={() => setAssistantOpen(false)}
+          onConsumeCredit={async () => {
+            const tenantId = appAccess?.tenantId || "main";
+            const updated = await consumeAiCredit(tenantId, 1);
+            setSaasConfig(updated);
+          }}
           onNavigate={go}
         />
       )}
@@ -2648,11 +2655,15 @@ function AdminScreen({
 
 function AssistantPanel({
   active,
+  config,
   onClose,
+  onConsumeCredit,
   onNavigate,
 }: {
   active: Section;
+  config: TenantSaasConfig | null;
   onClose: () => void;
+  onConsumeCredit: () => Promise<void>;
   onNavigate: (section: Section) => void;
 }) {
   const help: Record<Section, { title: string; steps: string[]; questions: string[] }> = {
@@ -2758,11 +2769,31 @@ function AssistantPanel({
   };
 
   const current = help[active];
+  const aiCredits = config?.aiCredits || { balance: 0, included: 0, status: "Bloqueado", used: 0 };
+  const creditsBlocked = aiCredits.status === "Bloqueado" || aiCredits.balance <= 0;
   const [selectedQuestion, setSelectedQuestion] = useState(current.questions[0]);
+  const [assistantMessage, setAssistantMessage] = useState("");
 
   useEffect(() => {
     setSelectedQuestion(current.questions[0]);
-  }, [active]);
+    setAssistantMessage("");
+  }, [active, current.questions]);
+
+  async function selectQuestion(question: string) {
+    if (creditsBlocked) {
+      setAssistantMessage("Creditos IA esgotados ou bloqueados. Ajuste a cota na aba Admin.");
+      return;
+    }
+
+    try {
+      await onConsumeCredit();
+      setSelectedQuestion(question);
+      setAssistantMessage("1 credito IA consumido nesta pergunta.");
+    } catch (error) {
+      console.error(error);
+      setAssistantMessage("Nao foi possivel consumir credito IA. Verifique a cota na Admin.");
+    }
+  }
 
   return (
     <div className="assistant-shell">
@@ -2774,6 +2805,9 @@ function AssistantPanel({
               Assistente Face ID
             </p>
             <h2 className="mt-2 text-xl font-semibold text-[#101923]">{current.title}</h2>
+            <p className="mt-2 text-xs font-semibold text-[#667085]">
+              Creditos IA: {aiCredits.balance}/{aiCredits.included} disponiveis
+            </p>
           </div>
           <button className="mini-button" onClick={onClose} type="button">Fechar</button>
         </div>
@@ -2796,15 +2830,21 @@ function AssistantPanel({
             <div className="mt-3 grid gap-2">
               {current.questions.map((question) => (
                 <button
-                  className="rounded-md border border-[#d9e0e7] bg-white px-3 py-2 text-left text-sm font-semibold text-[#26323f] hover:border-[#18594c] hover:text-[#18594c]"
+                  className="rounded-md border border-[#d9e0e7] bg-white px-3 py-2 text-left text-sm font-semibold text-[#26323f] hover:border-[#18594c] hover:text-[#18594c] disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={creditsBlocked}
                   key={question}
-                  onClick={() => setSelectedQuestion(question)}
+                  onClick={() => void selectQuestion(question)}
                   type="button"
                 >
                   {question}
                 </button>
               ))}
             </div>
+            {assistantMessage && (
+              <p className="mt-3 rounded-md border border-[#efd9a8] bg-[#fff8e9] p-3 text-sm font-semibold text-[#8a5a00]">
+                {assistantMessage}
+              </p>
+            )}
             <div className="mt-3 rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-3 text-sm leading-6 text-[#24594d]">
               <p className="font-semibold">{selectedQuestion}</p>
               <p className="mt-1">

@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, increment, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "@/lib/firebase/client";
 
@@ -151,6 +151,29 @@ export async function saveTenantSaasConfig(
     },
     { merge: true },
   );
+}
+
+export async function consumeAiCredit(tenantId = DEFAULT_TENANT_ID, amount = 1) {
+  const current = await getTenantSaasConfig(tenantId);
+
+  if (current.aiCredits.status === "Bloqueado" || current.aiCredits.balance < amount) {
+    throw new Error("ai-credits-unavailable");
+  }
+
+  await updateDoc(doc(db, `tenants/${tenantId}`), {
+    "aiCredits.balance": increment(-amount),
+    "aiCredits.used": increment(amount),
+    updatedAt: serverTimestamp(),
+  });
+
+  return {
+    ...current,
+    aiCredits: {
+      ...current.aiCredits,
+      balance: current.aiCredits.balance - amount,
+      used: current.aiCredits.used + amount,
+    },
+  };
 }
 
 export async function acceptTenantInvite(code: string, user: User) {
