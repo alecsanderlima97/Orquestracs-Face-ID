@@ -59,6 +59,7 @@ type EmployeeRow = {
   lastPunch: string;
   name: string;
   phone?: string;
+  pin?: string;
   registration?: string;
   role: string;
   shift: string;
@@ -208,23 +209,23 @@ const monthlyClosingRows: string[][] = [];
 const initialShifts = [
   {
     name: "Escala 07h as 17h15",
-    weeklyHours: "48:00",
+    weeklyHours: "43:45",
     start: "07:00",
     end: "17:15",
     breakStart: "11:30",
     breakEnd: "13:00",
-    days: "6",
+    days: "5",
     tolerance: "10 min",
     extraPercent: "60%",
   },
   {
     name: "Escala 09h as 19h",
-    weeklyHours: "48:00",
+    weeklyHours: "40:00",
     start: "09:00",
     end: "19:00",
     breakStart: "13:00",
     breakEnd: "15:00",
-    days: "6",
+    days: "5",
     tolerance: "10 min",
     extraPercent: "60%",
   },
@@ -1365,7 +1366,7 @@ function CompaniesScreen({
     lunchOut: "11:30",
     lunchBack: "13:00",
     end: "17:15",
-    days: "6",
+    days: "5",
   });
 
   function updateCompanyJourney(field: keyof typeof companyJourney, value: string) {
@@ -1603,7 +1604,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     lunchOut: "11:30",
     lunchBack: "13:00",
     end: "17:15",
-    days: "6",
+    days: "5",
   });
 
   function updateEmployeeJourney(field: keyof typeof employeeJourney, value: string) {
@@ -2008,7 +2009,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             {[
               ["Nome", selectedEmployee.name],
               ["Matricula", selectedEmployee.registration || "-"],
-              ["PIN", selectedEmployee.pin || "-"],
+              ["PIN", selectedEmployee.pin ? `${selectedEmployee.pin} - pronto` : "Pendente"],
               ["CPF", selectedEmployee.cpf || "-"],
               ["Admissao", selectedEmployee.admissionDate || "-"],
               ["Cargo", selectedEmployee.role || "-"],
@@ -3213,7 +3214,11 @@ function EmployeesTable({
                   <td className="px-5 py-4 font-semibold text-[#101923]">{employee.bank}</td>
                   <td className="px-5 py-4">
                     <span className="rounded-full border border-[#d8e1ff] bg-[#f2f5ff] px-3 py-1 text-xs font-semibold text-[#3446a3]">
-                      {employee.faceIdStatus === "registered" ? "Face ID cadastrado" : employee.status}
+                      {employee.faceIdStatus === "registered"
+                        ? "Face ID cadastrado"
+                        : employee.pin
+                          ? "PIN pronto - Face ID pendente"
+                          : employee.status}
                     </span>
                   </td>
                   <td className="px-5 py-4">
