@@ -111,6 +111,7 @@ const journeyRows = [
 
 const navItems: Section[] = [
   "Painel",
+  "Admin",
   "Empresa",
   "Colaboradores",
   "Escalas",
@@ -120,8 +121,9 @@ const navItems: Section[] = [
   "Fechamento mensal",
   "Relatorios",
   "LGPD e auditoria",
-  "Admin",
 ];
+
+const developerEmails = ["orquestracs@gmail.com"];
 
 const auditLogs = [
   ["Original imutavel", "Batidas bloqueadas contra edicao direta"],
@@ -857,6 +859,9 @@ export default function Home() {
     );
   }
 
+  const isDeveloperUser = developerEmails.includes(user.email?.toLowerCase() || "");
+  const visibleNavItems = navItems.filter((item) => item !== "Admin" || isDeveloperUser);
+
   return (
     <main className="min-h-screen bg-[#f4f6f8] text-[#17202a]">
       <div className="mx-auto grid max-w-[1480px] gap-6 px-4 py-4 lg:grid-cols-[292px_1fr] lg:px-6">
@@ -880,7 +885,7 @@ export default function Home() {
             </div>
 
             <nav className="mt-5 grid gap-1 text-sm">
-              {navItems.map((item) => (
+              {visibleNavItems.map((item) => (
                 <button
                   className={`rounded-md px-3 py-2.5 text-left font-medium transition ${
                     active === item
@@ -922,6 +927,15 @@ export default function Home() {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                {isDeveloperUser && (
+                  <button
+                    className="h-10 rounded-md border border-[#18594c] bg-[#edf5f2] px-4 text-sm font-semibold text-[#18594c]"
+                    onClick={() => go("Admin")}
+                    type="button"
+                  >
+                    Admin
+                  </button>
+                )}
                 <div className="rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-3 py-2 text-right">
                   <p className="text-xs font-semibold uppercase text-[#667085]">Data e hora</p>
                   <p className="text-sm font-bold text-[#101923]">{currentDateTime}</p>
