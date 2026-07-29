@@ -97,6 +97,7 @@ type ImportedEmployee = {
 };
 
 const LOCAL_EMPLOYEES_KEY = "orquestracs-face-id-local-employees-v2";
+const REQUIRED_FACE_CAPTURES = 3;
 
 function getLocalEmployees() {
   try {
@@ -1611,6 +1612,13 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setEmployeeJourney((current) => ({ ...current, [field]: value }));
   }
 
+  const faceReadyCount = localEmployees.filter((employee) => employee.faceIdStatus === "registered").length;
+  const facePendingEmployees = localEmployees.filter((employee) => employee.faceIdStatus !== "registered");
+  const facePendingCount = facePendingEmployees.length;
+  const faceProgress = localEmployees.length
+    ? Math.round((faceReadyCount / localEmployees.length) * 100)
+    : 0;
+
   useEffect(() => {
     let mounted = true;
 
@@ -1657,6 +1665,26 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setEditingEmployeeId(null);
     setShowFaceCamera(false);
     onAction("Edicao cancelada. Nenhuma alteracao foi salva.");
+  }
+
+  function startFaceRegistration(employee?: EmployeeRow) {
+    const target = employee
+      ? toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name)
+      : facePendingEmployees[0];
+
+    if (!target) {
+      onAction("Todos os colaboradores ja estao com Face ID cadastrado.");
+      return;
+    }
+
+    setSelectedEmployee(target);
+    setEditingEmployeeId(null);
+    setShowFaceCamera(true);
+    onAction(`Cadastro de Face ID iniciado para ${target.name}.`);
+    window.setTimeout(
+      () => document.getElementById("face-id-flow-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50,
+    );
   }
 
   function viewEmployee(employee: EmployeeRow) {
@@ -1836,23 +1864,43 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
 
   function markFaceRegistered(captureCount: number) {
     if (!selectedEmployee) return;
+    const completed = captureCount >= REQUIRED_FACE_CAPTURES;
 
     const updated = localEmployees.map((employee) =>
       employee.employeeId === selectedEmployee.employeeId
-        ? { ...employee, faceIdStatus: "registered" as const }
+        ? {
+            ...employee,
+            faceIdStatus: completed ? "registered" as const : employee.faceIdStatus,
+            status: completed ? "Face ID cadastrado" : `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}`,
+          }
         : employee,
     );
     const current = updated.find((employee) => employee.employeeId === selectedEmployee.employeeId) || null;
+    const nextPending = updated.find(
+      (employee) => employee.employeeId !== selectedEmployee.employeeId && employee.faceIdStatus !== "registered",
+    );
+
     window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
     setLocalEmployees(updated);
-    setSelectedEmployee(current);
+    setSelectedEmployee(completed && nextPending ? nextPending : current);
     if (current) {
       void upsertEmployee("main", employeeDocumentId(current), {
-        faceIdStatus: "registered",
-        faceRegisteredAt: new Date().toISOString(),
+        faceCaptureCount: captureCount,
+        faceIdStatus: completed ? "registered" : current.faceIdStatus,
+        ...(completed ? { faceRegisteredAt: new Date().toISOString(), status: "Face ID cadastrado" } : { status: `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}` }),
       });
     }
-    onAction(`${selectedEmployee.name}: ${captureCount} captura(s) facial(is) cadastrada(s).`);
+
+    if (completed) {
+      onAction(
+        nextPending
+          ? `${selectedEmployee.name}: Face ID concluido. Proximo: ${nextPending.name}.`
+          : `${selectedEmployee.name}: Face ID concluido. Todos os pendentes foram finalizados.`,
+      );
+      return;
+    }
+
+    onAction(`${selectedEmployee.name}: captura ${captureCount}/${REQUIRED_FACE_CAPTURES} salva.`);
   }
 
   return (
@@ -1965,7 +2013,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           {editingEmployeeId && (
             <button className="secondary-button" onClick={cancelEmployeeEdit} type="button">Cancelar edicao</button>
           )}
-          <button className="secondary-button" onClick={openFaceRegistration} type="button">Cadastrar Face ID do selecionado</button>
+          <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee || undefined)} type="button">Cadastrar Face ID do selecionado</button>
           <label className="secondary-button cursor-pointer">
             Importar holerite JSON
             <input
@@ -1976,33 +2024,106 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             />
           </label>
         </ActionRow>
-        {showFaceCamera && selectedEmployee && (
+        {false && showFaceCamera && selectedEmployee && (
           <div className="mt-5 grid gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white lg:grid-cols-[minmax(0,1fr)_280px]">
             <FaceCamera
               compact
               employee={{
-                employeeId: selectedEmployee.employeeId,
-                name: selectedEmployee.name,
-                punchMode: selectedEmployee.punchMode || "automatic",
-                schedule: selectedEmployee.schedule,
+                employeeId: selectedEmployee!.employeeId,
+                name: selectedEmployee!.name,
+                punchMode: selectedEmployee!.punchMode || "automatic",
+                schedule: selectedEmployee!.schedule,
               }}
               onProfileUpdated={markFaceRegistered}
               onStatus={onAction}
             />
             <div>
-              <p className="text-sm font-semibold text-[#b7d7ce]">Face ID de {selectedEmployee.name}</p>
+              <p className="text-sm font-semibold text-[#b7d7ce]">Face ID de {selectedEmployee!.name}</p>
               <p className="mt-2 text-xs leading-5 text-white/65">
                 Faça de 3 a 5 capturas, olhando para frente e virando levemente o rosto.
                 Isso melhora o reconhecimento neste aparelho.
               </p>
               <p className="mt-3 text-xs font-semibold text-white">
-                Status: {selectedEmployee.faceIdStatus === "registered" ? "Face ID cadastrado" : "Aguardando captura"}
+                Status: {selectedEmployee!.faceIdStatus === "registered" ? "Face ID cadastrado" : "Aguardando captura"}
               </p>
             </div>
           </div>
         )}
       </Panel>
       </div>
+      <Panel title="Implantacao do Face ID" subtitle="Cadastro facial em sequencia">
+        <div id="face-id-flow-panel" className="grid gap-4 lg:grid-cols-[1fr_320px]">
+          <div>
+            <div className="grid gap-3 md:grid-cols-3">
+              {[
+                ["Colaboradores", String(localEmployees.length)],
+                ["Face ID pronto", String(faceReadyCount)],
+                ["Pendentes", String(facePendingCount)],
+              ].map(([label, value]) => (
+                <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
+                  <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
+                  <p className="mt-1 text-2xl font-semibold text-[#101923]">{value}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 h-3 overflow-hidden rounded-full bg-[#e9eef3]">
+              <div className="h-full rounded-full bg-[#18594c]" style={{ width: `${faceProgress}%` }} />
+            </div>
+            <p className="mt-2 text-xs font-semibold text-[#667085]">{faceProgress}% concluido</p>
+            <ActionRow>
+              <button className="primary-button" onClick={() => startFaceRegistration()} type="button">Iniciar proximo pendente</button>
+              {selectedEmployee && (
+                <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee)} type="button">Capturar selecionado</button>
+              )}
+            </ActionRow>
+          </div>
+          <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3">
+            <p className="text-sm font-semibold text-[#26323f]">Proximos pendentes</p>
+            <div className="mt-3 grid max-h-64 gap-2 overflow-auto">
+              {facePendingEmployees.slice(0, 8).map((employee) => (
+                <button
+                  className="rounded-md border border-[#d9e0e7] bg-white px-3 py-2 text-left text-sm font-semibold text-[#26323f] hover:border-[#18594c] hover:text-[#18594c]"
+                  key={employee.employeeId}
+                  onClick={() => startFaceRegistration(employee)}
+                  type="button"
+                >
+                  {employee.name}
+                </button>
+              ))}
+              {!facePendingEmployees.length && (
+                <p className="rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-3 text-sm font-semibold text-[#24594d]">
+                  Todos os colaboradores estao com Face ID cadastrado.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+        {showFaceCamera && selectedEmployee && (
+          <div className="mt-5 grid gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white lg:grid-cols-[minmax(0,1fr)_280px]">
+            <FaceCamera
+              compact
+              employee={{
+                employeeId: selectedEmployee!.employeeId,
+                name: selectedEmployee!.name,
+                punchMode: selectedEmployee!.punchMode || "automatic",
+                schedule: selectedEmployee!.schedule,
+              }}
+              onProfileUpdated={markFaceRegistered}
+              onStatus={onAction}
+            />
+            <div>
+              <p className="text-sm font-semibold text-[#b7d7ce]">Face ID de {selectedEmployee!.name}</p>
+              <p className="mt-2 text-xs leading-5 text-white/65">
+                Faca pelo menos {REQUIRED_FACE_CAPTURES} capturas com boa luz. O sistema avanca para o proximo pendente quando concluir.
+              </p>
+              <p className="mt-3 text-xs font-semibold text-white">
+                Status: {selectedEmployee!.faceIdStatus === "registered" ? "Face ID cadastrado" : "Aguardando captura"}
+              </p>
+            </div>
+          </div>
+        )}
+      </Panel>
+
       {selectedEmployee && (
         <Panel title="Ficha do colaborador" subtitle="Conferencia do cadastro selecionado">
           <div id="employee-detail-panel" className="grid gap-3 md:grid-cols-4">
@@ -2028,7 +2149,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           </div>
           <ActionRow>
             <button className="secondary-button" onClick={() => editEmployee(selectedEmployee)} type="button">Editar cadastro</button>
-            <button className="secondary-button" onClick={openFaceRegistration} type="button">Cadastrar Face ID</button>
+            <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee)} type="button">Cadastrar Face ID</button>
           </ActionRow>
         </Panel>
       )}
