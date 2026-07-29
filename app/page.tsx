@@ -53,9 +53,6 @@ type EmployeeRow = {
   bank: string;
   cbo?: string;
   cpf: string;
-  ctpsNumber?: string;
-  ctpsSeries?: string;
-  ctpsUf?: string;
   department?: string;
   employeeId?: string;
   faceIdStatus?: "not_registered" | "registered";
@@ -88,9 +85,6 @@ type ImportedEmployee = {
   cbo?: string;
   collectiveJourneyId?: string;
   cpf?: string;
-  ctpsNumber?: string;
-  ctpsSeries?: string;
-  ctpsUf?: string;
   department?: string;
   faceIdStatus?: "not_registered" | "registered";
   journeyMode?: "collective" | "individual";
@@ -119,9 +113,6 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
     bank: String(employee.bank || "00:00"),
     cbo: String(employee.cbo || ""),
     cpf: String(employee.cpf || "Nao informado"),
-    ctpsNumber: String(employee.ctpsNumber || ""),
-    ctpsSeries: String(employee.ctpsSeries || ""),
-    ctpsUf: String(employee.ctpsUf || "SP"),
     department: String(employee.department || "Geral"),
     employeeId: String(employee.employeeId || employee.id || fallbackId),
     faceIdStatus: (employee.faceIdStatus || "not_registered") as LocalEmployee["faceIdStatus"],
@@ -1594,9 +1585,6 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     admissionDate: "",
     cbo: "",
     cpf: "",
-    ctpsNumber: "",
-    ctpsSeries: "",
-    ctpsUf: "SP",
     department: "",
     name: "",
     phone: "",
@@ -1670,9 +1658,6 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             bank: "00:00",
             cbo: employee.cbo || "",
             cpf: employee.cpf || "Nao informado",
-            ctpsNumber: employee.ctpsNumber || "",
-            ctpsSeries: employee.ctpsSeries || "",
-            ctpsUf: employee.ctpsUf || "SP",
             department: employee.department || "Geral",
             employeeId: employee.registration ? `matricula-${onlyDigits(employee.registration)}` : crypto.randomUUID(),
             faceIdStatus: employee.faceIdStatus || "not_registered",
@@ -1754,9 +1739,6 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
       bank: "00:00",
       cbo: employeeForm.cbo || "",
       cpf: employeeForm.cpf || "Não informado",
-      ctpsNumber: employeeForm.ctpsNumber || "",
-      ctpsSeries: employeeForm.ctpsSeries || "",
-      ctpsUf: employeeForm.ctpsUf || "SP",
       department: employeeForm.department || "Geral",
       employeeId: crypto.randomUUID(),
       faceIdStatus: "not_registered",
@@ -1841,20 +1823,6 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             </select>
           </Field>
           <Field label="CBO"><input className="input" onChange={(event) => updateEmployeeForm("cbo", event.target.value.replace(/[^\d-]/g, "").slice(0, 7))} placeholder="0000-00" value={employeeForm.cbo} /></Field>
-          <Field label="N. carteira trabalho"><input className="input" onChange={(event) => updateEmployeeForm("ctpsNumber", event.target.value.replace(/\D/g, "").slice(0, 12))} placeholder="0000000" value={employeeForm.ctpsNumber} /></Field>
-          <Field label="Serie CTPS"><input className="input" onChange={(event) => updateEmployeeForm("ctpsSeries", event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="0000" value={employeeForm.ctpsSeries} /></Field>
-          <Field label="UF CTPS">
-            <select className="input" onChange={(event) => updateEmployeeForm("ctpsUf", event.target.value)} value={employeeForm.ctpsUf}>
-              <option>SP</option>
-              <option>MG</option>
-              <option>RJ</option>
-              <option>PR</option>
-              <option>SC</option>
-              <option>RS</option>
-              <option>GO</option>
-              <option>BA</option>
-            </select>
-          </Field>
           <Field label="Tolerancia"><input className="input" placeholder="10 min" /></Field>
         </div>
 
