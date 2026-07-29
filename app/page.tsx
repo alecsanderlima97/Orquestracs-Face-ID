@@ -19,11 +19,14 @@ import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/se
 import {
   acceptTenantInvite,
   createTenantInvite,
+  getTenantSaasConfig,
   getUserTenantAccess,
   isPlatformOwnerEmail,
   listTenantInvites,
+  saveTenantSaasConfig,
   type TenantAccess,
   type TenantInvite,
+  type TenantSaasConfig,
 } from "@/lib/services/tenant-access";
 
 type Section =
@@ -524,6 +527,7 @@ export default function Home() {
   const [currentDateTime, setCurrentDateTime] = useState("");
   const [companyProfile, setCompanyProfile] = useState<MainCompanyProfile | null>(null);
   const [inviteCode, setInviteCode] = useState("");
+  const [saasConfig, setSaasConfig] = useState<TenantSaasConfig | null>(null);
   const [tenantInvites, setTenantInvites] = useState<TenantInvite[]>([]);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -543,8 +547,12 @@ export default function Home() {
       const access = await getUserTenantAccess(currentUser);
       setAppAccess(access);
       if (access?.role === "developer") {
-        const invites = await listTenantInvites(access.tenantId);
+        const [invites, config] = await Promise.all([
+          listTenantInvites(access.tenantId),
+          getTenantSaasConfig(access.tenantId),
+        ]);
         setTenantInvites(invites);
+        setSaasConfig(config);
       }
     } finally {
       setAccessLoading(false);
@@ -736,6 +744,33 @@ export default function Home() {
       });
       setTenantInvites((items) => [invite, ...items]);
       setNotice(`Convite criado: ${invite.code}. Envie esse codigo para o cliente.`);
+      return;
+    }
+
+    if (action === "Salvar configuracao Admin SaaS") {
+      const tenantId = appAccess?.tenantId || "main";
+      const config = {
+        aiCredits: {
+          balance: Number(onlyDigits(fields["Creditos disponiveis"] || fields["Creditos mensais"] || "150")) || 150,
+          included: Number(onlyDigits(fields["Creditos mensais"] || "150")) || 150,
+          status: fields["Status IA"] === "Bloqueado" ? "Bloqueado" as const : "Ativo" as const,
+          used: Number(onlyDigits(fields["Creditos usados"] || "0")) || 0,
+        },
+        billing: {
+          amount: fields.Mensalidade || "R$ 0,00",
+          dueDate: fields.Vencimento || "",
+          graceDays: Number(onlyDigits(fields["Bloqueio apos"] || "5")) || 5,
+          status: (fields["Status pagamento"] || "Teste") as TenantSaasConfig["billing"]["status"],
+        },
+        employeeLimit: Number(onlyDigits(fields["Limite funcionarios"] || "25")) || 25,
+        name: fields.Cliente || String(companyProfile?.tradeName || companyProfile?.legalName || "Cliente Face ID"),
+        plan: (fields.Plano || "Essencial") as TenantSaasConfig["plan"],
+        status: (fields["Status cliente"] || "Teste") as TenantSaasConfig["status"],
+      };
+
+      await saveTenantSaasConfig(tenantId, config);
+      setSaasConfig({ ...config, tenantId });
+      setNotice("Configuracao SaaS salva em tenants/main.");
       return;
     }
 
@@ -1131,7 +1166,9 @@ export default function Home() {
           {active === "Fechamento mensal" && <MonthlyClosingScreen onAction={demoAction} />}
           {active === "Relatorios" && <ReportsScreen onAction={demoAction} />}
           {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
-          {active === "Admin" && <AdminScreen invites={tenantInvites} onAction={demoAction} />}
+          {active === "Admin" && (
+            <AdminScreen config={saasConfig} invites={tenantInvites} onAction={demoAction} />
+          )}
         </section>
       </div>
 
@@ -2345,22 +2382,33 @@ function AuditScreen({ onAction }: { onAction: (action: string) => void }) {
 }
 
 function AdminScreen({
+  config,
   invites,
   onAction,
 }: {
+  config: TenantSaasConfig | null;
   invites: TenantInvite[];
   onAction: (action: string) => void;
 }) {
-  const saasClients = [
-    ["Orquestracs Face ID", "CNPJ principal", "Ativo", "Essencial", "25 colaboradores", "150 creditos IA"],
-    ["Novo cliente", "Aguardando convite", "Implantacao", "A definir", "0 colaboradores", "0 creditos IA"],
-  ];
+  const effectiveConfig: TenantSaasConfig = config || {
+    aiCredits: { balance: 150, included: 150, status: "Ativo", used: 0 },
+    billing: { amount: "R$ 0,00", dueDate: "", graceDays: 5, status: "Teste" },
+    employeeLimit: 25,
+    name: "Cliente Face ID",
+    plan: "Essencial",
+    status: "Teste",
+    tenantId: "main",
+  };
+
+  const pendingInvites = invites.filter((invite) => invite.status === "Ativo").length;
+  const remainingCredits = effectiveConfig.aiCredits.balance;
+  const usedCredits = effectiveConfig.aiCredits.used;
 
   const adminMetrics = [
-    ["Clientes", "1", "instalacao ativa"],
-    ["Usuarios", "1", "developer configurado"],
-    ["Convites", "0", "pendentes"],
-    ["IA", "150", "creditos do plano"],
+    ["Clientes", "1", effectiveConfig.status.toLowerCase()],
+    ["Funcionarios", String(effectiveConfig.employeeLimit), "limite contratado"],
+    ["Convites", String(pendingInvites), "ativos"],
+    ["IA", String(remainingCredits), `${usedCredits} creditos usados`],
   ];
 
   const permissionRows = [
@@ -2393,40 +2441,66 @@ function AdminScreen({
               <table className="w-full min-w-[760px] border-collapse text-left text-sm">
                 <thead className="bg-[#f6f8fa] text-xs uppercase text-[#667085]">
                   <tr>
-                    {["Cliente", "CNPJ", "Status", "Plano", "Uso", "IA"].map((head) => (
+                    {["Cliente", "Status", "Plano", "Mensalidade", "Vencimento", "IA"].map((head) => (
                       <th className="px-4 py-3 font-semibold" key={head}>{head}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {saasClients.map((row) => (
-                    <tr className="border-t border-[#e3e8ee]" key={row[0]}>
-                      {row.map((cell, index) => (
-                        <td className={`px-4 py-3 ${index === 0 ? "font-semibold text-[#101923]" : "text-[#667085]"}`} key={`${row[0]}-${cell}`}>
-                          {cell}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
+                  <tr className="border-t border-[#e3e8ee]">
+                    {[
+                      effectiveConfig.name,
+                      effectiveConfig.status,
+                      effectiveConfig.plan,
+                      effectiveConfig.billing.amount,
+                      effectiveConfig.billing.dueDate || "Nao definido",
+                      `${effectiveConfig.aiCredits.balance}/${effectiveConfig.aiCredits.included}`,
+                    ].map((cell, index) => (
+                      <td
+                        className={`px-4 py-3 ${index === 0 ? "font-semibold text-[#101923]" : "text-[#667085]"}`}
+                        key={`${index}-${cell}`}
+                      >
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
                 </tbody>
               </table>
             </div>
           </div>
 
           <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4">
-            <p className="text-sm font-semibold text-[#26323f]">Acesso developer</p>
+            <p className="text-sm font-semibold text-[#26323f]">Contrato do cliente</p>
             <p className="mt-1 text-xs leading-5 text-[#667085]">
-              A conta interna Orquestracs deve receber permissao developer via Firebase Admin/claims.
+              Controle de plano, cobranca e bloqueio automatico apos a tolerancia.
             </p>
             <div className="mt-4 grid gap-3">
-              <Field label="E-mail Orquestracs">
-                <input className="input" placeholder="orquestracs@gmail.com" type="email" />
+              <Field label="Cliente">
+                <input className="input" defaultValue={effectiveConfig.name} placeholder="Nome do cliente" />
               </Field>
-              <Field label="Nivel">
-                <select className="input">
-                  <option>Developer</option>
-                  <option>Suporte</option>
+              <Field label="Status cliente">
+                <select className="input" defaultValue={effectiveConfig.status}>
+                  <option>Ativo</option>
+                  <option>Teste</option>
+                  <option>Pausado</option>
+                  <option>Bloqueado</option>
                 </select>
+              </Field>
+              <Field label="Plano">
+                <select className="input" defaultValue={effectiveConfig.plan}>
+                  <option>Essencial</option>
+                  <option>Profissional</option>
+                  <option>Enterprise</option>
+                </select>
+              </Field>
+              <Field label="Mensalidade">
+                <input className="input" defaultValue={effectiveConfig.billing.amount} placeholder="R$ 199,00" />
+              </Field>
+              <Field label="Vencimento">
+                <input className="input" defaultValue={effectiveConfig.billing.dueDate} placeholder="10/08/2026" />
+              </Field>
+              <Field label="Bloqueio apos">
+                <input className="input" defaultValue={String(effectiveConfig.billing.graceDays)} inputMode="numeric" placeholder="5" />
               </Field>
             </div>
           </div>
@@ -2506,21 +2580,30 @@ function AdminScreen({
 
         <Panel title="Creditos do agente IA" subtitle="Cota por cliente e por plano">
           <div className="grid gap-3">
-            <Field label="Plano">
-              <select className="input">
-                <option>Essencial</option>
-                <option>Profissional</option>
-                <option>Enterprise</option>
+            <Field label="Creditos mensais">
+              <input className="input" defaultValue={String(effectiveConfig.aiCredits.included)} inputMode="numeric" placeholder="150" />
+            </Field>
+            <Field label="Creditos disponiveis">
+              <input className="input" defaultValue={String(effectiveConfig.aiCredits.balance)} inputMode="numeric" placeholder="150" />
+            </Field>
+            <Field label="Creditos usados">
+              <input className="input" defaultValue={String(effectiveConfig.aiCredits.used)} inputMode="numeric" placeholder="0" />
+            </Field>
+            <Field label="Limite funcionarios">
+              <input className="input" defaultValue={String(effectiveConfig.employeeLimit)} inputMode="numeric" placeholder="25" />
+            </Field>
+            <Field label="Status pagamento">
+              <select className="input" defaultValue={effectiveConfig.billing.status}>
+                <option>Em dia</option>
+                <option>Teste</option>
+                <option>Inadimplente</option>
+                <option>Bloqueado</option>
               </select>
             </Field>
-            <Field label="Creditos mensais">
-              <input className="input" inputMode="numeric" placeholder="150" />
-            </Field>
-            <Field label="Limite de uso">
-              <select className="input">
-                <option>Bloquear ao acabar</option>
-                <option>Avisar e permitir</option>
-                <option>Permitir excedente faturavel</option>
+            <Field label="Status IA">
+              <select className="input" defaultValue={effectiveConfig.aiCredits.status}>
+                <option>Ativo</option>
+                <option>Bloqueado</option>
               </select>
             </Field>
           </div>

@@ -21,6 +21,26 @@ export type TenantInvite = {
   usedBy?: string;
 };
 
+export type TenantSaasConfig = {
+  aiCredits: {
+    balance: number;
+    included: number;
+    status: "Ativo" | "Bloqueado";
+    used: number;
+  };
+  billing: {
+    amount: string;
+    dueDate: string;
+    graceDays: number;
+    status: "Em dia" | "Teste" | "Inadimplente" | "Bloqueado";
+  };
+  employeeLimit: number;
+  name: string;
+  plan: "Essencial" | "Profissional" | "Enterprise";
+  status: "Ativo" | "Teste" | "Pausado" | "Bloqueado";
+  tenantId: string;
+};
+
 export const PLATFORM_OWNER_EMAILS = ["orquestracs@gmail.com"];
 export const DEFAULT_TENANT_ID = "main";
 
@@ -89,6 +109,48 @@ export async function listTenantInvites(tenantId = DEFAULT_TENANT_ID) {
         : invite,
     )
     .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+}
+
+export async function getTenantSaasConfig(tenantId = DEFAULT_TENANT_ID): Promise<TenantSaasConfig> {
+  const snapshot = await getDoc(doc(db, `tenants/${tenantId}`));
+  const data = snapshot.data() || {};
+  const aiCredits = data.aiCredits || {};
+  const billing = data.billing || {};
+
+  return {
+    aiCredits: {
+      balance: Number(aiCredits.balance || 150),
+      included: Number(aiCredits.included || 150),
+      status: (aiCredits.status || "Ativo") as TenantSaasConfig["aiCredits"]["status"],
+      used: Number(aiCredits.used || 0),
+    },
+    billing: {
+      amount: String(billing.amount || "R$ 0,00"),
+      dueDate: String(billing.dueDate || ""),
+      graceDays: Number(billing.graceDays || 5),
+      status: (billing.status || "Teste") as TenantSaasConfig["billing"]["status"],
+    },
+    employeeLimit: Number(data.employeeLimit || 25),
+    name: String(data.name || "Cliente Face ID"),
+    plan: (data.plan || "Essencial") as TenantSaasConfig["plan"],
+    status: (data.status || "Teste") as TenantSaasConfig["status"],
+    tenantId,
+  };
+}
+
+export async function saveTenantSaasConfig(
+  tenantId = DEFAULT_TENANT_ID,
+  config: Omit<TenantSaasConfig, "tenantId">,
+) {
+  await setDoc(
+    doc(db, `tenants/${tenantId}`),
+    {
+      ...config,
+      tenantId,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 export async function acceptTenantInvite(code: string, user: User) {
