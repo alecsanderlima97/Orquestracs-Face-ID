@@ -911,60 +911,36 @@ export default function Home() {
         </aside>
 
         <section className="grid gap-5">
-          <header className="rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
-            <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2d6c5d]">
+          <header className="rounded-lg border border-[#d9e0e7] bg-white px-5 py-4 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
                   Orquestracs Face ID
                 </p>
-                <h1 className="mt-2 max-w-3xl text-2xl font-semibold text-[#101923] sm:text-3xl">
+                <h1 className="mt-1 text-2xl font-semibold text-[#101923]">
                   {title}
                 </h1>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-[#667085]">
-                  Ponto inteligente para empresas que precisam de seguranca,
-                  prova e conformidade.
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-[#667085]">
+                  Ponto inteligente com reconhecimento facial, auditoria e fechamento mensal.
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-                {isDeveloperUser && (
-                  <button
-                    className="h-10 rounded-md border border-[#18594c] bg-[#edf5f2] px-4 text-sm font-semibold text-[#18594c]"
-                    onClick={() => go("Admin")}
-                    type="button"
-                  >
-                    Admin
-                  </button>
-                )}
+              <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                 <div className="rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-3 py-2 text-right">
                   <p className="text-xs font-semibold uppercase text-[#667085]">Data e hora</p>
                   <p className="text-sm font-bold text-[#101923]">{currentDateTime}</p>
                 </div>
                 <button
-                  className="h-10 rounded-md border border-[#cbd5df] bg-white px-4 text-sm font-semibold text-[#26323f]"
+                  className="secondary-button"
                   onClick={handleLogout}
                   type="button"
                 >
                   Sair
                 </button>
-                <button
-                  className="h-10 rounded-md bg-[#18594c] px-4 text-sm font-semibold text-white shadow-sm"
-                  onClick={() => go("Sala de ponto")}
-                  type="button"
-                >
-                  Nova batida
-                </button>
-                <button
-                  className="h-10 rounded-md border border-[#cbd5df] bg-white px-4 text-sm font-semibold text-[#26323f]"
-                  onClick={() => go("Relatorios")}
-                  type="button"
-                >
-                  Exportar relatorio
-                </button>
               </div>
             </div>
 
-            <div className="mt-5 rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-4 py-3 text-sm text-[#52616f]">
+            <div className="mt-4 rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-4 py-3 text-sm text-[#52616f]">
               {notice}
             </div>
           </header>
