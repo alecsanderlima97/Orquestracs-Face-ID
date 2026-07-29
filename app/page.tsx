@@ -45,48 +45,26 @@ type Section =
 
 type MaskType = "name" | "cpf" | "cnpj" | "phone" | "time" | "pin" | "date" | "cep";
 
-const employees = [
-  {
-    name: "Elivelton Aparecido",
-    cpf: "471.073.068-71",
-    role: "Instalador de som",
-    shift: "08h as 18h",
-    status: "Em jornada",
-    bank: "+02:07",
-    lastPunch: "15:07 - retorno",
-  },
-  {
-    name: "Fatima Luana",
-    cpf: "542.203.118-07",
-    role: "Auxiliar administrativo",
-    shift: "08h as 18h",
-    status: "Intervalo",
-    bank: "+04:59",
-    lastPunch: "12:03 - saida",
-  },
-  {
-    name: "Gideao do Amaral",
-    cpf: "570.853.648-90",
-    role: "Vendedor",
-    shift: "09h as 19h",
-    status: "Pendente",
-    bank: "+04:17",
-    lastPunch: "Sem batida hoje",
-  },
-  {
-    name: "Julia Roberta",
-    cpf: "000.000.000-00",
-    role: "Movimentador financeiro",
-    shift: "09h as 19h",
-    status: "Ajuste RH",
-    bank: "-01:10",
-    lastPunch: "Marcacao incluida",
-  },
-];
+const employees: EmployeeRow[] = [];
 
-type EmployeeRow = (typeof employees)[number] & {
+type EmployeeRow = {
+  admissionDate?: string;
+  bank: string;
+  cbo?: string;
+  cpf: string;
+  ctpsNumber?: string;
+  ctpsSeries?: string;
+  ctpsUf?: string;
+  department?: string;
   employeeId?: string;
   faceIdStatus?: "not_registered" | "registered";
+  lastPunch: string;
+  name: string;
+  phone?: string;
+  registration?: string;
+  role: string;
+  shift: string;
+  status: string;
 };
 
 type LocalEmployee = EmployeeRow & {
@@ -103,7 +81,26 @@ type LocalEmployee = EmployeeRow & {
   };
 };
 
-const LOCAL_EMPLOYEES_KEY = "orquestracs-face-id-local-employees";
+type ImportedEmployee = {
+  active?: boolean;
+  admissionDate?: string;
+  cbo?: string;
+  collectiveJourneyId?: string;
+  cpf?: string;
+  ctpsNumber?: string;
+  ctpsSeries?: string;
+  ctpsUf?: string;
+  department?: string;
+  faceIdStatus?: "not_registered" | "registered";
+  journeyMode?: "collective" | "individual";
+  name: string;
+  phone?: string;
+  pin?: string;
+  registration?: string;
+  role?: string;
+};
+
+const LOCAL_EMPLOYEES_KEY = "orquestracs-face-id-local-employees-v2";
 
 function getLocalEmployees() {
   try {
@@ -113,14 +110,7 @@ function getLocalEmployees() {
   }
 }
 
-const journeyRows = [
-  ["01/06/26", "Seg", "08:00", "13:03", "15:07", "18:00", "07:56", "00:00", "Normal"],
-  ["02/06/26", "Ter", "--", "11:30", "13:00", "17:15", "08:45", "00:00", "Esquec. entrada"],
-  ["04/06/26", "Qui", "--", "--", "13:00", "17:15", "04:15", "1 falta", "Falta manha"],
-  ["10/06/26", "Qua", "07:00", "11:30", "--", "--", "04:30", "1 falta", "Falta tarde"],
-  ["15/06/26", "Seg", "--", "--", "--", "--", "00:00", "2 faltas", "Falta integral"],
-  ["19/06/26", "Sex", "07:00G", "11:30G", "13:00G", "17:15G", "08:45", "Externo", "Gestor"],
-];
+const journeyRows: string[][] = [];
 
 const navItems: Section[] = [
   "Painel",
@@ -151,18 +141,13 @@ const auditLogs = [
 ];
 
 const metrics = [
-  ["Colaboradores", "10", "ativos neste mes"],
-  ["Horas previstas", "200:00", "48 horas semanais"],
-  ["Horas trabalhadas", "185:24", "total consolidado"],
-  ["Saldo do banco", "+02:07", "periodo 01/06 a 30/06"],
+  ["Colaboradores", "0", "cadastre a equipe"],
+  ["Horas previstas", "00:00", "sem periodo fechado"],
+  ["Horas trabalhadas", "00:00", "sem batidas registradas"],
+  ["Saldo do banco", "00:00", "sem calculo mensal"],
 ];
 
-const monthlyClosingRows = [
-  ["Elivelton Aparecido", "471.073.068-71", "Instalador de som", "26", "1", "0", "00:45", "02:07", "Conferir esquecimento"],
-  ["Fatima Luana", "542.203.118-07", "Auxiliar administrativo", "27", "0", "1", "00:22", "04:59", "OK"],
-  ["Gideao do Amaral", "570.853.648-90", "Vendedor", "25", "1", "1", "01:10", "04:17", "Trabalho externo"],
-  ["Julia Roberta", "000.000.000-00", "Movimentador financeiro", "26", "0", "0", "00:00", "-01:10", "Ajuste RH"],
-];
+const monthlyClosingRows: string[][] = [];
 
 const initialShifts = [
   {
@@ -533,7 +518,7 @@ export default function Home() {
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginMessage, setLoginMessage] = useState("");
-  const [notice, setNotice] = useState("Modo demonstrativo: nenhum dado sera enviado ao Firebase.");
+  const [notice, setNotice] = useState("Sistema pronto. Cadastre empresa, usuarios e colaboradores para iniciar.");
   const [pin, setPin] = useState("");
   const [user, setUser] = useState<User | null>(null);
 
@@ -690,7 +675,7 @@ export default function Home() {
 
   function go(section: Section) {
     setActive(section);
-    setNotice(`Tela "${section}" aberta em modo demonstrativo.`);
+    setNotice(`Tela "${section}" aberta.`);
   }
 
   async function demoAction(action: string) {
@@ -787,7 +772,7 @@ export default function Home() {
         JSON.stringify(
           {
             createdAt: new Date().toISOString(),
-            mode: "local-demo",
+            mode: "local-backup",
             records: getLocalRecords(),
             system: "Orquestracs Face ID",
           },
@@ -803,9 +788,9 @@ export default function Home() {
     if (action === "Geracao de PDF") {
       downloadTextFile(
         `relatorio-jornada-${new Date().toISOString().slice(0, 10)}.txt`,
-        `Orquestracs Face ID\nRelatorio de jornada demonstrativo\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\n${JSON.stringify(fields, null, 2)}`,
+        `Orquestracs Face ID\nRelatorio de jornada\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\n${JSON.stringify(fields, null, 2)}`,
       );
-      setNotice("Relatorio demonstrativo gerado localmente. O PDF real sera conectado depois.");
+      setNotice("Relatorio gerado localmente com os dados disponiveis.");
       return;
     }
 
@@ -818,7 +803,7 @@ export default function Home() {
             .join("\n"),
         "text/csv",
       );
-      setNotice("Exportacao fiscal demonstrativa gerada em CSV.");
+      setNotice("Exportacao fiscal gerada em CSV.");
       return;
     }
 
@@ -844,25 +829,25 @@ export default function Home() {
         csv,
         "text/csv",
       );
-      setNotice("Folha mensal para contador gerada em CSV demonstrativo.");
+      setNotice("Folha mensal para contador gerada em CSV.");
       return;
     }
 
     if (action === "Ficha individual de ciencia") {
       downloadTextFile(
         `ficha-ciencia-funcionario-${new Date().toISOString().slice(0, 10)}.txt`,
-        `Orquestracs Face ID\nFicha individual de ciencia mensal\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\nFuncionario: Elivelton Aparecido\nPeriodo: 01/06/2026 a 30/06/2026\nFaltas manha: 1\nFaltas tarde: 0\nAtrasos: 00:45\nBanco de horas: 02:07\n\nAssinatura do funcionario: ______________________________\nAssinatura do responsavel: ______________________________`,
+        `Orquestracs Face ID\nFicha individual de ciencia mensal\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\nFuncionario: preencher apos selecionar colaborador\nPeriodo: preencher periodo\nFaltas manha: 0\nFaltas tarde: 0\nAtrasos: 00:00\nBanco de horas: 00:00\n\nAssinatura do funcionario: ______________________________\nAssinatura do responsavel: ______________________________`,
       );
-      setNotice("Ficha individual de ciencia gerada em arquivo demonstrativo.");
+      setNotice("Ficha individual de ciencia gerada.");
       return;
     }
 
     if (action === "Termo LGPD" || action === "Relatorio de impacto") {
       downloadTextFile(
         `${action.toLowerCase().replace(/\s+/g, "-")}.txt`,
-        `${action}\nOrquestracs Face ID\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\nDocumento demonstrativo para revisao juridica.`,
+        `${action}\nOrquestracs Face ID\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\nDocumento gerado com os dados disponiveis no sistema.`,
       );
-      setNotice(`${action} gerado localmente em formato demonstrativo.`);
+      setNotice(`${action} gerado localmente.`);
       return;
     }
 
@@ -1534,10 +1519,18 @@ function CompaniesScreen({
 function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   const [journeyMode, setJourneyMode] = useState<"coletiva" | "individual">("coletiva");
   const [employeeForm, setEmployeeForm] = useState({
+    admissionDate: "",
+    cbo: "",
     cpf: "",
+    ctpsNumber: "",
+    ctpsSeries: "",
+    ctpsUf: "SP",
+    department: "",
     name: "",
+    phone: "",
     pin: "",
     punchMode: "automatic" as "automatic" | "manual",
+    registration: "",
     role: "",
   });
   const [localEmployees, setLocalEmployees] = useState<LocalEmployee[]>([]);
@@ -1561,6 +1554,66 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
 
   function updateEmployeeForm(field: keyof typeof employeeForm, value: string) {
     setEmployeeForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function importEmployeesFromJson(file?: File) {
+    if (!file) return;
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || "{}")) as
+          | ImportedEmployee[]
+          | { employees?: ImportedEmployee[] };
+        const imported = Array.isArray(parsed) ? parsed : parsed.employees || [];
+        const mappedEmployees: LocalEmployee[] = imported
+          .filter((employee) => employee.name?.trim())
+          .map((employee) => ({
+            admissionDate: employee.admissionDate || "Nao informado",
+            bank: "00:00",
+            cbo: employee.cbo || "",
+            cpf: employee.cpf || "Nao informado",
+            ctpsNumber: employee.ctpsNumber || "",
+            ctpsSeries: employee.ctpsSeries || "",
+            ctpsUf: employee.ctpsUf || "SP",
+            department: employee.department || "Geral",
+            employeeId: crypto.randomUUID(),
+            faceIdStatus: employee.faceIdStatus || "not_registered",
+            lastPunch: "Sem batida hoje",
+            name: employee.name.trim(),
+            phone: employee.phone || "",
+            pin: employee.pin || "",
+            punchMode: "automatic",
+            registration: employee.registration || "",
+            role: employee.role || "Nao informado",
+            schedule: {
+              breakEnd: initialShifts[0].breakEnd,
+              breakStart: initialShifts[0].breakStart,
+              end: initialShifts[0].end,
+              start: initialShifts[0].start,
+              toleranceMinutes: Number.parseInt(initialShifts[0].tolerance, 10) || 10,
+            },
+            shift: "Jornada da empresa",
+            status: "Importado - revisar",
+          }));
+
+        if (!mappedEmployees.length) {
+          onAction("Nenhum colaborador valido encontrado no arquivo.");
+          return;
+        }
+
+        const updated = [...mappedEmployees, ...localEmployees];
+        window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
+        setLocalEmployees(updated);
+        setSelectedEmployee(mappedEmployees[0]);
+        onAction(`${mappedEmployees.length} colaboradores importados para revisao.`);
+      } catch {
+        onAction("Nao foi possivel ler o arquivo de colaboradores.");
+      }
+    };
+
+    reader.readAsText(file);
   }
 
   function saveEmployee() {
@@ -1587,14 +1640,22 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             toleranceMinutes: Number.parseInt(companyShift.tolerance, 10) || 10,
           };
     const employee: LocalEmployee = {
+      admissionDate: employeeForm.admissionDate || "Nao informado",
       bank: "00:00",
+      cbo: employeeForm.cbo || "",
       cpf: employeeForm.cpf || "Não informado",
+      ctpsNumber: employeeForm.ctpsNumber || "",
+      ctpsSeries: employeeForm.ctpsSeries || "",
+      ctpsUf: employeeForm.ctpsUf || "SP",
+      department: employeeForm.department || "Geral",
       employeeId: crypto.randomUUID(),
       faceIdStatus: "not_registered",
       lastPunch: "Sem batida hoje",
       name: employeeForm.name.trim(),
+      phone: employeeForm.phone || "",
       pin: employeeForm.pin,
       punchMode: employeeForm.punchMode,
+      registration: employeeForm.registration || "",
       role: employeeForm.role || "Não informado",
       schedule,
       shift: "Jornada da empresa",
@@ -1640,14 +1701,17 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           <MaskedField label="Nome" mask="name" onChange={(value) => updateEmployeeForm("name", value)} placeholder="Primeira Letra Maiuscula" value={employeeForm.name} />
           <MaskedField label="CPF" mask="cpf" onChange={(value) => updateEmployeeForm("cpf", value)} placeholder="000.000.000-00" value={employeeForm.cpf} />
           <MaskedField label="PIN" mask="pin" onChange={(value) => updateEmployeeForm("pin", value)} placeholder="0000" value={employeeForm.pin} />
-          <MaskedField label="Celular" mask="phone" placeholder="(00) 00000-0000" />
+          <MaskedField label="Celular" mask="phone" onChange={(value) => updateEmployeeForm("phone", value)} placeholder="(00) 00000-0000" value={employeeForm.phone} />
         </div>
 
         <p className="mt-5 text-sm font-semibold text-[#26323f]">Dados trabalhistas</p>
         <div className="mt-3 grid gap-3 md:grid-cols-4">
-          <MaskedField label="Data de admissao" mask="date" placeholder="00/00/0000" />
+          <Field label="Matricula">
+            <input className="input" onChange={(event) => updateEmployeeForm("registration", event.target.value.replace(/\D/g, "").slice(0, 8))} placeholder="00001" value={employeeForm.registration} />
+          </Field>
+          <MaskedField label="Data de admissao" mask="date" onChange={(value) => updateEmployeeForm("admissionDate", value)} placeholder="00/00/0000" value={employeeForm.admissionDate} />
           <MaskedField label="Cargo" mask="name" onChange={(value) => updateEmployeeForm("role", value)} placeholder="Vendedor" value={employeeForm.role} />
-          <MaskedField label="Departamento" mask="name" placeholder="Loja" />
+          <MaskedField label="Departamento" mask="name" onChange={(value) => updateEmployeeForm("department", value)} placeholder="Geral" value={employeeForm.department} />
           <Field label="Modo da batida">
             <select
               className="input"
@@ -1660,11 +1724,11 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
               <option value="manual">Manual - horário irregular</option>
             </select>
           </Field>
-          <Field label="CBO"><input className="input" placeholder="0000-00" /></Field>
-          <Field label="N. carteira trabalho"><input className="input" placeholder="0000000" /></Field>
-          <Field label="Serie CTPS"><input className="input" placeholder="0000" /></Field>
+          <Field label="CBO"><input className="input" onChange={(event) => updateEmployeeForm("cbo", event.target.value.replace(/[^\d-]/g, "").slice(0, 7))} placeholder="0000-00" value={employeeForm.cbo} /></Field>
+          <Field label="N. carteira trabalho"><input className="input" onChange={(event) => updateEmployeeForm("ctpsNumber", event.target.value.replace(/\D/g, "").slice(0, 12))} placeholder="0000000" value={employeeForm.ctpsNumber} /></Field>
+          <Field label="Serie CTPS"><input className="input" onChange={(event) => updateEmployeeForm("ctpsSeries", event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="0000" value={employeeForm.ctpsSeries} /></Field>
           <Field label="UF CTPS">
-            <select className="input">
+            <select className="input" onChange={(event) => updateEmployeeForm("ctpsUf", event.target.value)} value={employeeForm.ctpsUf}>
               <option>SP</option>
               <option>MG</option>
               <option>RJ</option>
@@ -1747,6 +1811,15 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
         <ActionRow>
           <button className="primary-button" onClick={saveEmployee} type="button">Cadastrar colaborador</button>
           <button className="secondary-button" onClick={openFaceRegistration} type="button">Cadastrar Face ID</button>
+          <label className="secondary-button cursor-pointer">
+            Importar holerite JSON
+            <input
+              accept="application/json"
+              className="hidden"
+              onChange={(event) => importEmployeesFromJson(event.target.files?.[0])}
+              type="file"
+            />
+          </label>
         </ActionRow>
         {showFaceCamera && selectedEmployee && (
           <div className="mt-5 grid gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white lg:grid-cols-[minmax(0,1fr)_280px]">
@@ -1774,7 +1847,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           </div>
         )}
       </Panel>
-      <EmployeesTable employeesList={[...localEmployees, ...employees]} onAction={onAction} />
+      <EmployeesTable employeesList={localEmployees} onAction={onAction} />
     </>
   );
 }
@@ -1904,7 +1977,11 @@ function PunchesScreen({
       <PunchCard onRegister={onRegister} pin={pin} setPin={setPin} />
       <Panel title="Ajuste de batida" subtitle="A batida original nao e alterada; o ajuste cria um novo registro">
         <div className="grid gap-3 md:grid-cols-3">
-          <Field label="Colaborador"><select className="input">{employees.map((employee) => <option key={employee.name}>{employee.name}</option>)}</select></Field>
+          <Field label="Colaborador">
+            <select className="input">
+              <option>Nenhum colaborador cadastrado</option>
+            </select>
+          </Field>
           <Field label="Data"><input className="input" placeholder="19/06/2026" /></Field>
           <MaskedField label="Horario" mask="time" placeholder="08:00" />
           <Field label="Tipo"><select className="input"><option>Entrada</option><option>Saida intervalo</option><option>Retorno</option><option>Saida</option></select></Field>
@@ -2269,11 +2346,11 @@ function MonthlyClosingScreen({ onAction }: { onAction: (action: string) => void
 
         <div className="mt-5 grid gap-3 md:grid-cols-5">
           {[
-            ["Funcionarios", "25"],
-            ["Faltas manha", "2"],
-            ["Faltas tarde", "2"],
-            ["Atrasos", "02:17"],
-            ["Ajustes", "4"],
+            ["Funcionarios", "0"],
+            ["Faltas manha", "0"],
+            ["Faltas tarde", "0"],
+            ["Atrasos", "00:00"],
+            ["Ajustes", "0"],
           ].map(([label, value]) => (
             <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
               <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
@@ -2308,22 +2385,30 @@ function MonthlyClosingScreen({ onAction }: { onAction: (action: string) => void
                   <th className="px-4 py-3 font-semibold" key={head}>{head}</th>
                 ))}
               </tr>
-            </thead>
-            <tbody>
-              {monthlyClosingRows.map((row) => (
-                <tr className="border-b border-[#e3e8ee]" key={`${row[0]}-${row[1]}`}>
-                  {row.map((cell, index) => (
-                    <td
-                      className={`px-4 py-3 ${index === 0 ? "font-semibold text-[#101923]" : "text-[#667085]"}`}
-                      key={`${row[0]}-${cell}-${index}`}
-                    >
-                      {cell}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          </thead>
+          <tbody>
+            {monthlyClosingRows.length === 0 ? (
+              <tr>
+                <td className="px-4 py-8 text-center text-[#667085]" colSpan={9}>
+                  Nenhum fechamento mensal gerado ainda.
+                </td>
+              </tr>
+            ) : (
+              monthlyClosingRows.map((row) => (
+                  <tr className="border-b border-[#e3e8ee]" key={`${row[0]}-${row[1]}`}>
+                    {row.map((cell, index) => (
+                      <td
+                        className={`px-4 py-3 ${index === 0 ? "font-semibold text-[#101923]" : "text-[#667085]"}`}
+                        key={`${row[0]}-${cell}-${index}`}
+                      >
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))
+            )}
+          </tbody>
+        </table>
         </div>
       </Panel>
 
@@ -2358,7 +2443,11 @@ function ReportsScreen({ onAction }: { onAction: (action: string) => void }) {
     <>
       <Panel title="Gerar relatorio" subtitle="Espelho de ponto e jornada detalhada">
         <div className="grid gap-3 md:grid-cols-4">
-          <Field label="Colaborador"><select className="input">{employees.map((employee) => <option key={employee.name}>{employee.name}</option>)}</select></Field>
+          <Field label="Colaborador">
+            <select className="input">
+              <option>Nenhum colaborador cadastrado</option>
+            </select>
+          </Field>
           <Field label="Inicio"><input className="input" placeholder="01/06/2026" /></Field>
           <Field label="Fim"><input className="input" placeholder="30/06/2026" /></Field>
           <Field label="Tipo"><select className="input"><option>Jornada detalhada</option><option>Espelho de ponto</option><option>Banco de horas</option></select></Field>
@@ -2897,12 +2986,14 @@ function EmployeesTable({
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+        <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
           <thead className="bg-[#f8fafb] text-xs uppercase text-[#667085]">
             <tr>
               <th className="px-5 py-3 font-semibold">Funcionario</th>
               <th className="px-5 py-3 font-semibold">CPF</th>
               <th className="px-5 py-3 font-semibold">Cargo</th>
+              <th className="px-5 py-3 font-semibold">Admissao</th>
+              <th className="px-5 py-3 font-semibold">CBO</th>
               <th className="px-5 py-3 font-semibold">Turno</th>
               <th className="px-5 py-3 font-semibold">Banco</th>
               <th className="px-5 py-3 font-semibold">Status</th>
@@ -2910,26 +3001,36 @@ function EmployeesTable({
             </tr>
           </thead>
           <tbody>
-            {employeesList.map((employee) => (
-              <tr className="border-t border-[#e3e8ee]" key={employee.employeeId || employee.name}>
-                <td className="px-5 py-4 font-semibold text-[#101923]">{employee.name}</td>
-                <td className="px-5 py-4 text-[#667085]">{employee.cpf}</td>
-                <td className="px-5 py-4 text-[#667085]">{employee.role}</td>
-                <td className="px-5 py-4 text-[#667085]">{employee.shift}</td>
-                <td className="px-5 py-4 font-semibold text-[#101923]">{employee.bank}</td>
-                <td className="px-5 py-4">
-                  <span className="rounded-full border border-[#d8e1ff] bg-[#f2f5ff] px-3 py-1 text-xs font-semibold text-[#3446a3]">
-                    {employee.faceIdStatus === "registered" ? "Face ID cadastrado" : employee.status}
-                  </span>
-                </td>
-                <td className="px-5 py-4">
-                  <div className="flex gap-2">
-                    <button className="mini-button" onClick={() => onAction(`Editar ${employee.name}`)} type="button">Editar</button>
-                    <button className="mini-button" onClick={() => onAction(`Ver ${employee.name}`)} type="button">Ver</button>
-                  </div>
+            {employeesList.length === 0 ? (
+              <tr>
+                <td className="px-5 py-8 text-center text-[#667085]" colSpan={9}>
+                  Nenhum colaborador cadastrado ainda.
                 </td>
               </tr>
-            ))}
+            ) : (
+              employeesList.map((employee) => (
+                <tr className="border-t border-[#e3e8ee]" key={employee.employeeId || employee.name}>
+                  <td className="px-5 py-4 font-semibold text-[#101923]">{employee.name}</td>
+                  <td className="px-5 py-4 text-[#667085]">{employee.cpf}</td>
+                  <td className="px-5 py-4 text-[#667085]">{employee.role}</td>
+                  <td className="px-5 py-4 text-[#667085]">{employee.admissionDate || "-"}</td>
+                  <td className="px-5 py-4 text-[#667085]">{employee.cbo || "-"}</td>
+                  <td className="px-5 py-4 text-[#667085]">{employee.shift}</td>
+                  <td className="px-5 py-4 font-semibold text-[#101923]">{employee.bank}</td>
+                  <td className="px-5 py-4">
+                    <span className="rounded-full border border-[#d8e1ff] bg-[#f2f5ff] px-3 py-1 text-xs font-semibold text-[#3446a3]">
+                      {employee.faceIdStatus === "registered" ? "Face ID cadastrado" : employee.status}
+                    </span>
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="flex gap-2">
+                      <button className="mini-button" onClick={() => onAction(`Editar ${employee.name}`)} type="button">Editar</button>
+                      <button className="mini-button" onClick={() => onAction(`Ver ${employee.name}`)} type="button">Ver</button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
@@ -2946,17 +3047,17 @@ function ReportPreview() {
           <h2 className="mt-1 text-xl font-semibold text-[#101923]">Periodo 01/06/2026 - 30/06/2026</h2>
         </div>
         <div className="grid gap-1 text-sm text-[#667085] lg:text-right">
-          <span>Colaborador: Elivelton Aparecido</span>
-          <span>Emitido por: Fabio Cordeiro</span>
+          <span>Colaborador: selecione um colaborador</span>
+          <span>Emitido por: usuario logado</span>
         </div>
       </div>
 
       <div className="grid gap-3 p-5 md:grid-cols-4">
         {[
-          ["Horas previstas", "200:00"],
-          ["Horas abonadas", "16:00"],
-          ["Faltantes", "-07:13"],
-          ["Saldo final", "+02:07"],
+          ["Horas previstas", "00:00"],
+          ["Horas abonadas", "00:00"],
+          ["Faltantes", "00:00"],
+          ["Saldo final", "00:00"],
         ].map(([label, value]) => (
           <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
             <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
@@ -2967,10 +3068,10 @@ function ReportPreview() {
 
       <div className="grid gap-3 px-5 pb-5 md:grid-cols-4">
         {[
-          ["Faltas manha", "1"],
-          ["Faltas tarde", "1"],
-          ["Esquecimentos", "1"],
-          ["Trabalho externo", "1"],
+          ["Faltas manha", "0"],
+          ["Faltas tarde", "0"],
+          ["Esquecimentos", "0"],
+          ["Trabalho externo", "0"],
         ].map(([label, value]) => (
           <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
             <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
@@ -2989,15 +3090,23 @@ function ReportPreview() {
             </tr>
           </thead>
           <tbody>
-            {journeyRows.map((row) => (
-              <tr className="border-b border-[#e3e8ee]" key={`${row[0]}-${row[1]}`}>
-                {row.map((cell, index) => (
-                  <td className={`px-3 py-3 ${index >= 6 ? "font-semibold text-[#26323f]" : "text-[#667085]"}`} key={`${row[0]}-${cell}-${index}`}>
-                    {cell}
-                  </td>
-                ))}
+            {journeyRows.length === 0 ? (
+              <tr>
+                <td className="px-3 py-8 text-center text-[#667085]" colSpan={9}>
+                  Nenhuma jornada registrada para o periodo.
+                </td>
               </tr>
-            ))}
+            ) : (
+              journeyRows.map((row) => (
+                <tr className="border-b border-[#e3e8ee]" key={`${row[0]}-${row[1]}`}>
+                  {row.map((cell, index) => (
+                    <td className={`px-3 py-3 ${index >= 6 ? "font-semibold text-[#26323f]" : "text-[#667085]"}`} key={`${row[0]}-${cell}-${index}`}>
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
