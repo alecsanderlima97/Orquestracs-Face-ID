@@ -133,6 +133,25 @@ type MainCompanyProfile = Record<string, unknown> & {
   tradeName?: string;
 };
 
+const VANMART_INITIAL_COMPANY_PROFILE = {
+  address: {
+    city: "Ribeirao Branco",
+    complement: "",
+    district: "",
+    number: "880",
+    state: "SP",
+    street: "Rua Capitao Elias Pereira",
+    zipCode: "",
+  },
+  cnpj: "44.215.194/0001-18",
+  contactEmail: "",
+  contactName: "",
+  contactPhone: "",
+  legalName: "COMERCIO DE MADEIRAS VANMART LTDA",
+  stateRegistration: "",
+  tradeName: "Vanmart",
+};
+
 const auditLogs = [
   ["Original imutavel", "Batidas bloqueadas contra edicao direta"],
   ["Ajuste rastreado", "Responsavel, motivo e horario obrigatorios"],
@@ -524,7 +543,14 @@ export default function Home() {
 
   async function refreshCompanyProfile() {
     const company = await getMainCompany();
-    setCompanyProfile(company as MainCompanyProfile | null);
+    if (company) {
+      setCompanyProfile(company as MainCompanyProfile);
+      return;
+    }
+
+    await saveMainCompany(VANMART_INITIAL_COMPANY_PROFILE);
+    setCompanyProfile(VANMART_INITIAL_COMPANY_PROFILE as MainCompanyProfile);
+    setNotice("Dados iniciais da empresa salvos no Firebase.");
   }
 
   async function refreshAccess(currentUser: User) {
