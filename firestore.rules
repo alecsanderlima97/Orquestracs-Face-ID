@@ -6,52 +6,101 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function role() {
-      return request.auth.token.role;
+    function isPlatformOwner() {
+      return signedIn() && request.auth.token.email == "orquestracs@gmail.com";
     }
 
-    function companyId() {
-      return request.auth.token.companyId;
+    function belongsToTenant(tenantId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid));
     }
 
-    function isDeveloper() {
-      return signedIn() && role() == "developer";
+    function tenantRole(tenantId) {
+      return get(/databases/$(database)/documents/tenants/$(tenantId)/users/$(request.auth.uid)).data.role;
     }
 
-    function isCompanyMember(targetCompanyId) {
-      return signedIn() && companyId() == targetCompanyId;
+    function canReadTenant(tenantId) {
+      return isPlatformOwner() || belongsToTenant(tenantId);
     }
 
-    function canWriteCompany(targetCompanyId) {
-      return isDeveloper() || (
-        isCompanyMember(targetCompanyId) &&
-        (role() == "owner" || role() == "admin")
-      );
+    function canWriteTenant(tenantId) {
+      return isPlatformOwner()
+        || (belongsToTenant(tenantId) && tenantRole(tenantId) in ["owner", "admin"]);
     }
 
-    function canReadCompany(targetCompanyId) {
-      return isDeveloper() || (
-        isCompanyMember(targetCompanyId) &&
-        (role() == "owner" || role() == "admin" || role() == "reader")
-      );
+    function isTenantOwner(tenantId) {
+      return isPlatformOwner()
+        || (belongsToTenant(tenantId) && tenantRole(tenantId) == "owner");
     }
 
     match /companies/{targetCompanyId} {
-      allow read: if targetCompanyId == "main" && signedIn() || canReadCompany(targetCompanyId);
-      allow create, update: if targetCompanyId == "main" && signedIn() || canWriteCompany(targetCompanyId);
-      allow delete: if isDeveloper();
+      allow read: if targetCompanyId == "main" && signedIn();
+      allow create, update: if targetCompanyId == "main" && signedIn();
+      allow delete: if isPlatformOwner();
 
       match /{document=**} {
-        allow read: if targetCompanyId == "main" && signedIn() || canReadCompany(targetCompanyId);
-        allow create, update: if targetCompanyId == "main" && signedIn() || canWriteCompany(targetCompanyId);
-        allow delete: if isDeveloper();
+        allow read: if targetCompanyId == "main" && signedIn();
+        allow create, update: if targetCompanyId == "main" && signedIn();
+        allow delete: if isPlatformOwner();
       }
     }
 
-    match /invites/{inviteId} {
-      allow read, create, update: if signedIn() &&
-        (role() == "developer" || role() == "owner" || role() == "admin");
-      allow delete: if isDeveloper();
+    match /tenants/{tenantId} {
+      allow read: if canReadTenant(tenantId);
+      allow create, update: if isPlatformOwner() || (signedIn() && request.resource.data.ownerId == request.auth.uid);
+      allow delete: if false;
+
+      match /users/{userId} {
+        allow read: if canReadTenant(tenantId);
+        allow create: if isPlatformOwner()
+          || (
+            signedIn()
+            && request.auth.uid == userId
+            && exists(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode))
+            && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.tenantId == tenantId
+            && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.status == "Ativo"
+            && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.expiresAt > request.time
+          );
+        allow update: if isTenantOwner(tenantId) || (signedIn() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
+        allow delete: if false;
+      }
+
+      match /{document=**} {
+        allow read: if canReadTenant(tenantId);
+        allow write: if canWriteTenant(tenantId);
+      }
+    }
+
+    match /userTenants/{userId}/memberships/{tenantId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create: if isPlatformOwner()
+        || (
+          signedIn()
+          && request.auth.uid == userId
+          && exists(/databases/$(database)/documents/tenants/$(tenantId)/users/$(userId))
+        );
+      allow update, delete: if false;
+    }
+
+    match /invites/{code} {
+      allow read: if signedIn() && (
+        isPlatformOwner()
+        || resource.data.status == "Ativo"
+        || isTenantOwner(resource.data.tenantId)
+      );
+      allow create: if isPlatformOwner() || isTenantOwner(request.resource.data.tenantId);
+      allow update: if signedIn() && (
+        isPlatformOwner()
+        || isTenantOwner(resource.data.tenantId)
+        || (
+          resource.data.status == "Ativo"
+          && request.resource.data.status == "Usado"
+          && request.resource.data.usedBy == request.auth.uid
+          && request.resource.data.tenantId == resource.data.tenantId
+          && request.resource.data.role == resource.data.role
+        )
+      );
+      allow delete: if false;
     }
   }
 }

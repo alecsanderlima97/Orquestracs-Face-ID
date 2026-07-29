@@ -16,6 +16,15 @@ import {
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
+import {
+  acceptTenantInvite,
+  createTenantInvite,
+  getUserTenantAccess,
+  isPlatformOwnerEmail,
+  listTenantInvites,
+  type TenantAccess,
+  type TenantInvite,
+} from "@/lib/services/tenant-access";
 
 type Section =
   | "Painel"
@@ -122,8 +131,6 @@ const navItems: Section[] = [
   "Relatorios",
   "LGPD e auditoria",
 ];
-
-const developerEmails = ["orquestracs@gmail.com"];
 
 type MainCompanyProfile = Record<string, unknown> & {
   cnpj?: string;
@@ -512,8 +519,12 @@ export default function Home() {
   const [active, setActive] = useState<Section>("Painel");
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [accessLoading, setAccessLoading] = useState(true);
+  const [appAccess, setAppAccess] = useState<TenantAccess | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState("");
   const [companyProfile, setCompanyProfile] = useState<MainCompanyProfile | null>(null);
+  const [inviteCode, setInviteCode] = useState("");
+  const [tenantInvites, setTenantInvites] = useState<TenantInvite[]>([]);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginMessage, setLoginMessage] = useState("");
@@ -524,6 +535,20 @@ export default function Home() {
   async function refreshCompanyProfile() {
     const company = await getMainCompany();
     setCompanyProfile(company as MainCompanyProfile | null);
+  }
+
+  async function refreshAccess(currentUser: User) {
+    setAccessLoading(true);
+    try {
+      const access = await getUserTenantAccess(currentUser);
+      setAppAccess(access);
+      if (access?.role === "developer") {
+        const invites = await listTenantInvites(access.tenantId);
+        setTenantInvites(invites);
+      }
+    } finally {
+      setAccessLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -546,7 +571,13 @@ export default function Home() {
     return onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setAuthLoading(false);
-      if (currentUser) void refreshCompanyProfile();
+      if (currentUser) {
+        void refreshCompanyProfile();
+        void refreshAccess(currentUser);
+      } else {
+        setAppAccess(null);
+        setAccessLoading(false);
+      }
     });
   }, []);
 
@@ -616,6 +647,20 @@ export default function Home() {
     await signOut(auth);
   }
 
+  async function handleAcceptInvite() {
+    if (!user) return;
+    setLoginMessage("Validando convite...");
+    try {
+      const access = await acceptTenantInvite(inviteCode, user);
+      setAppAccess(access);
+      setLoginMessage("");
+      setNotice(`Acesso liberado para ${access.companyName}.`);
+    } catch (error) {
+      console.error(error);
+      setLoginMessage("Convite invalido, expirado ou ja utilizado.");
+    }
+  }
+
   const title = useMemo(() => {
     const subtitles: Record<Section, string> = {
       Painel: "Visao geral da operacao",
@@ -675,6 +720,22 @@ export default function Home() {
         console.error(error);
         setNotice("Nao foi possivel salvar no Firebase. Verifique Auth/Regras do Firestore.");
       }
+      return;
+    }
+
+    if (action === "Convite por e-mail") {
+      const roleByLabel: Record<string, "owner" | "admin" | "reader"> = {
+        Administrador: "admin",
+        Leitor: "reader",
+        Proprietario: "owner",
+      };
+      const invite = await createTenantInvite({
+        companyName: fields.Cliente || fields.Empresa || String(companyProfile?.tradeName || companyProfile?.legalName || "Empresa convidada"),
+        role: roleByLabel[fields.Perfil || fields.Permissao || "Proprietario"] || "owner",
+        tenantId: appAccess?.tenantId || "main",
+      });
+      setTenantInvites((items) => [invite, ...items]);
+      setNotice(`Convite criado: ${invite.code}. Envie esse codigo para o cliente.`);
       return;
     }
 
@@ -874,7 +935,54 @@ export default function Home() {
     );
   }
 
-  const isDeveloperUser = developerEmails.includes(user.email?.toLowerCase() || "");
+  if (accessLoading) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#f4f6f8] px-4 text-[#17202a]">
+        <div className="rounded-lg border border-[#d9e0e7] bg-white p-6 shadow-sm">
+          <p className="text-sm font-semibold text-[#26323f]">Carregando permissoes...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!appAccess && !isPlatformOwnerEmail(user.email)) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#f4f6f8] px-4 text-[#17202a]">
+        <section className="w-full max-w-md rounded-lg border border-[#d9e0e7] bg-white p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2d6c5d]">
+            Orquestracs Face ID
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold text-[#101923]">Ativar convite</h1>
+          <p className="mt-2 text-sm leading-6 text-[#667085]">
+            Informe o codigo enviado pela Orquestracs para liberar o acesso da empresa.
+          </p>
+          <div className="mt-6 grid gap-3">
+            <Field label="Codigo do convite">
+              <input
+                className="input uppercase"
+                onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
+                placeholder="FACE1234"
+                value={inviteCode}
+              />
+            </Field>
+            <button className="primary-button" onClick={handleAcceptInvite} type="button">
+              Ativar acesso
+            </button>
+            <button className="secondary-button" onClick={handleLogout} type="button">
+              Sair
+            </button>
+            {loginMessage && (
+              <p className="rounded-md border border-[#efd9a8] bg-[#fff8e9] p-3 text-sm font-semibold text-[#8a5a00]">
+                {loginMessage}
+              </p>
+            )}
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  const isDeveloperUser = appAccess?.role === "developer" || isPlatformOwnerEmail(user.email);
   const visibleNavItems = navItems.filter((item) => item !== "Admin" || isDeveloperUser);
   const companyName =
     companyProfile?.tradeName || companyProfile?.legalName || "Empresa principal";
@@ -1023,7 +1131,7 @@ export default function Home() {
           {active === "Fechamento mensal" && <MonthlyClosingScreen onAction={demoAction} />}
           {active === "Relatorios" && <ReportsScreen onAction={demoAction} />}
           {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
-          {active === "Admin" && <AdminScreen onAction={demoAction} />}
+          {active === "Admin" && <AdminScreen invites={tenantInvites} onAction={demoAction} />}
         </section>
       </div>
 
@@ -2236,7 +2344,13 @@ function AuditScreen({ onAction }: { onAction: (action: string) => void }) {
   );
 }
 
-function AdminScreen({ onAction }: { onAction: (action: string) => void }) {
+function AdminScreen({
+  invites,
+  onAction,
+}: {
+  invites: TenantInvite[];
+  onAction: (action: string) => void;
+}) {
   const saasClients = [
     ["Orquestracs Face ID", "CNPJ principal", "Ativo", "Essencial", "25 colaboradores", "150 creditos IA"],
     ["Novo cliente", "Aguardando convite", "Implantacao", "A definir", "0 colaboradores", "0 creditos IA"],
@@ -2354,12 +2468,40 @@ function AdminScreen({ onAction }: { onAction: (action: string) => void }) {
           </div>
           <ActionRow>
             <button className="primary-button" onClick={() => onAction("Convite por e-mail")} type="button">
-              Enviar convite
+              Gerar codigo
             </button>
             <button className="secondary-button" onClick={() => onAction("Reenviar convite")} type="button">
               Reenviar
             </button>
           </ActionRow>
+          <div className="mt-5 grid gap-2">
+            {invites.length ? (
+              invites.map((invite) => (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] px-3 py-3"
+                  key={invite.code}
+                >
+                  <div>
+                    <strong className="text-sm text-[#101923]">{invite.code}</strong>
+                    <p className="mt-1 text-xs text-[#667085]">
+                      {invite.companyName} - {invite.role} - {invite.status} - validade de 7 dias
+                    </p>
+                  </div>
+                  <button
+                    className="mini-button"
+                    onClick={() => navigator.clipboard.writeText(invite.code)}
+                    type="button"
+                  >
+                    Copiar
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] px-3 py-3 text-sm text-[#667085]">
+                Nenhum convite gerado ainda.
+              </p>
+            )}
+          </div>
         </Panel>
 
         <Panel title="Creditos do agente IA" subtitle="Cota por cliente e por plano">
