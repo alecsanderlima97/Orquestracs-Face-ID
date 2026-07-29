@@ -8,6 +8,7 @@ import {
   onAuthStateChanged,
   setPersistence,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signInWithRedirect,
   signOut,
   type User,
@@ -561,16 +562,37 @@ export default function Home() {
   }
 
   async function handleGoogleLogin() {
-    setLoginMessage("Redirecionando para o Google...");
+    setLoginMessage("Abrindo login do Google...");
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
       await setPersistence(auth, browserLocalPersistence);
-      await signInWithRedirect(auth, provider);
+      await signInWithPopup(auth, provider);
+      setLoginMessage("");
     } catch (error: unknown) {
       console.error(error);
       const authError = error as { code?: string; message?: string };
-      setLoginMessage(`Erro no Google: ${authError.code || authError.message || "falha ao iniciar login"}.`);
+      if (authError.code === "auth/popup-blocked" || authError.code === "auth/cancelled-popup-request") {
+        setLoginMessage("Popup bloqueado. Permita popups para faceid.orquestracs.com e tente novamente.");
+        return;
+      }
+
+      if (authError.code === "auth/popup-closed-by-user") {
+        setLoginMessage("Login Google cancelado antes de concluir.");
+        return;
+      }
+
+      try {
+        setLoginMessage("Popup indisponivel. Redirecionando para o Google...");
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
+        await signInWithRedirect(auth, provider);
+      } catch (redirectError: unknown) {
+        const redirectAuthError = redirectError as { code?: string; message?: string };
+        setLoginMessage(
+          `Erro no Google: ${redirectAuthError.code || authError.code || redirectAuthError.message || "falha ao iniciar login"}.`,
+        );
+      }
     }
   }
 
