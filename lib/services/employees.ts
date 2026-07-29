@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import type { Employee } from "@/lib/models";
 
@@ -8,6 +8,18 @@ function employeesRef(companyId: string) {
 
 export async function createEmployee(companyId: string, employee: Omit<Employee, "id">) {
   return addDoc(employeesRef(companyId), employee);
+}
+
+export async function upsertEmployee(companyId: string, employeeId: string, employee: Record<string, unknown>) {
+  return setDoc(
+    doc(db, "companies", companyId, "employees", employeeId),
+    {
+      ...employee,
+      companyId,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 export async function getEmployee(companyId: string, employeeId: string) {

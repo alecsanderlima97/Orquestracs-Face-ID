@@ -16,6 +16,7 @@ import {
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
+import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import {
   acceptTenantInvite,
   consumeAiCredit,
@@ -108,6 +109,51 @@ function getLocalEmployees() {
   } catch {
     return [];
   }
+}
+
+function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string): LocalEmployee {
+  const schedule = (employee.schedule || {}) as LocalEmployee["schedule"];
+
+  return {
+    admissionDate: String(employee.admissionDate || "Nao informado"),
+    bank: String(employee.bank || "00:00"),
+    cbo: String(employee.cbo || ""),
+    cpf: String(employee.cpf || "Nao informado"),
+    ctpsNumber: String(employee.ctpsNumber || ""),
+    ctpsSeries: String(employee.ctpsSeries || ""),
+    ctpsUf: String(employee.ctpsUf || "SP"),
+    department: String(employee.department || "Geral"),
+    employeeId: String(employee.employeeId || employee.id || fallbackId),
+    faceIdStatus: (employee.faceIdStatus || "not_registered") as LocalEmployee["faceIdStatus"],
+    lastPunch: String(employee.lastPunch || "Sem batida hoje"),
+    name: String(employee.name || "Colaborador sem nome"),
+    phone: String(employee.phone || ""),
+    pin: String(employee.pin || ""),
+    punchMode: (employee.punchMode || "automatic") as LocalEmployee["punchMode"],
+    registration: String(employee.registration || ""),
+    role: String(employee.role || "Nao informado"),
+    schedule: {
+      breakEnd: schedule.breakEnd || "13:00",
+      breakStart: schedule.breakStart || "11:30",
+      end: schedule.end || "17:15",
+      start: schedule.start || "07:00",
+      toleranceMinutes: Number(schedule.toleranceMinutes || 10),
+    },
+    shift: String(employee.shift || "Jornada da empresa"),
+    status: String(employee.status || "Pre-cadastro"),
+  };
+}
+
+function employeeDocumentId(employee: Pick<LocalEmployee, "employeeId" | "name" | "registration">) {
+  const registration = onlyDigits(employee.registration || "");
+  if (registration) return `matricula-${registration}`;
+
+  return `colaborador-${employee.name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || employee.employeeId}`;
 }
 
 const journeyRows: string[][] = [];
@@ -1575,7 +1621,31 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   }
 
   useEffect(() => {
-    setLocalEmployees(getLocalEmployees());
+    let mounted = true;
+
+    async function loadEmployees() {
+      const savedInBrowser = getLocalEmployees();
+      setLocalEmployees(savedInBrowser);
+
+      try {
+        const savedInFirebase = await listEmployees("main");
+        if (!mounted) return;
+
+        const mapped = savedInFirebase.map((employee) =>
+          toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
+        );
+        setLocalEmployees(mapped);
+        window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(mapped));
+      } catch {
+        if (savedInBrowser.length === 0) setLocalEmployees([]);
+      }
+    }
+
+    void loadEmployees();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   function updateEmployeeForm(field: keyof typeof employeeForm, value: string) {
@@ -1587,7 +1657,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
 
     const reader = new FileReader();
 
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const parsed = JSON.parse(String(reader.result || "{}")) as
           | ImportedEmployee[]
@@ -1604,7 +1674,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             ctpsSeries: employee.ctpsSeries || "",
             ctpsUf: employee.ctpsUf || "SP",
             department: employee.department || "Geral",
-            employeeId: crypto.randomUUID(),
+            employeeId: employee.registration ? `matricula-${onlyDigits(employee.registration)}` : crypto.randomUUID(),
             faceIdStatus: employee.faceIdStatus || "not_registered",
             lastPunch: "Sem batida hoje",
             name: employee.name.trim(),
@@ -1621,7 +1691,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
               toleranceMinutes: Number.parseInt(initialShifts[0].tolerance, 10) || 10,
             },
             shift: "Jornada da empresa",
-            status: "Importado - revisar",
+            status: "Pre-cadastro - revisar",
           }));
 
         if (!mappedEmployees.length) {
@@ -1629,20 +1699,34 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           return;
         }
 
-        const updated = [...mappedEmployees, ...localEmployees];
+        await Promise.all(
+          mappedEmployees.map((employee) =>
+            upsertEmployee("main", employeeDocumentId(employee), {
+              ...employee,
+              importSource: "holerite",
+              importedAt: new Date().toISOString(),
+            }),
+          ),
+        );
+
+        const existingIds = new Set(mappedEmployees.map((employee) => employeeDocumentId(employee)));
+        const updated = [
+          ...mappedEmployees,
+          ...localEmployees.filter((employee) => !existingIds.has(employeeDocumentId(employee))),
+        ];
         window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
         setLocalEmployees(updated);
         setSelectedEmployee(mappedEmployees[0]);
-        onAction(`${mappedEmployees.length} colaboradores importados para revisao.`);
+        onAction(`${mappedEmployees.length} colaboradores salvos no Firebase para revisao.`);
       } catch {
-        onAction("Nao foi possivel ler o arquivo de colaboradores.");
+        onAction("Nao foi possivel importar os colaboradores. Verifique login e permissoes.");
       }
     };
 
     reader.readAsText(file);
   }
 
-  function saveEmployee() {
+  async function saveEmployee() {
     if (!employeeForm.name.trim() || employeeForm.pin.length < 4) {
       onAction("Informe o nome e um PIN de pelo menos 4 números.");
       return;
@@ -1688,6 +1772,12 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
       status: "Cadastrado",
     };
     const updated = [employee, ...localEmployees];
+
+    await upsertEmployee("main", employeeDocumentId(employee), {
+      ...employee,
+      createdAt: new Date().toISOString(),
+      source: "manual",
+    });
 
     window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
     setLocalEmployees(updated);
