@@ -1581,7 +1581,7 @@ function CompaniesScreen({
 
 function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   const [journeyMode, setJourneyMode] = useState<"coletiva" | "individual">("coletiva");
-  const [employeeForm, setEmployeeForm] = useState({
+  const emptyEmployeeForm = {
     admissionDate: "",
     cbo: "",
     cpf: "",
@@ -1592,7 +1592,9 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     punchMode: "automatic" as "automatic" | "manual",
     registration: "",
     role: "",
-  });
+  };
+  const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm);
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [localEmployees, setLocalEmployees] = useState<LocalEmployee[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState<LocalEmployee | null>(null);
   const [showFaceCamera, setShowFaceCamera] = useState(false);
@@ -1638,6 +1640,50 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
 
   function updateEmployeeForm(field: keyof typeof employeeForm, value: string) {
     setEmployeeForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function startNewEmployee() {
+    setEmployeeForm(emptyEmployeeForm);
+    setEditingEmployeeId(null);
+    setSelectedEmployee(null);
+    setShowFaceCamera(false);
+    onAction("Novo colaborador: formulario limpo para cadastro.");
+    document.getElementById("employee-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function viewEmployee(employee: EmployeeRow) {
+    const selected = toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name);
+    setSelectedEmployee(selected);
+    setShowFaceCamera(false);
+    onAction(`Visualizando cadastro de ${selected.name}.`);
+    window.setTimeout(
+      () => document.getElementById("employee-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50,
+    );
+  }
+
+  function editEmployee(employee: EmployeeRow) {
+    const selected = toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name);
+    setSelectedEmployee(selected);
+    setEditingEmployeeId(employeeDocumentId(selected));
+    setShowFaceCamera(false);
+    setEmployeeForm({
+      admissionDate: selected.admissionDate || "",
+      cbo: selected.cbo || "",
+      cpf: selected.cpf === "Nao informado" ? "" : selected.cpf,
+      department: selected.department || "",
+      name: selected.name,
+      phone: selected.phone || "",
+      pin: selected.pin || "",
+      punchMode: selected.punchMode,
+      registration: selected.registration || "",
+      role: selected.role === "Nao informado" ? "" : selected.role,
+    });
+    onAction(`Editando cadastro de ${selected.name}.`);
+    window.setTimeout(
+      () => document.getElementById("employee-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50,
+    );
   }
 
   function importEmployeesFromJson(file?: File) {
@@ -1740,8 +1786,8 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
       cbo: employeeForm.cbo || "",
       cpf: employeeForm.cpf || "Não informado",
       department: employeeForm.department || "Geral",
-      employeeId: crypto.randomUUID(),
-      faceIdStatus: "not_registered",
+      employeeId: editingEmployeeId || crypto.randomUUID(),
+      faceIdStatus: selectedEmployee?.faceIdStatus || "not_registered",
       lastPunch: "Sem batida hoje",
       name: employeeForm.name.trim(),
       phone: employeeForm.phone || "",
@@ -1751,21 +1797,25 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
       role: employeeForm.role || "Não informado",
       schedule,
       shift: "Jornada da empresa",
-      status: "Cadastrado",
+      status: editingEmployeeId ? "Atualizado" : "Cadastrado",
     };
-    const updated = [employee, ...localEmployees];
+    const documentId = editingEmployeeId || employeeDocumentId(employee);
+    const updated = editingEmployeeId
+      ? localEmployees.map((item) => (employeeDocumentId(item) === documentId ? employee : item))
+      : [employee, ...localEmployees];
 
-    await upsertEmployee("main", employeeDocumentId(employee), {
+    await upsertEmployee("main", documentId, {
       ...employee,
-      createdAt: new Date().toISOString(),
+      ...(editingEmployeeId ? {} : { createdAt: new Date().toISOString() }),
       source: "manual",
     });
 
     window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
     setLocalEmployees(updated);
     setSelectedEmployee(employee);
-    setShowFaceCamera(true);
-    onAction(`${employee.name} cadastrado. Agora faça as capturas do Face ID.`);
+    setEditingEmployeeId(documentId);
+    setShowFaceCamera(false);
+    onAction(`${employee.name} ${editingEmployeeId ? "atualizado" : "cadastrado"} com sucesso.`);
   }
 
   function openFaceRegistration() {
@@ -1788,12 +1838,22 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
     setLocalEmployees(updated);
     setSelectedEmployee(current);
+    if (current) {
+      void upsertEmployee("main", employeeDocumentId(current), {
+        faceIdStatus: "registered",
+        faceRegisteredAt: new Date().toISOString(),
+      });
+    }
     onAction(`${selectedEmployee.name}: ${captureCount} captura(s) facial(is) cadastrada(s).`);
   }
 
   return (
     <>
-      <Panel title="Novo colaborador" subtitle="Dados para ponto, holerite e relatorio mensal">
+      <div id="employee-form-panel">
+      <Panel
+        title={editingEmployeeId ? "Editar colaborador" : "Novo colaborador"}
+        subtitle="Dados para ponto, holerite e relatorio mensal"
+      >
         <p className="text-sm font-semibold text-[#26323f]">Dados pessoais</p>
         <div className="mt-3 grid gap-3 md:grid-cols-4">
           <MaskedField label="Nome" mask="name" onChange={(value) => updateEmployeeForm("name", value)} placeholder="Primeira Letra Maiuscula" value={employeeForm.name} />
@@ -1893,8 +1953,8 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           )}
         </div>
         <ActionRow>
-          <SaveButton onClick={saveEmployee}>Cadastrar colaborador</SaveButton>
-          <button className="secondary-button" onClick={openFaceRegistration} type="button">Cadastrar Face ID</button>
+          <SaveButton onClick={saveEmployee}>{editingEmployeeId ? "Salvar alteracoes" : "Cadastrar colaborador"}</SaveButton>
+          <button className="secondary-button" onClick={openFaceRegistration} type="button">Cadastrar Face ID do selecionado</button>
           <label className="secondary-button cursor-pointer">
             Importar holerite JSON
             <input
@@ -1931,7 +1991,43 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           </div>
         )}
       </Panel>
-      <EmployeesTable employeesList={localEmployees} onAction={onAction} />
+      </div>
+      {selectedEmployee && (
+        <Panel title="Ficha do colaborador" subtitle="Conferencia do cadastro selecionado">
+          <div id="employee-detail-panel" className="grid gap-3 md:grid-cols-4">
+            {[
+              ["Nome", selectedEmployee.name],
+              ["Matricula", selectedEmployee.registration || "-"],
+              ["PIN", selectedEmployee.pin || "-"],
+              ["CPF", selectedEmployee.cpf || "-"],
+              ["Admissao", selectedEmployee.admissionDate || "-"],
+              ["Cargo", selectedEmployee.role || "-"],
+              ["Departamento", selectedEmployee.department || "-"],
+              ["CBO", selectedEmployee.cbo || "-"],
+              ["Jornada", selectedEmployee.shift || "-"],
+              ["Face ID", selectedEmployee.faceIdStatus === "registered" ? "Cadastrado" : "Pendente"],
+              ["Ultima batida", selectedEmployee.lastPunch || "-"],
+              ["Status", selectedEmployee.status || "-"],
+            ].map(([label, value]) => (
+              <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
+                <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
+                <p className="mt-1 text-sm font-semibold text-[#26323f]">{value}</p>
+              </div>
+            ))}
+          </div>
+          <ActionRow>
+            <button className="secondary-button" onClick={() => editEmployee(selectedEmployee)} type="button">Editar cadastro</button>
+            <button className="secondary-button" onClick={openFaceRegistration} type="button">Cadastrar Face ID</button>
+          </ActionRow>
+        </Panel>
+      )}
+      <EmployeesTable
+        employeesList={localEmployees}
+        onAction={onAction}
+        onEdit={editEmployee}
+        onNew={startNewEmployee}
+        onView={viewEmployee}
+      />
     </>
   );
 }
@@ -3050,10 +3146,16 @@ function AssistantPanel({
 function EmployeesTable({
   employeesList = employees,
   onAction,
+  onEdit,
+  onNew,
+  onView,
   compact = false,
 }: {
   employeesList?: EmployeeRow[];
   onAction: (action: string) => void;
+  onEdit?: (employee: EmployeeRow) => void;
+  onNew?: () => void;
+  onView?: (employee: EmployeeRow) => void;
   compact?: boolean;
 }) {
   return (
@@ -3064,7 +3166,7 @@ function EmployeesTable({
             <p className="text-sm font-medium text-[#667085]">Equipe</p>
             <h2 className="mt-1 text-xl font-semibold text-[#101923]">Colaboradores e banco de horas</h2>
           </div>
-          <button className="secondary-button w-fit" onClick={() => onAction("Novo colaborador")} type="button">Novo colaborador</button>
+          <button className="secondary-button w-fit" onClick={() => (onNew ? onNew() : onAction("Novo colaborador"))} type="button">Novo colaborador</button>
         </div>
       )}
       <div className="overflow-x-auto">
@@ -3105,10 +3207,10 @@ function EmployeesTable({
                     </span>
                   </td>
                   <td className="px-5 py-4">
-                    <div className="flex gap-2">
-                      <button className="mini-button" onClick={() => onAction(`Editar ${employee.name}`)} type="button">Editar</button>
-                      <button className="mini-button" onClick={() => onAction(`Ver ${employee.name}`)} type="button">Ver</button>
-                    </div>
+                  <div className="flex gap-2">
+                    <button className="mini-button" onClick={() => (onEdit ? onEdit(employee) : onAction(`Editar ${employee.name}`))} type="button">Editar</button>
+                    <button className="mini-button" onClick={() => (onView ? onView(employee) : onAction(`Ver ${employee.name}`))} type="button">Ver</button>
+                  </div>
                   </td>
                 </tr>
               ))
