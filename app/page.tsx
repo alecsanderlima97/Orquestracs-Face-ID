@@ -176,6 +176,31 @@ type MainCompanyProfile = Record<string, unknown> & {
   legalName?: string;
   logoUrl?: string;
   tradeName?: string;
+  workPolicy?: WorkPolicy;
+};
+
+type WorkPolicy = {
+  absenceMode: "day" | "period";
+  afternoonAbsenceWeight: number;
+  bankHoursEnabled: boolean;
+  externalWorkPolicy: string;
+  forgottenPunchPolicy: string;
+  fullDayAbsenceWeight: number;
+  morningAbsenceWeight: number;
+  scheduledDays: number;
+  toleranceMinutes: number;
+};
+
+const DEFAULT_WORK_POLICY: WorkPolicy = {
+  absenceMode: "period",
+  afternoonAbsenceWeight: 1,
+  bankHoursEnabled: true,
+  externalWorkPolicy: "Permitir com justificativa",
+  forgottenPunchPolicy: "Exige aprovacao",
+  fullDayAbsenceWeight: 2,
+  morningAbsenceWeight: 1,
+  scheduledDays: 5,
+  toleranceMinutes: 10,
 };
 
 const VANMART_INITIAL_COMPANY_PROFILE = {
@@ -244,6 +269,7 @@ type MonthlyMirrorRow = {
 };
 
 type MonthlyMirrorSummary = {
+  absencePoints: number;
   earlyLeaveMinutes: number;
   employee: LocalEmployee;
   lateMinutes: number;
@@ -858,6 +884,30 @@ export default function Home() {
       } catch (error) {
         console.error(error);
         setNotice("Nao foi possivel salvar no Firebase. Verifique Auth/Regras do Firestore.");
+      }
+      return;
+    }
+
+    if (action === "Politica de calculo da empresa") {
+      try {
+        await saveMainCompany({
+          workPolicy: {
+            absenceMode: fields["Tipo de controle"] === "Por dia" ? "day" : "period",
+            afternoonAbsenceWeight: Number(fields["Valor falta tarde"] || DEFAULT_WORK_POLICY.afternoonAbsenceWeight),
+            bankHoursEnabled: fields["Banco de horas"] !== "Inativo",
+            externalWorkPolicy: fields["Trabalho externo"] || DEFAULT_WORK_POLICY.externalWorkPolicy,
+            forgottenPunchPolicy: fields["Aprovacao de ajuste"] || DEFAULT_WORK_POLICY.forgottenPunchPolicy,
+            fullDayAbsenceWeight: Number(fields["Valor falta dia inteiro"] || DEFAULT_WORK_POLICY.fullDayAbsenceWeight),
+            morningAbsenceWeight: Number(fields["Valor falta manha"] || DEFAULT_WORK_POLICY.morningAbsenceWeight),
+            scheduledDays: Number(fields["Dias por semana"] || DEFAULT_WORK_POLICY.scheduledDays),
+            toleranceMinutes: Number.parseInt(fields["Tolerancia padrao"] || "", 10) || DEFAULT_WORK_POLICY.toleranceMinutes,
+          },
+        });
+        await refreshCompanyProfile();
+        setNotice("Politica de calculo salva para esta empresa.");
+      } catch (error) {
+        console.error(error);
+        setNotice("Nao foi possivel salvar a politica de calculo.");
       }
       return;
     }
@@ -1544,6 +1594,7 @@ function CompaniesScreen({
   }
 
   const address = (company?.address || {}) as Record<string, string>;
+  const workPolicy = getCompanyWorkPolicy(company);
 
   return (
     <>
@@ -1687,7 +1738,7 @@ function CompaniesScreen({
         <fieldset disabled={!canEdit}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Retencao das fotos">
-              <select className="input">
+              <select className="input" defaultValue={workPolicy.absenceMode === "day" ? "Por dia" : "Por periodo"}>
                 <option>5 anos</option>
                 <option>2 anos</option>
                 <option>Personalizado</option>
@@ -1728,17 +1779,34 @@ function CompaniesScreen({
               </select>
             </Field>
             <Field label="Aprovacao de ajuste">
-              <select className="input">
+              <select className="input" defaultValue={workPolicy.forgottenPunchPolicy}>
                 <option>Obrigatoria</option>
+                <option>Exige aprovacao</option>
                 <option>Opcional</option>
                 <option>Bloqueada</option>
               </select>
             </Field>
-            <Field label="Valor falta manha"><input className="input" placeholder="1" /></Field>
-            <Field label="Valor falta tarde"><input className="input" placeholder="1" /></Field>
-            <Field label="Valor falta dia inteiro"><input className="input" placeholder="2" /></Field>
+            <Field label="Valor falta manha"><input className="input" defaultValue={String(workPolicy.morningAbsenceWeight)} placeholder="1" /></Field>
+            <Field label="Valor falta tarde"><input className="input" defaultValue={String(workPolicy.afternoonAbsenceWeight)} placeholder="1" /></Field>
+            <Field label="Valor falta dia inteiro"><input className="input" defaultValue={String(workPolicy.fullDayAbsenceWeight)} placeholder="2" /></Field>
+            <Field label="Dias por semana">
+              <select className="input" defaultValue={String(workPolicy.scheduledDays)}>
+                <option value="5">5 dias</option>
+                <option value="6">6 dias</option>
+                <option value="7">7 dias</option>
+              </select>
+            </Field>
+            <Field label="Tolerancia padrao">
+              <input className="input" defaultValue={String(workPolicy.toleranceMinutes)} placeholder="10 min" />
+            </Field>
+            <Field label="Banco de horas">
+              <select className="input" defaultValue={workPolicy.bankHoursEnabled ? "Ativo" : "Inativo"}>
+                <option>Ativo</option>
+                <option>Inativo</option>
+              </select>
+            </Field>
             <Field label="Trabalho externo">
-              <select className="input">
+              <select className="input" defaultValue={workPolicy.externalWorkPolicy}>
                 <option>Permitir com justificativa</option>
                 <option>Permitir com foto</option>
                 <option>Permitir com geolocalizacao</option>
@@ -1753,6 +1821,9 @@ function CompaniesScreen({
             ]}
           />
         </fieldset>
+        <ActionRow>
+          <SaveButton disabled={!canEdit} onClick={() => onAction("Politica de calculo da empresa")}>Salvar politica</SaveButton>
+        </ActionRow>
       </CollapsiblePanel>
 
       <CollapsiblePanel
@@ -3185,6 +3256,7 @@ function MonthlyClosingScreen({
     selectedEmployeeId === "all"
       ? employeesList
       : employeesList.filter((employee) => employee.employeeId === selectedEmployeeId);
+  const workPolicy = getCompanyWorkPolicy(company);
 
   async function generateMonthlyMirror() {
     if (!selectedEmployees.length) {
@@ -3199,7 +3271,7 @@ function MonthlyClosingScreen({
           employee.employeeId,
           employee.pin ? `pin-${employee.pin}` : "",
         ]);
-        return buildMonthlyMirrorSummary(employee, punches, period);
+        return buildMonthlyMirrorSummary(employee, punches, period, workPolicy);
       }),
     );
 
@@ -3210,6 +3282,7 @@ function MonthlyClosingScreen({
       period,
       responsible,
       summaries,
+      workPolicy,
     });
     onAction("Espelho mensal aberto para impressao. Use Salvar como PDF se quiser arquivar.");
   }
@@ -3221,7 +3294,7 @@ function MonthlyClosingScreen({
     }
 
     const rows = [
-      ["Funcionario", "Matricula", "PIN", "Periodo", "Dias", "Batidas", "Falta manha", "Falta tarde", "Atrasos", "Banco", "Pendencias", "Responsavel"],
+      ["Funcionario", "Matricula", "PIN", "Periodo", "Dias", "Batidas", "Falta manha", "Falta tarde", "Faltas calculadas", "Atrasos", "Banco", "Pendencias", "Responsavel"],
       ...lastSummary.map((summary) => [
         summary.employee.name,
         summary.employee.registration || "",
@@ -3231,6 +3304,7 @@ function MonthlyClosingScreen({
         String(summary.totalPunches),
         String(summary.missingMornings),
         String(summary.missingAfternoons),
+        String(summary.absencePoints),
         formatDurationClock(summary.lateMinutes),
         formatDurationClock(summary.totalBalanceMinutes),
         String(summary.pendingDays),
@@ -3276,7 +3350,7 @@ function MonthlyClosingScreen({
             ["Funcionarios", String(selectedEmployees.length)],
             ["Periodo", `${month}/${year}`],
             ["Gerados", String(lastSummary.length)],
-            ["Faltas periodo", String(lastSummary.reduce((total, item) => total + item.missingMornings + item.missingAfternoons, 0))],
+            ["Faltas", String(lastSummary.reduce((total, item) => total + item.absencePoints, 0))],
             ["Banco", formatDurationClock(lastSummary.reduce((total, item) => total + item.totalBalanceMinutes, 0))],
           ].map(([label, value]) => (
             <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
@@ -4306,20 +4380,33 @@ function sameDay(first: Date, second: Date) {
     && first.getDate() === second.getDate();
 }
 
-function positiveDifference(actual?: Punch, expectedTime?: string) {
-  if (!actual || !expectedTime) return 0;
-  const date = punchDate(actual);
-  if (Number.isNaN(date.getTime())) return 0;
-  const actualMinutes = date.getHours() * 60 + date.getMinutes();
-  return Math.max(0, actualMinutes - minutesFromTime(expectedTime));
+function getCompanyWorkPolicy(company: MainCompanyProfile | null): WorkPolicy {
+  const policy = (company?.workPolicy || {}) as Partial<WorkPolicy>;
+  return {
+    ...DEFAULT_WORK_POLICY,
+    ...policy,
+    afternoonAbsenceWeight: Number(policy.afternoonAbsenceWeight ?? DEFAULT_WORK_POLICY.afternoonAbsenceWeight),
+    fullDayAbsenceWeight: Number(policy.fullDayAbsenceWeight ?? DEFAULT_WORK_POLICY.fullDayAbsenceWeight),
+    morningAbsenceWeight: Number(policy.morningAbsenceWeight ?? DEFAULT_WORK_POLICY.morningAbsenceWeight),
+    scheduledDays: Number(policy.scheduledDays ?? DEFAULT_WORK_POLICY.scheduledDays),
+    toleranceMinutes: Number(policy.toleranceMinutes ?? DEFAULT_WORK_POLICY.toleranceMinutes),
+  };
 }
 
-function earlyDifference(actual?: Punch, expectedTime?: string) {
+function positiveDifference(actual?: Punch, expectedTime?: string, toleranceMinutes = 0) {
   if (!actual || !expectedTime) return 0;
   const date = punchDate(actual);
   if (Number.isNaN(date.getTime())) return 0;
   const actualMinutes = date.getHours() * 60 + date.getMinutes();
-  return Math.max(0, minutesFromTime(expectedTime) - actualMinutes);
+  return Math.max(0, actualMinutes - minutesFromTime(expectedTime) - toleranceMinutes);
+}
+
+function earlyDifference(actual?: Punch, expectedTime?: string, toleranceMinutes = 0) {
+  if (!actual || !expectedTime) return 0;
+  const date = punchDate(actual);
+  if (Number.isNaN(date.getTime())) return 0;
+  const actualMinutes = date.getHours() * 60 + date.getMinutes();
+  return Math.max(0, minutesFromTime(expectedTime) - actualMinutes - toleranceMinutes);
 }
 
 function workedPeriodMinutes(start?: Punch, end?: Punch) {
@@ -4340,6 +4427,7 @@ function buildMonthlyMirrorSummary(
   employee: LocalEmployee,
   punches: Punch[],
   period: MonthPeriod,
+  workPolicy: WorkPolicy,
 ): MonthlyMirrorSummary {
   const validPunches = punches
     .filter((punch) => {
@@ -4349,7 +4437,7 @@ function buildMonthlyMirrorSummary(
     .sort((first, second) => punchDate(first).getTime() - punchDate(second).getTime());
   const rows: MonthlyMirrorRow[] = [];
   const expectedMinutes = expectedDailyMinutes(employee);
-  const scheduledWorkdays = Number(employee.schedule ? 5 : 5);
+  const scheduledWorkdays = workPolicy.scheduledDays;
 
   for (let day = 1; day <= period.end.getDate(); day += 1) {
     const date = new Date(period.year, period.month - 1, day);
@@ -4359,8 +4447,7 @@ function buildMonthlyMirrorSummary(
       punchesByType[punch.type] = punch;
     });
 
-    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-    const isWorkday = !isWeekend && date.getDay() <= scheduledWorkdays;
+    const isWorkday = date.getDay() !== 0 && date.getDay() <= scheduledWorkdays;
     const morningComplete = Boolean(punchesByType.entry && punchesByType.lunch_out);
     const afternoonComplete = Boolean(punchesByType.lunch_back && punchesByType.exit);
     const missingMorning = isWorkday && !morningComplete;
@@ -4369,12 +4456,14 @@ function buildMonthlyMirrorSummary(
       workedPeriodMinutes(punchesByType.entry, punchesByType.lunch_out)
       + workedPeriodMinutes(punchesByType.lunch_back, punchesByType.exit);
     const lateMinutes =
-      positiveDifference(punchesByType.entry, employee.schedule.start)
-      + positiveDifference(punchesByType.lunch_back, employee.schedule.breakEnd);
+      positiveDifference(punchesByType.entry, employee.schedule.start, workPolicy.toleranceMinutes)
+      + positiveDifference(punchesByType.lunch_back, employee.schedule.breakEnd, workPolicy.toleranceMinutes);
     const earlyLeaveMinutes =
-      earlyDifference(punchesByType.lunch_out, employee.schedule.breakStart)
-      + earlyDifference(punchesByType.exit, employee.schedule.end);
-    const balanceMinutes = isWorkday ? workedMinutes - expectedMinutes : workedMinutes;
+      earlyDifference(punchesByType.lunch_out, employee.schedule.breakStart, workPolicy.toleranceMinutes)
+      + earlyDifference(punchesByType.exit, employee.schedule.end, workPolicy.toleranceMinutes);
+    const balanceMinutes = workPolicy.bankHoursEnabled
+      ? isWorkday ? workedMinutes - expectedMinutes : workedMinutes
+      : 0;
     const status = !isWorkday && !dayPunches.length
       ? "Sem expediente aparente"
       : missingMorning || missingAfternoon
@@ -4400,12 +4489,23 @@ function buildMonthlyMirrorSummary(
 
   const missingMornings = rows.filter((row) => row.missingMorning).length;
   const missingAfternoons = rows.filter((row) => row.missingAfternoon).length;
+  const absencePoints = workPolicy.absenceMode === "day"
+    ? rows.filter((row) => row.missingMorning || row.missingAfternoon).reduce(
+        (total, row) =>
+          total + (row.missingMorning && row.missingAfternoon
+            ? workPolicy.fullDayAbsenceWeight
+            : Math.max(workPolicy.morningAbsenceWeight, workPolicy.afternoonAbsenceWeight)),
+        0,
+      )
+    : missingMornings * workPolicy.morningAbsenceWeight
+      + missingAfternoons * workPolicy.afternoonAbsenceWeight;
   const lateMinutes = rows.reduce((total, row) => total + row.lateMinutes, 0);
   const earlyLeaveMinutes = rows.reduce((total, row) => total + row.earlyLeaveMinutes, 0);
   const totalWorkedMinutes = rows.reduce((total, row) => total + row.workedMinutes, 0);
   const totalBalanceMinutes = rows.reduce((total, row) => total + row.balanceMinutes, 0);
 
   return {
+    absencePoints,
     earlyLeaveMinutes,
     employee,
     lateMinutes,
@@ -4441,12 +4541,14 @@ function openPrintableMonthlyMirror({
   period,
   responsible,
   summaries,
+  workPolicy,
 }: {
   company: MainCompanyProfile | null;
   generatedAt: Date;
   period: MonthPeriod;
   responsible: string;
   summaries: MonthlyMirrorSummary[];
+  workPolicy: WorkPolicy;
 }) {
   const address = (company?.address || {}) as Record<string, string>;
   const companyName = String(company?.legalName || company?.tradeName || "Empresa");
@@ -4512,11 +4614,20 @@ function openPrintableMonthlyMirror({
         <div><span>Total de batidas</span><strong>${summary.totalPunches}</strong></div>
         <div><span>Falta manha</span><strong>${summary.missingMornings}</strong></div>
         <div><span>Falta tarde</span><strong>${summary.missingAfternoons}</strong></div>
+        <div><span>Faltas calculadas</span><strong>${summary.absencePoints}</strong></div>
         <div><span>Atrasos</span><strong>${escapeHtml(formatDurationClock(summary.lateMinutes))}</strong></div>
         <div><span>Saida antecipada</span><strong>${escapeHtml(formatDurationClock(summary.earlyLeaveMinutes))}</strong></div>
         <div><span>Banco de horas</span><strong>${escapeHtml(formatDurationClock(summary.totalBalanceMinutes))}</strong></div>
         <div><span>Dias pendentes</span><strong>${summary.pendingDays}</strong></div>
         <div><span>Responsavel</span><strong>${escapeHtml(responsible || "Nao informado")}</strong></div>
+      </div>
+
+      <div class="policy">
+        <strong>Regra aplicada</strong>
+        <p>Controle de faltas: ${escapeHtml(workPolicy.absenceMode === "day" ? "por dia" : "por periodo")}.</p>
+        <p>Peso das faltas: manha ${workPolicy.morningAbsenceWeight}, tarde ${workPolicy.afternoonAbsenceWeight}, dia inteiro ${workPolicy.fullDayAbsenceWeight}.</p>
+        <p>Jornada semanal: ${workPolicy.scheduledDays} dias. Tolerancia: ${workPolicy.toleranceMinutes} minutos. Banco de horas: ${workPolicy.bankHoursEnabled ? "ativo" : "inativo"}.</p>
+        <p>Trabalho externo: ${escapeHtml(workPolicy.externalWorkPolicy)}. Ajuste/esquecimento: ${escapeHtml(workPolicy.forgottenPunchPolicy)}.</p>
       </div>
 
       <p class="statement">
@@ -4559,6 +4670,8 @@ function openPrintableMonthlyMirror({
           th, td { border: 1px solid #d9e0e7; padding: 6px; }
           tr:nth-child(even) td { background: #fbfcfd; }
           .statement { margin-top: 18px; border: 1px solid #d9e0e7; border-radius: 6px; padding: 10px; }
+          .policy { margin-top: 14px; border: 1px solid #d9e0e7; border-radius: 6px; padding: 10px; background: #fbfcfd; }
+          .policy strong { margin: 0 0 6px; }
           .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 34px; }
           .signatures span { height: 44px; border-bottom: 1px solid #101923; }
           .signatures strong { text-align: center; }
