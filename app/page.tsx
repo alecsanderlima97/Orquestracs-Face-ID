@@ -2084,6 +2084,46 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setShowFaceCamera(true);
   }
 
+  function updateEmployeeProfilePhoto(employee: LocalEmployee, photoPath: string, previewUrl?: string) {
+    if (previewUrl) {
+      setEmployeePhotoUrls((urls) => ({ ...urls, [employee.employeeId]: previewUrl }));
+    }
+    setLocalEmployees((employees) => {
+      const updated = employees.map((item) =>
+        item.employeeId === employee.employeeId ? { ...item, profilePhotoPath: photoPath } : item,
+      );
+      window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
+      return updated;
+    });
+    setSelectedEmployee((current) =>
+      current?.employeeId === employee.employeeId ? { ...current, profilePhotoPath: photoPath } : current,
+    );
+  }
+
+  async function changeEmployeePhoto(file?: File) {
+    if (!file || !selectedEmployee) return;
+
+    if (!file.type.startsWith("image/")) {
+      onAction("Escolha um arquivo de imagem para a foto do colaborador.");
+      return;
+    }
+
+    try {
+      const photoPath = await uploadFacePhoto({
+        blob: file,
+        companyId: "main",
+        employeeId: selectedEmployee.employeeId,
+        photoId: `perfil-${crypto.randomUUID()}`,
+      });
+      updateEmployeeProfilePhoto(selectedEmployee, photoPath, URL.createObjectURL(file));
+      await upsertEmployee("main", employeeDocumentId(selectedEmployee), { profilePhotoPath: photoPath });
+      onAction(`Foto de ${selectedEmployee.name} atualizada.`);
+    } catch (error) {
+      console.error(error);
+      onAction("Nao foi possivel salvar a foto do colaborador. Verifique Storage e permissao.");
+    }
+  }
+
   function markFaceRegistered(captureCount: number, photoBlob?: Blob) {
     if (!selectedEmployee) return;
     const completed = captureCount >= REQUIRED_FACE_CAPTURES;
@@ -2120,15 +2160,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           employeeId: current.employeeId,
           photoId: captureId,
         }).then((photoPath) => {
-          setEmployeePhotoUrls((urls) => ({ ...urls, [current.employeeId]: URL.createObjectURL(photoBlob) }));
-          setLocalEmployees((employees) =>
-            employees.map((employee) =>
-              employee.employeeId === current.employeeId ? { ...employee, profilePhotoPath: photoPath } : employee,
-            ),
-          );
-          setSelectedEmployee((employee) =>
-            employee?.employeeId === current.employeeId ? { ...employee, profilePhotoPath: photoPath } : employee,
-          );
+          updateEmployeeProfilePhoto(current, photoPath, URL.createObjectURL(photoBlob));
           void upsertEmployee("main", employeeDocumentId(current), { profilePhotoPath: photoPath });
           void createFaceIdRecord({
             capturedBy: "web-kiosk",
@@ -2404,8 +2436,17 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             <div>
               <p className="text-lg font-semibold text-[#101923]">{selectedEmployee.name}</p>
               <p className="mt-1 text-sm text-[#667085]">
-                {selectedEmployee.profilePhotoPath ? "Foto vinculada ao cadastro" : "Foto sera vinculada apos o cadastro do Face ID"}
+                {selectedEmployee.profilePhotoPath ? "Foto vinculada ao cadastro" : "Adicione uma foto manual ou cadastre o Face ID"}
               </p>
+              <label className="secondary-button mt-3 inline-flex cursor-pointer items-center">
+                Alterar foto
+                <input
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => void changeEmployeePhoto(event.target.files?.[0])}
+                  type="file"
+                />
+              </label>
             </div>
           </div>
           <div id="employee-detail-panel" className="grid gap-3 md:grid-cols-4">
@@ -2456,6 +2497,15 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           <ActionRow>
             <button className="secondary-button" onClick={() => editEmployee(selectedEmployee)} type="button">Editar cadastro</button>
             <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee)} type="button">Cadastrar Face ID</button>
+            <label className="secondary-button cursor-pointer">
+              Alterar foto
+              <input
+                accept="image/*"
+                className="hidden"
+                onChange={(event) => void changeEmployeePhoto(event.target.files?.[0])}
+                type="file"
+              />
+            </label>
           </ActionRow>
         </CollapsiblePanel>
       )}
