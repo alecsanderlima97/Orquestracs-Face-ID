@@ -2669,6 +2669,8 @@ function KioskScreen({
   const [timingWarning, setTimingWarning] = useState<PunchException | null>(null);
   const [recognizedPhoto, setRecognizedPhoto] = useState<Blob | undefined>();
   const [blockingMessage, setBlockingMessage] = useState("");
+  const [kioskDetailsOpen, setKioskDetailsOpen] = useState(false);
+  const [pinFallbackOpen, setPinFallbackOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<{
     employeeName: string;
     time: string;
@@ -2784,16 +2786,16 @@ function KioskScreen({
   const manualSelection = recognizedEmployee?.punchMode === "manual";
 
   return (
-    <section className="kiosk-screen rounded-lg border border-[#d9e0e7] bg-[#101923] p-5 text-white shadow-sm">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+    <section className="kiosk-screen rounded-lg border border-[#d9e0e7] bg-[#101923] p-4 text-white shadow-sm md:p-5">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 md:p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b7d7ce]">
                 Sala de ponto
               </p>
-              <h2 className="mt-2 text-2xl font-semibold">Tablet em modo reconhecimento</h2>
-              <p className="mt-2 text-sm text-white/60">
+              <h2 className="mt-2 text-xl font-semibold md:text-2xl">Tablet em modo reconhecimento</h2>
+              <p className="mt-1 text-sm text-white/60">
                 Funcionarios chegam, ficam em frente a camera e confirmam a presenca.
               </p>
             </div>
@@ -2802,7 +2804,7 @@ function KioskScreen({
             </span>
           </div>
 
-          <div className="mt-6">
+          <div className="mt-4">
             <FaceCamera onRecognized={identifyFace} onStatus={onAction} />
             <p className="mt-3 text-center text-sm text-white/55">
               {recognizedEmployee
@@ -2812,8 +2814,8 @@ function KioskScreen({
           </div>
         </div>
 
-        <aside className="grid gap-4">
-          <div className="rounded-lg border border-white/10 bg-white/[0.04] p-5">
+        <aside className="grid content-start gap-3">
+          <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 md:p-5">
             <p className="text-lg font-semibold text-white">
               {manualSelection ? "Escolha a marcação" : "Marcação identificada"}
             </p>
@@ -2880,7 +2882,7 @@ function KioskScreen({
                 </div>
               )}
               <button
-                className="min-h-20 rounded-xl bg-[#38c793] px-5 text-xl font-black text-[#082c22] shadow-lg disabled:cursor-not-allowed disabled:bg-[#52616f] disabled:text-white/50"
+                className="min-h-16 rounded-xl bg-[#38c793] px-5 text-lg font-black text-[#082c22] shadow-lg transition hover:-translate-y-0.5 hover:bg-[#45d8a2] disabled:cursor-not-allowed disabled:bg-[#52616f] disabled:text-white/50 disabled:hover:translate-y-0"
                 disabled={!recognizedEmployee || journeyFinished || Boolean(confirmation) || Boolean(blockingMessage)}
                 onClick={() => void confirmPunch()}
                 type="button"
@@ -2899,12 +2901,23 @@ function KioskScreen({
             </div>
           )}
 
-          <div className="rounded-lg border border-white/10 bg-white p-5 text-[#17202a]">
-            <p className="text-sm font-semibold text-[#26323f]">Fallback PIN + foto</p>
-            <p className="mt-1 text-xs leading-5 text-[#667085]">
-              Use quando o rosto nao reconhecer, funcionario for novo ou a luz estiver ruim.
-            </p>
-            <div className="mt-4 grid gap-3">
+          <div className="rounded-lg border border-white/10 bg-white text-[#17202a]">
+            <button
+              aria-expanded={pinFallbackOpen}
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+              onClick={() => setPinFallbackOpen((open) => !open)}
+              type="button"
+            >
+              <span>
+                <span className="block text-sm font-semibold text-[#26323f]">PIN + foto</span>
+                <span className="mt-1 block text-xs text-[#667085]">Usar quando o rosto nao reconhecer</span>
+              </span>
+              <span className="grid h-8 w-8 place-items-center rounded-md border border-[#d9e0e7] bg-[#fbfcfd] font-semibold">
+                {pinFallbackOpen ? "-" : "+"}
+              </span>
+            </button>
+            {pinFallbackOpen && (
+            <div className="grid gap-3 border-t border-[#e3e8ee] p-4">
               <Field label="PIN do colaborador">
                 <input
                   className="input"
@@ -2932,17 +2945,30 @@ function KioskScreen({
                 Registrar por PIN + foto
               </button>
             </div>
+            )}
           </div>
 
-          <div className="rounded-lg border border-[#cfe3dc] bg-[#f1faf7] p-4 text-[#24594d]">
-            <p className="text-sm font-semibold">O que sera registrado</p>
-            <div className="mt-3 grid gap-2 text-xs leading-5">
+          <div className="rounded-lg border border-[#cfe3dc] bg-[#f1faf7] text-[#24594d]">
+            <button
+              aria-expanded={kioskDetailsOpen}
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+              onClick={() => setKioskDetailsOpen((open) => !open)}
+              type="button"
+            >
+              <span className="text-sm font-semibold">Detalhes do registro</span>
+              <span className="grid h-8 w-8 place-items-center rounded-md border border-[#cfe3dc] bg-white font-semibold">
+                {kioskDetailsOpen ? "-" : "+"}
+              </span>
+            </button>
+            {kioskDetailsOpen && (
+            <div className="grid gap-2 border-t border-[#cfe3dc] p-4 text-xs leading-5">
               <span>Funcionario identificado</span>
               <span>Foto da batida</span>
               <span>Horario do servidor</span>
               <span>Status: no horario, atraso ou fora da jornada</span>
               <span>Log inviolavel</span>
             </div>
+            )}
           </div>
         </aside>
       </div>
