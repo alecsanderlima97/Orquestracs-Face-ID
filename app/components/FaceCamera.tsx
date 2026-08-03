@@ -285,7 +285,7 @@ export function FaceCamera({
           </button>
         ) : (
           <>
-            <button className="primary-button" disabled={processing} onClick={recognizeFace} type="button">
+            <button className="primary-button face-recognize-button" disabled={processing} onClick={recognizeFace} type="button">
               {processing ? "Processando..." : "Reconhecer rosto"}
             </button>
             {employee && (

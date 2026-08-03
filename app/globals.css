@@ -83,6 +83,37 @@ a {
   opacity: 0.9;
 }
 
+.face-recognize-button {
+  min-height: 54px;
+  border: 1px solid rgb(126 226 196 / 60%);
+  background: #38c793;
+  color: #082c22;
+  font-size: 16px;
+  box-shadow: 0 0 0 0 rgb(56 199 147 / 42%);
+  animation: recognize-pulse 1.7s ease-in-out infinite;
+}
+
+.face-recognize-button:hover {
+  background: #45d8a2;
+  box-shadow: 0 14px 28px rgb(56 199 147 / 24%);
+}
+
+.face-recognize-button:disabled {
+  animation: none;
+}
+
+@keyframes recognize-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(56 199 147 / 40%);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgb(56 199 147 / 0%);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(56 199 147 / 0%);
+  }
+}
+
 .save-button {
   display: inline-flex;
   min-width: 138px;

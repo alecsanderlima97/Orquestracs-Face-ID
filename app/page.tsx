@@ -2676,6 +2676,7 @@ function KioskScreen({
     time: string;
     type: string;
   } | null>(null);
+  const confirmPanelRef = useRef<HTMLDivElement>(null);
   const resetTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -2720,6 +2721,29 @@ function KioskScreen({
     } else {
       speak(`${employee.name}. ${nextPunch}. Confirme.`);
     }
+    window.setTimeout(() => {
+      confirmPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+  }
+
+  function resetRecognition(message = "Reconhecimento cancelado. Tente novamente.") {
+    setRecognizedEmployee(null);
+    setSelectedPunch("Entrada 1");
+    setJourneyFinished(false);
+    setTimingWarning(null);
+    setRecognizedPhoto(undefined);
+    setBlockingMessage("");
+    setConfirmation(null);
+    onAction(message);
+    speak(message);
+  }
+
+  function usePinFallback() {
+    resetRecognition("Use o PIN do colaborador para registrar.");
+    setPinFallbackOpen(true);
+    window.setTimeout(() => {
+      document.getElementById("kiosk-pin-fallback")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
   }
 
   async function confirmPunch() {
@@ -2815,7 +2839,7 @@ function KioskScreen({
         </div>
 
         <aside className="grid content-start gap-3">
-          <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 md:p-5">
+          <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 md:p-5" ref={confirmPanelRef}>
             <p className="text-lg font-semibold text-white">
               {manualSelection ? "Escolha a marcação" : "Marcação identificada"}
             </p>
@@ -2889,6 +2913,24 @@ function KioskScreen({
               >
                 {timingWarning ? "⚠ CONFIRMAR MESMO ASSIM" : "✓ CONFIRMAR PONTO"}
               </button>
+              {recognizedEmployee && !confirmation && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    className="secondary-button border-white/25 bg-white/[0.06] text-white hover:bg-white/10"
+                    onClick={() => resetRecognition()}
+                    type="button"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    className="secondary-button border-[#f5b942] bg-[#fff4d6] text-[#6b4500] hover:bg-[#ffe8a6]"
+                    onClick={usePinFallback}
+                    type="button"
+                  >
+                    Nao sou eu / usar PIN
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2901,7 +2943,7 @@ function KioskScreen({
             </div>
           )}
 
-          <div className="rounded-lg border border-white/10 bg-white text-[#17202a]">
+          <div className="rounded-lg border border-white/10 bg-white text-[#17202a]" id="kiosk-pin-fallback">
             <button
               aria-expanded={pinFallbackOpen}
               className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
