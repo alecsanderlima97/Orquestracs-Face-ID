@@ -1153,13 +1153,11 @@ export default function Home() {
           <div className="flex h-full flex-col">
             <div className="border-b border-white/10 pb-5">
               <div className="flex items-center gap-3">
-                <div className="grid h-11 w-11 place-items-center rounded-md bg-[#dcebe6] text-lg font-bold text-[#164d42]">
-                  O
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">Orquestracs</p>
-                  <p className="text-xs text-white/60">Face ID</p>
-                </div>
+                <img
+                  alt="Orquestracs Face ID"
+                  className="h-12 w-auto rounded-md bg-white p-1.5"
+                  src="/orquestracs-face-id-logo.svg"
+                />
               </div>
               <div className="mt-5 rounded-md border border-white/10 bg-white/[0.04] p-3">
                 <p className="text-xs uppercase tracking-[0.12em] text-white/45">Empresa</p>
@@ -1239,8 +1237,11 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mt-4 rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-4 py-3 text-sm text-[#52616f]">
-              {notice}
+            <div className="mt-4 flex items-start gap-2 rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-3 py-2 text-sm text-[#52616f]">
+              <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border border-[#cfe3dc] bg-[#f1faf7] text-xs font-bold text-[#18594c]">
+                i
+              </span>
+              <p className="leading-5">{notice}</p>
             </div>
           </header>
 
