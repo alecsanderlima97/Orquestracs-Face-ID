@@ -11,6 +11,7 @@ type FaceApiModule = typeof import("@vladmandic/face-api");
 export type RecognizedFace = {
   employeeId: string;
   name: string;
+  externalPunchAllowed?: boolean;
   punchMode?: "automatic" | "manual";
   schedule?: {
     breakEnd: string;

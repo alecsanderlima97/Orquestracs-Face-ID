@@ -42,6 +42,7 @@ type Section =
   | "Colaboradores"
   | "Escalas"
   | "Sala de ponto"
+  | "Ponto externo"
   | "Batidas"
   | "Banco de horas"
   | "Fechamento mensal"
@@ -61,6 +62,7 @@ type EmployeeRow = {
   cpf: string;
   department?: string;
   employeeId?: string;
+  externalPunchAllowed?: boolean;
   faceIdStatus?: "not_registered" | "registered";
   lastPunch: string;
   name: string;
@@ -94,6 +96,7 @@ type ImportedEmployee = {
   collectiveJourneyId?: string;
   cpf?: string;
   department?: string;
+  externalPunchAllowed?: boolean;
   faceIdStatus?: "not_registered" | "registered";
   journeyMode?: "collective" | "individual";
   name: string;
@@ -124,6 +127,7 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
     cpf: String(employee.cpf || "Nao informado"),
     department: String(employee.department || "Geral"),
     employeeId: String(employee.employeeId || employee.id || fallbackId),
+    externalPunchAllowed: employee.externalPunchAllowed === true,
     faceIdStatus: (employee.faceIdStatus || "not_registered") as LocalEmployee["faceIdStatus"],
     lastPunch: String(employee.lastPunch || "Sem batida hoje"),
     name: String(employee.name || "Colaborador sem nome"),
@@ -165,6 +169,7 @@ const navItems: Section[] = [
   "Empresa",
   "Colaboradores",
   "Sala de ponto",
+  "Ponto externo",
   "Banco de horas",
   "Fechamento mensal",
   "Relatorios",
@@ -561,6 +566,48 @@ type PunchException = {
   expectedTime: string;
 };
 
+type PunchLocation = NonNullable<Punch["location"]>;
+
+type PunchContext = {
+  deviceId?: string;
+  externalReason?: string;
+  location?: PunchLocation;
+  origin?: "kiosk" | "external";
+};
+
+function getPunchDeviceId() {
+  const storageKey = "orquestracs-face-id-device-id";
+  const existing = window.localStorage.getItem(storageKey);
+  if (existing) return existing;
+
+  const created = `web-${crypto.randomUUID()}`;
+  window.localStorage.setItem(storageKey, created);
+  return created;
+}
+
+function capturePunchLocation(): Promise<PunchLocation> {
+  if (!("geolocation" in navigator)) return Promise.resolve({ status: "unavailable" });
+
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => resolve({
+        accuracy: Math.round(position.coords.accuracy),
+        latitude: Number(position.coords.latitude.toFixed(6)),
+        longitude: Number(position.coords.longitude.toFixed(6)),
+        status: "captured",
+      }),
+      (error) => resolve({
+        status: error.code === error.PERMISSION_DENIED
+          ? "denied"
+          : error.code === error.TIMEOUT
+            ? "timeout"
+            : "unavailable",
+      }),
+      { enableHighAccuracy: true, maximumAge: 30000, timeout: 12000 },
+    );
+  });
+}
+
 function getLocalRecords() {
   return JSON.parse(
     window.localStorage.getItem("orquestracs-face-id-local-records") || "[]",
@@ -837,6 +884,7 @@ export default function Home() {
       Colaboradores: "Equipe, documentos, turnos e biometria",
       Escalas: "Jornadas, tolerancias e banco de horas",
       "Sala de ponto": "Tablet de reconhecimento facial",
+      "Ponto externo": "Registro autorizado pelo celular",
       Batidas: "Registro por PIN, foto e evidencias",
       "Banco de horas": "Saldos, faltantes, extras e abonos",
       "Fechamento mensal": "Conferencia mensal para contador",
@@ -1063,7 +1111,13 @@ export default function Home() {
     setNotice(`${action} salvo localmente neste navegador. Firebase sera conectado depois.`);
   }
 
-  async function registerPunch(kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob) {
+  async function registerPunch(
+    kind: string,
+    employee?: RecognizedFace,
+    exception?: PunchException,
+    photoBlob?: Blob,
+    context: PunchContext = {},
+  ) {
     if (!employee && !pin.trim()) {
       setNotice("Informe um PIN para simular a batida.");
       return false;
@@ -1091,14 +1145,20 @@ export default function Home() {
       }
     }
 
+    const external = context.origin === "external";
     const punchPayload = {
       companyId: "main",
-      deviceId: "web-kiosk",
+      deviceId: context.deviceId || getPunchDeviceId(),
       employeeId,
+      externalReason: context.externalReason || "",
+      location: context.location || { status: "unavailable" as const },
       occurredAt: occurredAt.toISOString(),
+      origin: external ? "external" as const : "kiosk" as const,
       photoPath,
-      source: employee ? "face_id" as const : "pin_photo" as const,
-      status: (exception ? "outside_shift" : "on_time") as PunchStatus,
+      source: employee
+        ? external ? "external_face_id" as const : "face_id" as const
+        : external ? "external_pin_photo" as const : "pin_photo" as const,
+      status: (external ? "external_work" : exception ? "outside_shift" : "on_time") as PunchStatus,
       type: mapPunchType(kind),
     };
 
@@ -1115,11 +1175,13 @@ export default function Home() {
       return false;
     }
 
-    appendLocalRecord(`Batida: ${kind}`, "Sala de ponto", {
+    appendLocalRecord(`Batida: ${kind}`, external ? "Ponto externo" : "Sala de ponto", {
       Colaborador: employeeName,
       "ID do colaborador": employee?.employeeId || "Identificação por PIN",
       Horário: occurredAt.toISOString(),
       Método: employee ? "Face ID" : "PIN + foto",
+      Origem: external ? "Externa" : "Sala de ponto",
+      Localização: context.location?.status || "Nao solicitada",
       Tipo: kind,
       ...(exception
         ? {
@@ -1388,6 +1450,9 @@ export default function Home() {
               setPin={setPin}
             />
           )}
+          {active === "Ponto externo" && (
+            <ExternalPunchScreen onAction={demoAction} onRegister={registerPunch} />
+          )}
           {active === "Batidas" && (
             <PunchesScreen
               onAction={demoAction}
@@ -1490,7 +1555,7 @@ function PunchCard({
   pin,
   setPin,
 }: {
-  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob) => Promise<boolean>;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob, context?: PunchContext) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -1868,6 +1933,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     cbo: "",
     cpf: "",
     department: "",
+    externalPunchAllowed: false,
     name: "",
     phone: "",
     pin: "",
@@ -1985,7 +2051,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     });
   }, [employeePhotoUrls, localEmployees]);
 
-  function updateEmployeeForm(field: keyof typeof employeeForm, value: string) {
+  function updateEmployeeForm<K extends keyof typeof employeeForm>(field: K, value: (typeof employeeForm)[K]) {
     setEmployeeForm((current) => ({ ...current, [field]: value }));
   }
 
@@ -2054,6 +2120,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
       cbo: selected.cbo || "",
       cpf: selected.cpf === "Nao informado" ? "" : selected.cpf,
       department: selected.department || "",
+      externalPunchAllowed: selected.externalPunchAllowed === true,
       name: selected.name,
       phone: selected.phone || "",
       pin: selected.pin || "",
@@ -2088,6 +2155,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             cpf: employee.cpf || "Nao informado",
             department: employee.department || "Geral",
             employeeId: employee.registration ? `matricula-${onlyDigits(employee.registration)}` : crypto.randomUUID(),
+            externalPunchAllowed: employee.externalPunchAllowed === true,
             faceIdStatus: employee.faceIdStatus || "not_registered",
             lastPunch: "Sem batida hoje",
             name: employee.name.trim(),
@@ -2169,6 +2237,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
       cpf: employeeForm.cpf || "Não informado",
       department: employeeForm.department || "Geral",
       employeeId: editingEmployeeId || crypto.randomUUID(),
+      externalPunchAllowed: employeeForm.externalPunchAllowed,
       faceIdStatus: selectedEmployee?.faceIdStatus || "not_registered",
       lastPunch: "Sem batida hoje",
       name: employeeForm.name.trim(),
@@ -2351,6 +2420,22 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           <Field label="Tolerancia"><input className="input" placeholder="10 min" /></Field>
         </div>
 
+        <div className="mt-4 flex items-start gap-3 rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-4">
+          <input
+            checked={employeeForm.externalPunchAllowed}
+            className="mt-1 h-4 w-4 accent-[#176b5b]"
+            id="external-punch-allowed"
+            onChange={(event) => updateEmployeeForm("externalPunchAllowed", event.target.checked)}
+            type="checkbox"
+          />
+          <label className="cursor-pointer" htmlFor="external-punch-allowed">
+            <span className="block text-sm font-semibold text-[#173f37]">Autorizar ponto externo</span>
+            <span className="mt-1 block text-xs leading-5 text-[#53736c]">
+              Permite que este colaborador registre pelo celular com PIN, reconhecimento facial e localizacao como evidencia.
+            </span>
+          </label>
+        </div>
+
         <div className="mt-5 rounded-md border border-[#d9e0e7] bg-[#fbfcfd] p-4">
           <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
             <div>
@@ -2439,6 +2524,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
               compact
               employee={{
                 employeeId: selectedEmployee!.employeeId,
+                externalPunchAllowed: selectedEmployee!.externalPunchAllowed,
                 name: selectedEmployee!.name,
                 punchMode: selectedEmployee!.punchMode || "automatic",
                 schedule: selectedEmployee!.schedule,
@@ -2518,6 +2604,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
               compact
               employee={{
                 employeeId: selectedEmployee!.employeeId,
+                externalPunchAllowed: selectedEmployee!.externalPunchAllowed,
                 name: selectedEmployee!.name,
                 punchMode: selectedEmployee!.punchMode || "automatic",
                 schedule: selectedEmployee!.schedule,
@@ -2585,6 +2672,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
               ["CBO", selectedEmployee.cbo || "-"],
               ["Jornada", selectedEmployee.shift || "-"],
               ["Face ID", selectedEmployee.faceIdStatus === "registered" ? "Cadastrado" : "Pendente"],
+              ["Ponto externo", selectedEmployee.externalPunchAllowed ? "Autorizado" : "Nao autorizado"],
               ["Ultima batida", selectedEmployee.lastPunch || "-"],
               ["Status", selectedEmployee.status || "-"],
             ].map(([label, value]) => (
@@ -2769,7 +2857,7 @@ function PunchesScreen({
   setPin,
 }: {
   onAction: (action: string) => void;
-  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob) => Promise<boolean>;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob, context?: PunchContext) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -2826,6 +2914,184 @@ function PunchesScreen({
   );
 }
 
+function ExternalPunchScreen({
+  onAction,
+  onRegister,
+}: {
+  onAction: (action: string) => void;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob, context?: PunchContext) => Promise<boolean>;
+}) {
+  const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
+  const [pin, setPin] = useState("");
+  const [reason, setReason] = useState("");
+  const [selectedPunch, setSelectedPunch] = useState("Entrada 1");
+  const [recognizedEmployee, setRecognizedEmployee] = useState<RecognizedFace | null>(null);
+  const [recognizedPhoto, setRecognizedPhoto] = useState<Blob | undefined>();
+  const [location, setLocation] = useState<PunchLocation | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    void listEmployees("main")
+      .then((saved) => {
+        if (!mounted) return;
+        setEmployeesList(saved.map((employee) =>
+          toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
+        ));
+      })
+      .catch((error) => console.error("Falha ao carregar autorizacoes de ponto externo.", error));
+
+    return () => { mounted = false; };
+  }, []);
+
+  function identifyExternalEmployee(employee: RecognizedFace, photoBlob?: Blob) {
+    setConfirmation("");
+    setLocation(null);
+    const registered = employeesList.find((item) => item.employeeId === employee.employeeId);
+
+    if (!registered) {
+      setRecognizedEmployee(null);
+      onAction("Rosto reconhecido, mas o colaborador nao foi encontrado no cadastro da empresa.");
+      return;
+    }
+    if (!registered.externalPunchAllowed) {
+      setRecognizedEmployee(null);
+      onAction(`${registered.name} nao possui autorizacao para ponto externo.`);
+      return;
+    }
+    if (!pin || registered.pin !== pin) {
+      setRecognizedEmployee(null);
+      onAction("O PIN informado nao corresponde ao rosto reconhecido.");
+      return;
+    }
+
+    const nextPunch = inferNextPunch(registered.employeeId);
+    const recognized = {
+      ...employee,
+      employeeId: registered.employeeId,
+      externalPunchAllowed: true,
+      name: registered.name,
+      punchMode: registered.punchMode,
+      schedule: registered.schedule,
+    };
+    setRecognizedEmployee(recognized);
+    setRecognizedPhoto(photoBlob);
+    if (nextPunch) setSelectedPunch(nextPunch);
+    onAction(`${registered.name} identificado e autorizado para ponto externo.`);
+  }
+
+  async function confirmExternalPunch() {
+    if (!recognizedEmployee || submitting) return;
+    if (!reason.trim()) {
+      onAction("Informe onde ou por que o trabalho esta sendo realizado fora da empresa.");
+      return;
+    }
+
+    setSubmitting(true);
+    const capturedLocation = await capturePunchLocation();
+    setLocation(capturedLocation);
+    const saved = await onRegister(selectedPunch, recognizedEmployee, undefined, recognizedPhoto, {
+      deviceId: getPunchDeviceId(),
+      externalReason: reason.trim(),
+      location: capturedLocation,
+      origin: "external",
+    });
+    setSubmitting(false);
+
+    if (!saved) return;
+    setConfirmation(`${selectedPunch} registrada para ${recognizedEmployee.name}.`);
+    setRecognizedEmployee(null);
+    setRecognizedPhoto(undefined);
+    setPin("");
+    setReason("");
+  }
+
+  return (
+    <section className="mx-auto max-w-3xl rounded-lg border border-[#d9e0e7] bg-white p-4 shadow-sm md:p-6">
+      <div className="flex flex-col gap-2 border-b border-[#e3e8ee] pb-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase text-[#2d6c5d]">Registro pelo celular</p>
+          <h2 className="mt-1 text-xl font-semibold text-[#101923]">Ponto externo</h2>
+          <p className="mt-1 text-sm leading-6 text-[#667085]">
+            Exclusivo para colaboradores autorizados. A localizacao e registrada como evidencia e nao bloqueia a marcacao.
+          </p>
+        </div>
+        <span className="w-fit rounded-md border border-[#cfe3dc] bg-[#f1faf7] px-3 py-2 text-xs font-semibold text-[#24594d]">
+          PIN + reconhecimento facial
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+        <div>
+          <Field label="PIN do colaborador">
+            <input
+              className="input"
+              inputMode="numeric"
+              maxLength={6}
+              onChange={(event) => {
+                setPin(event.target.value.replace(/\D/g, ""));
+                setRecognizedEmployee(null);
+              }}
+              placeholder="0000"
+              value={pin}
+            />
+          </Field>
+          <div className="mt-4 rounded-lg bg-[#101923] p-3 text-white">
+            <FaceCamera compact onRecognized={identifyExternalEmployee} onStatus={onAction} />
+          </div>
+        </div>
+
+        <div className="grid content-start gap-4">
+          <Field label="Local ou motivo do trabalho externo">
+            <input
+              className="input"
+              maxLength={120}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Ex.: entrega no cliente"
+              value={reason}
+            />
+          </Field>
+          <Field label="Marcacao">
+            <select className="input" onChange={(event) => setSelectedPunch(event.target.value)} value={selectedPunch}>
+              <option value="Entrada 1">Entrada</option>
+              <option value="Saida 1">Inicio do intervalo</option>
+              <option value="Entrada 2">Retorno do intervalo</option>
+              <option value="Saida 2">Saida</option>
+            </select>
+          </Field>
+
+          <div className={`rounded-md border p-3 text-sm ${recognizedEmployee ? "border-[#9ed3c5] bg-[#eaf7f3] text-[#174f43]" : "border-[#d9e0e7] bg-[#fbfcfd] text-[#667085]"}`}>
+            {recognizedEmployee
+              ? `${recognizedEmployee.name} identificado. Confira a marcacao e confirme.`
+              : "Informe o PIN e toque em Reconhecer rosto."}
+          </div>
+
+          <button
+            className="primary-button min-h-12 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!recognizedEmployee || submitting}
+            onClick={() => void confirmExternalPunch()}
+            type="button"
+          >
+            {submitting ? "Obtendo localizacao..." : "Confirmar ponto externo"}
+          </button>
+
+          {location && (
+            <p className="text-xs leading-5 text-[#667085]">
+              Localizacao: {location.status === "captured" ? `capturada com precisao aproximada de ${location.accuracy} m` : "nao disponivel; a ocorrencia foi registrada"}.
+            </p>
+          )}
+          {confirmation && (
+            <div aria-live="polite" className="rounded-md border border-[#8bcab9] bg-[#dff5ed] p-4 text-sm font-semibold text-[#155548]">
+              {confirmation}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function KioskScreen({
   onAction,
   onRegister,
@@ -2833,7 +3099,7 @@ function KioskScreen({
   setPin,
 }: {
   onAction: (action: string) => void;
-  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob) => Promise<boolean>;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob, context?: PunchContext) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -3951,6 +4217,15 @@ function AssistantPanel({
         "Se o reconhecimento falhar, use PIN + foto como contingencia.",
       ],
       questions: ["Como confirmar presenca?", "Quando usar PIN + foto?", "O que fica registrado?"],
+    },
+    "Ponto externo": {
+      title: "Ponto externo pelo celular",
+      steps: [
+        "O administrador autoriza o ponto externo no cadastro do colaborador.",
+        "O colaborador informa o PIN e faz o reconhecimento facial no celular.",
+        "O sistema registra horario, aparelho, foto, localizacao e motivo como evidencias.",
+      ],
+      questions: ["Quem pode usar?", "E se o GPS falhar?", "O que fica registrado?"],
     },
     Batidas: {
       title: "Sala de ponto",

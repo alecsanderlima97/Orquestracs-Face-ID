@@ -103,6 +103,7 @@ export type Employee = {
   collectiveJourneyId?: string;
   individualJourney?: IndividualJourney;
   faceIdStatus: "not_registered" | "registered" | "needs_review";
+  externalPunchAllowed?: boolean;
   active: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -128,7 +129,15 @@ export type Punch = {
   serverRecordedAt: Date;
   photoPath: string;
   deviceId: string;
-  source: "face_id" | "pin_photo" | "manager";
+  source: "face_id" | "pin_photo" | "external_face_id" | "external_pin_photo" | "manager";
+  origin?: "kiosk" | "external" | "manager_adjustment";
+  location?: {
+    accuracy?: number;
+    latitude?: number;
+    longitude?: number;
+    status: "captured" | "denied" | "unavailable" | "timeout";
+  };
+  externalReason?: string;
   hash: string;
   previousHash?: string;
 };
