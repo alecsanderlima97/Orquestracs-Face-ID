@@ -1237,8 +1237,8 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mt-4 flex items-start gap-2 rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-3 py-2 text-sm text-[#52616f]">
-              <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full border border-[#cfe3dc] bg-[#f1faf7] text-xs font-bold text-[#18594c]">
+            <div className="mt-3 flex items-center gap-2 text-xs font-medium text-[#667085]">
+              <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#edf5f2] text-[11px] font-bold text-[#18594c]">
                 i
               </span>
               <p className="leading-5">{notice}</p>
