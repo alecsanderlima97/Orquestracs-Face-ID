@@ -50,6 +50,7 @@ type Section =
   | "Admin";
 
 type MaskType = "name" | "cpf" | "cnpj" | "phone" | "time" | "pin" | "date" | "cep";
+type EmployeeSection = "detail" | "face" | "form" | "list";
 
 const employees: EmployeeRow[] = [];
 
@@ -1652,6 +1653,12 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   const [selectedEmployeePunches, setSelectedEmployeePunches] = useState<Punch[]>([]);
   const [selectedEmployeePunchesLoading, setSelectedEmployeePunchesLoading] = useState(false);
   const [employeePhotoUrls, setEmployeePhotoUrls] = useState<Record<string, string>>({});
+  const [openEmployeeSections, setOpenEmployeeSections] = useState<Record<EmployeeSection, boolean>>({
+    detail: false,
+    face: false,
+    form: false,
+    list: true,
+  });
   const [showFaceCamera, setShowFaceCamera] = useState(false);
   const [employeeJourney, setEmployeeJourney] = useState({
     start: "07:00",
@@ -1671,6 +1678,10 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   const faceProgress = localEmployees.length
     ? Math.round((faceReadyCount / localEmployees.length) * 100)
     : 0;
+
+  function setEmployeeSection(section: EmployeeSection, open: boolean) {
+    setOpenEmployeeSections((current) => ({ ...current, [section]: open }));
+  }
 
   async function loadEmployeePhoto(employee: LocalEmployee) {
     if (!employee.profilePhotoPath || employeePhotoUrls[employee.employeeId]) return;
@@ -1754,6 +1765,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setEditingEmployeeId(null);
     setSelectedEmployee(null);
     setShowFaceCamera(false);
+    setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
     onAction("Novo colaborador: formulario limpo para cadastro.");
     document.getElementById("employee-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -1762,6 +1774,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setEmployeeForm(emptyEmployeeForm);
     setEditingEmployeeId(null);
     setShowFaceCamera(false);
+    setEmployeeSection("form", false);
     onAction("Edicao cancelada. Nenhuma alteracao foi salva.");
   }
 
@@ -1778,6 +1791,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setSelectedEmployee(target);
     setEditingEmployeeId(null);
     setShowFaceCamera(true);
+    setOpenEmployeeSections({ detail: false, face: true, form: false, list: true });
     onAction(`Cadastro de Face ID iniciado para ${target.name}.`);
     window.setTimeout(
       () => document.getElementById("face-id-flow-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }),
@@ -1790,6 +1804,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setSelectedEmployee(selected);
     setSelectedEmployeePunches([]);
     setShowFaceCamera(false);
+    setOpenEmployeeSections({ detail: true, face: false, form: false, list: true });
     onAction(`Visualizando cadastro de ${selected.name}.`);
     void loadEmployeePhoto(selected);
     void loadEmployeePunches(selected);
@@ -1804,6 +1819,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setSelectedEmployee(selected);
     setEditingEmployeeId(employeeDocumentId(selected));
     setShowFaceCamera(false);
+    setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
     setEmployeeForm({
       admissionDate: selected.admissionDate || "",
       cbo: selected.cbo || "",
@@ -2036,7 +2052,9 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   return (
     <>
       <div id="employee-form-panel">
-      <Panel
+      <CollapsiblePanel
+        isOpen={openEmployeeSections.form}
+        onToggle={() => setEmployeeSection("form", !openEmployeeSections.form)}
         title={editingEmployeeId ? "Editar colaborador" : "Novo colaborador"}
         subtitle="Dados para ponto, holerite e relatorio mensal"
       >
@@ -2179,9 +2197,14 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             </div>
           </div>
         )}
-      </Panel>
+      </CollapsiblePanel>
       </div>
-      <Panel title="Implantacao do Face ID" subtitle="Cadastro facial em sequencia">
+      <CollapsiblePanel
+        isOpen={openEmployeeSections.face}
+        onToggle={() => setEmployeeSection("face", !openEmployeeSections.face)}
+        title="Implantacao do Face ID"
+        subtitle={`${faceReadyCount}/${localEmployees.length} colaboradores com Face ID`}
+      >
         <div id="face-id-flow-panel" className="grid gap-4 lg:grid-cols-[1fr_320px]">
           <div>
             <div className="grid gap-3 md:grid-cols-3">
@@ -2252,10 +2275,15 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             </div>
           </div>
         )}
-      </Panel>
+      </CollapsiblePanel>
 
       {selectedEmployee && (
-        <Panel title="Ficha do colaborador" subtitle="Conferencia do cadastro selecionado">
+        <CollapsiblePanel
+          isOpen={openEmployeeSections.detail}
+          onToggle={() => setEmployeeSection("detail", !openEmployeeSections.detail)}
+          title="Ficha do colaborador"
+          subtitle="Conferencia do cadastro selecionado"
+        >
           <div className="mb-4 flex flex-col gap-4 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4 sm:flex-row sm:items-center">
             {employeePhotoUrls[selectedEmployee.employeeId] ? (
               <img
@@ -2324,16 +2352,24 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
             <button className="secondary-button" onClick={() => editEmployee(selectedEmployee)} type="button">Editar cadastro</button>
             <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee)} type="button">Cadastrar Face ID</button>
           </ActionRow>
-        </Panel>
+        </CollapsiblePanel>
       )}
-      <EmployeesTable
-        employeesList={localEmployees}
-        onAction={onAction}
-        onEdit={editEmployee}
-        onNew={startNewEmployee}
-        onView={viewEmployee}
-        photoUrls={employeePhotoUrls}
-      />
+      <CollapsiblePanel
+        isOpen={openEmployeeSections.list}
+        onToggle={() => setEmployeeSection("list", !openEmployeeSections.list)}
+        title="Colaboradores"
+        subtitle={`${localEmployees.length} cadastros na base`}
+      >
+        <EmployeesTable
+          embedded
+          employeesList={localEmployees}
+          onAction={onAction}
+          onEdit={editEmployee}
+          onNew={startNewEmployee}
+          onView={viewEmployee}
+          photoUrls={employeePhotoUrls}
+        />
+      </CollapsiblePanel>
     </>
   );
 }
@@ -3455,6 +3491,7 @@ function AssistantPanel({
 }
 
 function EmployeesTable({
+  embedded = false,
   employeesList = employees,
   onAction,
   onEdit,
@@ -3463,6 +3500,7 @@ function EmployeesTable({
   photoUrls = {},
   compact = false,
 }: {
+  embedded?: boolean;
   employeesList?: EmployeeRow[];
   onAction: (action: string) => void;
   onEdit?: (employee: EmployeeRow) => void;
@@ -3471,8 +3509,8 @@ function EmployeesTable({
   photoUrls?: Record<string, string>;
   compact?: boolean;
 }) {
-  return (
-    <section className="rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+  const tableContent = (
+    <>
       {!compact && (
         <div className="flex flex-col gap-3 border-b border-[#e3e8ee] p-5 md:flex-row md:items-center md:justify-between">
           <div>
@@ -3550,6 +3588,16 @@ function EmployeesTable({
           </tbody>
         </table>
       </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="overflow-hidden rounded-md border border-[#e3e8ee]">{tableContent}</div>;
+  }
+
+  return (
+    <section className="rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+      {tableContent}
     </section>
   );
 }
@@ -3626,6 +3674,40 @@ function ReportPreview() {
           </tbody>
         </table>
       </div>
+    </section>
+  );
+}
+
+function CollapsiblePanel({
+  children,
+  isOpen,
+  onToggle,
+  subtitle,
+  title,
+}: {
+  children: React.ReactNode;
+  isOpen: boolean;
+  onToggle: () => void;
+  subtitle: string;
+  title: string;
+}) {
+  return (
+    <section className="rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+      <button
+        aria-expanded={isOpen}
+        className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-[#f8fafb]"
+        onClick={onToggle}
+        type="button"
+      >
+        <span>
+          <span className="block text-sm font-medium text-[#667085]">{subtitle}</span>
+          <span className="mt-1 block text-xl font-semibold text-[#101923]">{title}</span>
+        </span>
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#d9e0e7] bg-[#fbfcfd] text-lg font-semibold text-[#26323f]">
+          {isOpen ? "-" : "+"}
+        </span>
+      </button>
+      {isOpen && <div className="border-t border-[#e3e8ee] p-5">{children}</div>}
     </section>
   );
 }
