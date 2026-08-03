@@ -17,7 +17,9 @@ import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
 import type { PunchStatus, PunchType } from "@/lib/models";
+import { createFaceIdRecord, uploadFacePhoto } from "@/lib/services/face-id";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
+import { uploadPunchPhoto } from "@/lib/services/punch-photos";
 import { createPunch } from "@/lib/services/punches";
 import {
   acceptTenantInvite,
@@ -931,7 +933,7 @@ export default function Home() {
     setNotice(`${action} salvo localmente neste navegador. Firebase sera conectado depois.`);
   }
 
-  async function registerPunch(kind: string, employee?: RecognizedFace, exception?: PunchException) {
+  async function registerPunch(kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob) {
     if (!employee && !pin.trim()) {
       setNotice("Informe um PIN para simular a batida.");
       return false;
@@ -941,11 +943,30 @@ export default function Home() {
     const serverRecordedAt = new Date();
     const employeeName = employee?.name || "Colaborador identificado por PIN";
     const employeeId = employee?.employeeId || `pin-${pin.trim()}`;
+    const punchId = crypto.randomUUID();
+    let photoPath = employee ? "face-id-local-profile" : "pending-storage-photo";
+
+    if (photoBlob) {
+      try {
+        photoPath = await uploadPunchPhoto({
+          blob: photoBlob,
+          companyId: "main",
+          employeeId,
+          occurredAt,
+          punchId,
+        });
+      } catch (error) {
+        console.error(error);
+        setNotice("A foto nao foi salva no Storage. A batida continuara com evidencia pendente.");
+      }
+    }
+
     const punchPayload = {
       companyId: "main",
       deviceId: "web-kiosk",
       employeeId,
       occurredAt: occurredAt.toISOString(),
+      photoPath,
       source: employee ? "face_id" as const : "pin_photo" as const,
       status: (exception ? "outside_shift" : "on_time") as PunchStatus,
       type: mapPunchType(kind),
@@ -956,7 +977,6 @@ export default function Home() {
         ...punchPayload,
         hash: await createAuditHash(punchPayload),
         occurredAt,
-        photoPath: employee ? "face-id-local-profile" : "pending-storage-photo",
         serverRecordedAt,
       });
     } catch (error) {
@@ -1316,7 +1336,7 @@ function PunchCard({
   pin,
   setPin,
 }: {
-  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => Promise<boolean>;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -1889,9 +1909,10 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
     setShowFaceCamera(true);
   }
 
-  function markFaceRegistered(captureCount: number) {
+  function markFaceRegistered(captureCount: number, photoBlob?: Blob) {
     if (!selectedEmployee) return;
     const completed = captureCount >= REQUIRED_FACE_CAPTURES;
+    const captureId = crypto.randomUUID();
 
     const updated = localEmployees.map((employee) =>
       employee.employeeId === selectedEmployee.employeeId
@@ -1916,6 +1937,24 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
         faceIdStatus: completed ? "registered" : current.faceIdStatus,
         ...(completed ? { faceRegisteredAt: new Date().toISOString(), status: "Face ID cadastrado" } : { status: `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}` }),
       });
+
+      if (photoBlob) {
+        void uploadFacePhoto({
+          blob: photoBlob,
+          companyId: "main",
+          employeeId: current.employeeId,
+          photoId: captureId,
+        }).then((photoPath) =>
+          createFaceIdRecord({
+            capturedBy: "web-kiosk",
+            companyId: "main",
+            consentAcceptedAt: new Date(),
+            createdAt: new Date(),
+            employeeId: current.employeeId,
+            photoPath,
+          }),
+        );
+      }
     }
 
     if (completed) {
@@ -2307,7 +2346,7 @@ function PunchesScreen({
   setPin,
 }: {
   onAction: (action: string) => void;
-  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => Promise<boolean>;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -2371,7 +2410,7 @@ function KioskScreen({
   setPin,
 }: {
   onAction: (action: string) => void;
-  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException) => Promise<boolean>;
+  onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
 }) {
@@ -2379,6 +2418,7 @@ function KioskScreen({
   const [selectedPunch, setSelectedPunch] = useState("Entrada 1");
   const [journeyFinished, setJourneyFinished] = useState(false);
   const [timingWarning, setTimingWarning] = useState<PunchException | null>(null);
+  const [recognizedPhoto, setRecognizedPhoto] = useState<Blob | undefined>();
   const [blockingMessage, setBlockingMessage] = useState("");
   const [confirmation, setConfirmation] = useState<{
     employeeName: string;
@@ -2413,10 +2453,11 @@ function KioskScreen({
     window.speechSynthesis.speak(voiceMessage);
   }
 
-  function identifyFace(employee: RecognizedFace) {
+  function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
     const nextPunch = inferNextPunch(employee.employeeId);
     setTimingWarning(null);
     setBlockingMessage("");
+    setRecognizedPhoto(photoBlob);
     setRecognizedEmployee(employee);
     setJourneyFinished(nextPunch === null);
     if (employee.punchMode !== "manual" && nextPunch) setSelectedPunch(nextPunch);
@@ -2459,7 +2500,7 @@ function KioskScreen({
       return;
     }
 
-    if (!(await onRegister(selectedPunch, recognizedEmployee, timingWarning || undefined))) return;
+    if (!(await onRegister(selectedPunch, recognizedEmployee, timingWarning || undefined, recognizedPhoto))) return;
 
     const time = new Date().toLocaleTimeString("pt-BR", {
       hour: "2-digit",
@@ -2478,6 +2519,7 @@ function KioskScreen({
       setSelectedPunch("Entrada 1");
       setJourneyFinished(false);
       setTimingWarning(null);
+      setRecognizedPhoto(undefined);
       setBlockingMessage("");
     }, 6000);
   }

@@ -29,8 +29,8 @@ type StoredFaceProfile = RecognizedFace & {
 type FaceCameraProps = {
   compact?: boolean;
   employee?: RecognizedFace;
-  onProfileUpdated?: (captureCount: number) => void;
-  onRecognized?: (employee: RecognizedFace) => void;
+  onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void;
+  onRecognized?: (employee: RecognizedFace, photoBlob?: Blob) => void;
   onStatus?: (message: string) => void;
 };
 
@@ -134,6 +134,22 @@ export function FaceCamera({
       .withFaceDescriptor();
   }
 
+  async function captureFrame() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth || !video.videoHeight) return undefined;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext("2d");
+    if (!context) return undefined;
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return new Promise<Blob | undefined>((resolve) => {
+      canvas.toBlob((blob) => resolve(blob || undefined), "image/webp", 0.82);
+    });
+  }
+
   async function registerFace() {
     if (!employee) {
       updateMessage("Selecione ou cadastre um colaborador antes da captura facial.");
@@ -170,7 +186,7 @@ export function FaceCamera({
       }
 
       window.localStorage.setItem(FACE_PROFILES_KEY, JSON.stringify(profiles));
-      onProfileUpdated?.(descriptors.length);
+      onProfileUpdated?.(descriptors.length, await captureFrame());
       updateMessage(
         `${employee.name}: captura ${descriptors.length}/${MAX_CAPTURES_PER_EMPLOYEE} salva neste aparelho.`,
       );
@@ -218,12 +234,15 @@ export function FaceCamera({
         updateMessage(
           `${match.profile.name} reconhecido (similaridade técnica: ${Math.round((1 - match.distance) * 100)}%).`,
         );
-        onRecognized?.({
-          employeeId: match.profile.employeeId,
-          name: match.profile.name,
-          punchMode: match.profile.punchMode || "automatic",
-          schedule: match.profile.schedule,
-        });
+        onRecognized?.(
+          {
+            employeeId: match.profile.employeeId,
+            name: match.profile.name,
+            punchMode: match.profile.punchMode || "automatic",
+            schedule: match.profile.schedule,
+          },
+          await captureFrame(),
+        );
       } else {
         updateMessage("Rosto não reconhecido. Use o PIN ou tente novamente.");
       }

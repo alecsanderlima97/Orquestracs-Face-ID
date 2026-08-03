@@ -13,6 +13,20 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
+    match /companies/main/employees/{employeeId}/face-id/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /companies/main/employees/{employeeId}/punches/{date}/{fileName} {
+      allow read: if signedIn();
+      allow write: if signedIn()
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
     match /companies/main/{allPaths=**} {
       allow read: if signedIn();
       allow write: if false;
