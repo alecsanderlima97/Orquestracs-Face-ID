@@ -1155,9 +1155,13 @@ export default function Home() {
               <div className="flex items-center gap-3">
                 <img
                   alt="Orquestracs Face ID"
-                  className="h-12 w-[180px] rounded-md bg-white object-contain p-1.5"
+                  className="h-11 w-11 rounded-md bg-[#dcebe6] object-contain p-1.5"
                   src="/orquestracs-face-id-logo.svg"
                 />
+                <div className="min-w-0">
+                  <p className="text-base font-bold leading-5 text-white">Orquestracs</p>
+                  <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.12em] text-[#7ee2c4]">Face ID</p>
+                </div>
               </div>
               <div className="mt-5 rounded-md border border-white/10 bg-white/[0.04] p-3">
                 <p className="text-xs uppercase tracking-[0.12em] text-white/45">Empresa</p>
