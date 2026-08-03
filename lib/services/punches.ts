@@ -21,6 +21,21 @@ export async function listEmployeePunches(companyId: string, employeeId: string)
   return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as Punch);
 }
 
+export async function listEmployeePunchesByIds(companyId: string, employeeIds: string[]) {
+  const uniqueIds = Array.from(new Set(employeeIds.filter(Boolean)));
+  if (!uniqueIds.length) return [];
+
+  const snapshots = await Promise.all(
+    uniqueIds.map((employeeId) =>
+      getDocs(query(punchesRef(companyId), where("employeeId", "==", employeeId))),
+    ),
+  );
+
+  return snapshots.flatMap((snapshot) =>
+    snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as Punch),
+  );
+}
+
 export async function createPunchAdjustment(
   companyId: string,
   adjustment: Omit<PunchAdjustment, "id">,

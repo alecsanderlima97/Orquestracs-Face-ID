@@ -20,7 +20,7 @@ import type { Punch, PunchStatus, PunchType } from "@/lib/models";
 import { createFaceIdRecord, uploadFacePhoto } from "@/lib/services/face-id";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
-import { createPunch, listEmployeePunches } from "@/lib/services/punches";
+import { createPunch, listEmployeePunchesByIds } from "@/lib/services/punches";
 import { getStorageFileUrl } from "@/lib/services/storage-files";
 import {
   acceptTenantInvite,
@@ -1686,7 +1686,10 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   async function loadEmployeePunches(employee: LocalEmployee) {
     setSelectedEmployeePunchesLoading(true);
     try {
-      const punches = await listEmployeePunches("main", employee.employeeId);
+      const punches = await listEmployeePunchesByIds("main", [
+        employee.employeeId,
+        employee.pin ? `pin-${employee.pin}` : "",
+      ]);
       const sorted = punches.sort((first, second) =>
         punchDate(second).getTime() - punchDate(first).getTime(),
       );
