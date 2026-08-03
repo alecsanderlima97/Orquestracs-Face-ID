@@ -164,9 +164,7 @@ const navItems: Section[] = [
   "Admin",
   "Empresa",
   "Colaboradores",
-  "Escalas",
   "Sala de ponto",
-  "Batidas",
   "Banco de horas",
   "Fechamento mensal",
   "Relatorios",
@@ -204,13 +202,6 @@ const auditLogs = [
   ["Ajuste rastreado", "Responsavel, motivo e horario obrigatorios"],
   ["Prova digital", "Foto, PIN, IP, aparelho e hash por marcacao"],
   ["Relatorio mensal", "Espelho pronto para assinatura e conferencia"],
-];
-
-const metrics = [
-  ["Colaboradores", "0", "cadastre a equipe"],
-  ["Horas previstas", "00:00", "sem periodo fechado"],
-  ["Horas trabalhadas", "00:00", "sem batidas registradas"],
-  ["Saldo do banco", "00:00", "sem calculo mensal"],
 ];
 
 const monthlyClosingRows: string[][] = [];
@@ -527,6 +518,36 @@ function inferNextPunch(employeeId: string) {
 function minutesFromTime(value: string) {
   const [hours, minutes] = value.split(":").map(Number);
   return hours * 60 + minutes;
+}
+
+function formatDurationShort(totalMinutes: number) {
+  const sign = totalMinutes < 0 ? "-" : "";
+  const absolute = Math.abs(totalMinutes);
+  const hours = Math.floor(absolute / 60);
+  const minutes = absolute % 60;
+
+  if (!hours) return `${sign}${minutes} min`;
+  if (!minutes) return `${sign}${hours}h`;
+  return `${sign}${hours}h${String(minutes).padStart(2, "0")}`;
+}
+
+function formatDurationClock(totalMinutes: number) {
+  const sign = totalMinutes < 0 ? "-" : "";
+  const absolute = Math.abs(totalMinutes);
+  const hours = Math.floor(absolute / 60);
+  const minutes = absolute % 60;
+  return `${sign}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function formatDurationSpeech(totalMinutes: number) {
+  const absolute = Math.abs(totalMinutes);
+  const hours = Math.floor(absolute / 60);
+  const minutes = absolute % 60;
+  const parts = [];
+
+  if (hours) parts.push(`${hours} ${hours === 1 ? "hora" : "horas"}`);
+  if (minutes) parts.push(`${minutes} ${minutes === 1 ? "minuto" : "minutos"}`);
+  return parts.join(" e ") || "0 minuto";
 }
 
 function getPunchTiming(employee: RecognizedFace, punchType: string) {
@@ -998,7 +1019,7 @@ export default function Home() {
       ...(exception
         ? {
             "Confirmação de exceção": "Sim",
-            "Diferença em minutos": String(exception.differenceMinutes),
+            "Diferença": formatDurationClock(exception.differenceMinutes),
             "Horário previsto": exception.expectedTime,
           }
         : {}),
@@ -1241,6 +1262,7 @@ export default function Home() {
 
           {active === "Empresa" && (
             <CompaniesScreen
+              canEdit={isPlatformOwnerEmail(user.email) || appAccess?.role !== "reader"}
               company={companyProfile}
               key={String(companyProfile?.updatedAt || companyProfile?.logoUrl || "empty-company")}
               onAction={demoAction}
@@ -1319,9 +1341,34 @@ export default function Home() {
 }
 
 function Metrics() {
+  const [dashboardMetrics, setDashboardMetrics] = useState([
+    ["Colaboradores", "0", "cadastros carregados"],
+    ["Face ID", "0", "cadastros prontos"],
+    ["Batidas hoje", "0", "registros locais do dia"],
+    ["Pendencias", "0", "Face ID pendente"],
+  ]);
+
+  useEffect(() => {
+    const employeesList = getLocalEmployees();
+    const today = new Date().toDateString();
+    const todayPunches = getLocalRecords().filter((record) => {
+      const timestamp = record.fields["Horário"] || record.fields["HorÃ¡rio"] || record.savedAt;
+      return record.action.startsWith("Batida:") && new Date(timestamp).toDateString() === today;
+    });
+    const faceReady = employeesList.filter((employee) => employee.faceIdStatus === "registered").length;
+    const pendingFace = employeesList.filter((employee) => employee.faceIdStatus !== "registered").length;
+
+    setDashboardMetrics([
+      ["Colaboradores", String(employeesList.length), "cadastros na base"],
+      ["Face ID", String(faceReady), "cadastros prontos"],
+      ["Batidas hoje", String(todayPunches.length), "registros do dia"],
+      ["Pendencias", String(pendingFace), "Face ID pendente"],
+    ]);
+  }, []);
+
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {metrics.map(([label, value, detail]) => (
+      {dashboardMetrics.map(([label, value, detail]) => (
         <div className="rounded-lg border border-[#d9e0e7] bg-white p-4 shadow-sm" key={label}>
           <div className="flex items-start justify-between gap-3">
             <p className="text-sm font-medium text-[#667085]">{label}</p>
@@ -1407,12 +1454,23 @@ function ComplianceCard() {
 }
 
 function CompaniesScreen({
+  canEdit,
   company,
   onAction,
 }: {
+  canEdit: boolean;
   company: MainCompanyProfile | null;
   onAction: (action: string) => void;
 }) {
+  const [openCompanySections, setOpenCompanySections] = useState({
+    adjustments: false,
+    backup: false,
+    photos: false,
+    profile: true,
+    rules: false,
+    shifts: false,
+    users: false,
+  });
   const [companyJourney, setCompanyJourney] = useState({
     start: "07:00",
     lunchOut: "11:30",
@@ -1425,12 +1483,27 @@ function CompaniesScreen({
     setCompanyJourney((current) => ({ ...current, [field]: value }));
   }
 
+  function setCompanySection(section: keyof typeof openCompanySections, open: boolean) {
+    setOpenCompanySections((current) => ({ ...current, [section]: open }));
+  }
+
   const address = (company?.address || {}) as Record<string, string>;
 
   return (
     <>
-      <TwoColumn>
-        <Panel title="Perfil da empresa" subtitle="Dados principais do CNPJ">
+      {!canEdit && (
+        <div className="rounded-lg border border-[#efd9a8] bg-[#fff8e9] p-4 text-sm font-semibold text-[#8a5a00]">
+          Seu perfil permite visualizar, mas nao alterar as configuracoes da empresa.
+        </div>
+      )}
+
+      <CollapsiblePanel
+        isOpen={openCompanySections.profile}
+        onToggle={() => setCompanySection("profile", !openCompanySections.profile)}
+        title="Perfil da empresa"
+        subtitle="Dados principais do CNPJ"
+      >
+        <fieldset disabled={!canEdit}>
           <div className="grid gap-3 md:grid-cols-3">
             <MaskedField label="Razao social" mask="name" placeholder="Razao social da empresa" value={String(company?.legalName || "")} />
             <MaskedField label="Nome fantasia" mask="name" placeholder="Nome fantasia" value={String(company?.tradeName || "")} />
@@ -1461,13 +1534,19 @@ function CompaniesScreen({
               </select>
             </Field>
           </div>
+        </fieldset>
           <ActionRow>
-            <SaveButton onClick={() => onAction("Cadastro da empresa principal")}>Salvar empresa</SaveButton>
-            <button className="secondary-button" onClick={() => onAction("Validacao de CNPJ")} type="button">Validar CNPJ</button>
+            <SaveButton disabled={!canEdit} onClick={() => onAction("Cadastro da empresa principal")}>Salvar empresa</SaveButton>
+            <button className="secondary-button" disabled={!canEdit} onClick={() => onAction("Validacao de CNPJ")} type="button">Validar CNPJ</button>
           </ActionRow>
-        </Panel>
+      </CollapsiblePanel>
 
-        <Panel title="Foto e backup" subtitle="Identidade visual e seguranca local">
+      <CollapsiblePanel
+        isOpen={openCompanySections.backup}
+        onToggle={() => setCompanySection("backup", !openCompanySections.backup)}
+        title="Foto e backup"
+        subtitle="Identidade visual e seguranca local"
+      >
           <div className="grid gap-4">
             <div className="grid min-h-[180px] place-items-center rounded-md border border-dashed border-[#aeb9c5] bg-[#fbfcfd] p-4 text-center">
               <div>
@@ -1486,8 +1565,8 @@ function CompaniesScreen({
                 <p className="mt-1 text-xs leading-5 text-[#667085]">Usada em perfil, relatorios e tela do tablet.</p>
               </div>
             </div>
-            <button className="secondary-button" onClick={() => onAction("Upload de logo da empresa")} type="button">Selecionar imagem</button>
-            <SaveButton onClick={() => onAction("Backup local completo")}>Gerar backup local</SaveButton>
+            <button className="secondary-button" disabled={!canEdit} onClick={() => onAction("Upload de logo da empresa")} type="button">Selecionar imagem</button>
+            <SaveButton disabled={!canEdit} onClick={() => onAction("Backup local completo")}>Gerar backup local</SaveButton>
             <CheckList
               items={[
                 "Backup inclui dados, relatorios e referencias das fotos",
@@ -1496,10 +1575,15 @@ function CompaniesScreen({
               ]}
             />
           </div>
-        </Panel>
-      </TwoColumn>
+      </CollapsiblePanel>
 
-      <Panel title="Escalas da empresa" subtitle="Cadastre uma ou mais jornadas coletivas">
+      <CollapsiblePanel
+        isOpen={openCompanySections.shifts}
+        onToggle={() => setCompanySection("shifts", !openCompanySections.shifts)}
+        title="Escalas da empresa"
+        subtitle="Jornadas coletivas usadas pelos colaboradores"
+      >
+        <fieldset disabled={!canEdit}>
         <div className="grid gap-3 md:grid-cols-4">
           <Field label="Nome da escala"><input className="input" placeholder="Operacional 07h as 17h15" /></Field>
           <TimeStepper label="Entrada" onChange={(value) => updateCompanyJourney("start", value)} value={companyJourney.start} />
@@ -1521,8 +1605,9 @@ function CompaniesScreen({
             start={companyJourney.start}
           />
         </div>
+        </fieldset>
         <ActionRow>
-          <SaveButton onClick={() => onAction("Escala coletiva da empresa")}>Salvar escala</SaveButton>
+          <SaveButton disabled={!canEdit} onClick={() => onAction("Escala coletiva da empresa")}>Salvar escala</SaveButton>
           <button className="secondary-button" onClick={() => onAction("Previa da jornada coletiva")} type="button">Ver previa</button>
         </ActionRow>
         <div className="mt-5 grid gap-3 md:grid-cols-2">
@@ -1535,10 +1620,15 @@ function CompaniesScreen({
             </div>
           ))}
         </div>
-      </Panel>
+      </CollapsiblePanel>
 
-      <TwoColumn>
-        <Panel title="Politica de fotos" subtitle="Armazenamento e LGPD">
+      <CollapsiblePanel
+        isOpen={openCompanySections.photos}
+        onToggle={() => setCompanySection("photos", !openCompanySections.photos)}
+        title="Politica de fotos"
+        subtitle="Armazenamento e LGPD"
+      >
+        <fieldset disabled={!canEdit}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Retencao das fotos">
               <select className="input">
@@ -1563,9 +1653,16 @@ function CompaniesScreen({
               <input className="input" placeholder="10 min" />
             </Field>
           </div>
-        </Panel>
+        </fieldset>
+      </CollapsiblePanel>
 
-        <Panel title="Politica de faltas" subtitle="Configuravel conforme a regra do cliente">
+      <CollapsiblePanel
+        isOpen={openCompanySections.rules}
+        onToggle={() => setCompanySection("rules", !openCompanySections.rules)}
+        title="Politica de faltas"
+        subtitle="Configuravel conforme a regra do cliente"
+      >
+        <fieldset disabled={!canEdit}>
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Tipo de controle">
               <select className="input">
@@ -1599,11 +1696,15 @@ function CompaniesScreen({
               "Mudancas devem ficar registradas em log de auditoria",
             ]}
           />
-        </Panel>
-      </TwoColumn>
+        </fieldset>
+      </CollapsiblePanel>
 
-      <TwoColumn>
-        <Panel title="Usuarios da empresa" subtitle="Login por convite">
+      <CollapsiblePanel
+        isOpen={openCompanySections.users}
+        onToggle={() => setCompanySection("users", !openCompanySections.users)}
+        title="Usuarios da empresa"
+        subtitle="Login por convite"
+      >
           <CheckList
             items={[
               "Proprietario tem acesso total",
@@ -1613,11 +1714,16 @@ function CompaniesScreen({
             ]}
           />
         <ActionRow>
-            <SaveButton onClick={() => onAction("Convidar usuario da empresa")}>Convidar usuario</SaveButton>
+            <SaveButton disabled={!canEdit} onClick={() => onAction("Convidar usuario da empresa")}>Convidar usuario</SaveButton>
         </ActionRow>
-        </Panel>
+      </CollapsiblePanel>
 
-        <Panel title="Ajuste permitido" subtitle="Configurado pela politica do cliente">
+      <CollapsiblePanel
+        isOpen={openCompanySections.adjustments}
+        onToggle={() => setCompanySection("adjustments", !openCompanySections.adjustments)}
+        title="Ajuste permitido"
+        subtitle="Configurado pela politica do cliente"
+      >
           <CheckList
             items={[
               "Esquecimento pode exigir evidencia no mesmo periodo",
@@ -1626,8 +1732,7 @@ function CompaniesScreen({
               "Relatorio mostra a classificacao conforme a politica ativa",
             ]}
           />
-        </Panel>
-      </TwoColumn>
+      </CollapsiblePanel>
     </>
   );
 }
@@ -2640,7 +2745,7 @@ function KioskScreen({
       };
       setTimingWarning(warning);
       const direction = timing.differenceMinutes < 0 ? "antes" : "depois";
-      speak(`${selectedPunch} fora do horário. ${Math.abs(timing.differenceMinutes)} minutos ${direction}. Confirme novamente.`);
+      speak(`${selectedPunch} fora do horário. ${formatDurationSpeech(timing.differenceMinutes)} ${direction}. Confirme novamente.`);
       return;
     }
 
@@ -2761,7 +2866,7 @@ function KioskScreen({
                     Previsto: {timingWarning.expectedTime} • Agora: {timingWarning.currentTime}
                   </p>
                   <p className="mt-2 text-sm">
-                    {Math.abs(timingWarning.differenceMinutes)} minutos{" "}
+                    {formatDurationShort(Math.abs(timingWarning.differenceMinutes))}{" "}
                     {timingWarning.differenceMinutes < 0 ? "antes" : "depois"} do horário.
                   </p>
                   <p className="mt-3 text-sm font-bold">Toque novamente para registrar mesmo assim.</p>
@@ -3894,15 +3999,17 @@ async function createAuditHash(payload: Record<string, unknown>) {
 
 function SaveButton({
   children,
+  disabled = false,
   onClick,
 }: {
   children: React.ReactNode;
+  disabled?: boolean;
   onClick: () => Promise<void> | void;
 }) {
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   async function handleClick() {
-    if (status === "saving") return;
+    if (disabled || status === "saving") return;
 
     setStatus("saving");
     try {
@@ -3917,7 +4024,7 @@ function SaveButton({
   return (
     <button
       className={`primary-button save-button ${status === "saved" ? "save-button-saved" : ""}`}
-      disabled={status === "saving"}
+      disabled={disabled || status === "saving"}
       onClick={handleClick}
       type="button"
     >
