@@ -230,18 +230,31 @@ type MonthPeriod = {
 };
 
 type MonthlyMirrorRow = {
+  balanceMinutes: number;
   date: Date;
+  earlyLeaveMinutes: number;
+  isWorkday: boolean;
   label: string;
+  lateMinutes: number;
+  missingAfternoon: boolean;
+  missingMorning: boolean;
   punches: Partial<Record<PunchType, Punch>>;
   status: string;
+  workedMinutes: number;
 };
 
 type MonthlyMirrorSummary = {
+  earlyLeaveMinutes: number;
   employee: LocalEmployee;
+  lateMinutes: number;
+  missingAfternoons: number;
+  missingMornings: number;
   pendingDays: number;
   periodLabel: string;
   rows: MonthlyMirrorRow[];
+  totalBalanceMinutes: number;
   totalPunches: number;
+  totalWorkedMinutes: number;
 };
 
 const initialShifts = [
@@ -3208,7 +3221,7 @@ function MonthlyClosingScreen({
     }
 
     const rows = [
-      ["Funcionario", "Matricula", "PIN", "Periodo", "Dias", "Batidas", "Pendencias", "Responsavel"],
+      ["Funcionario", "Matricula", "PIN", "Periodo", "Dias", "Batidas", "Falta manha", "Falta tarde", "Atrasos", "Banco", "Pendencias", "Responsavel"],
       ...lastSummary.map((summary) => [
         summary.employee.name,
         summary.employee.registration || "",
@@ -3216,6 +3229,10 @@ function MonthlyClosingScreen({
         summary.periodLabel,
         String(summary.rows.length),
         String(summary.totalPunches),
+        String(summary.missingMornings),
+        String(summary.missingAfternoons),
+        formatDurationClock(summary.lateMinutes),
+        formatDurationClock(summary.totalBalanceMinutes),
         String(summary.pendingDays),
         responsible,
       ]),
@@ -3259,8 +3276,8 @@ function MonthlyClosingScreen({
             ["Funcionarios", String(selectedEmployees.length)],
             ["Periodo", `${month}/${year}`],
             ["Gerados", String(lastSummary.length)],
-            ["Pendencias", String(lastSummary.reduce((total, item) => total + item.pendingDays, 0))],
-            ["Batidas", String(lastSummary.reduce((total, item) => total + item.totalPunches, 0))],
+            ["Faltas periodo", String(lastSummary.reduce((total, item) => total + item.missingMornings + item.missingAfternoons, 0))],
+            ["Banco", formatDurationClock(lastSummary.reduce((total, item) => total + item.totalBalanceMinutes, 0))],
           ].map(([label, value]) => (
             <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
               <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
@@ -3311,10 +3328,10 @@ function MonthlyClosingScreen({
                       summary.employee.cpf,
                       summary.employee.role,
                       String(summary.rows.length),
-                      "Conferir",
-                      "Conferir",
-                      "Conferir",
-                      "Conferir",
+                      String(summary.missingMornings),
+                      String(summary.missingAfternoons),
+                      formatDurationClock(summary.lateMinutes),
+                      formatDurationClock(summary.totalBalanceMinutes),
                       summary.pendingDays ? `${summary.pendingDays} dias com pendencia` : "Sem pendencia aparente",
                     ].map((cell, index) => (
                       <td
@@ -4289,6 +4306,36 @@ function sameDay(first: Date, second: Date) {
     && first.getDate() === second.getDate();
 }
 
+function positiveDifference(actual?: Punch, expectedTime?: string) {
+  if (!actual || !expectedTime) return 0;
+  const date = punchDate(actual);
+  if (Number.isNaN(date.getTime())) return 0;
+  const actualMinutes = date.getHours() * 60 + date.getMinutes();
+  return Math.max(0, actualMinutes - minutesFromTime(expectedTime));
+}
+
+function earlyDifference(actual?: Punch, expectedTime?: string) {
+  if (!actual || !expectedTime) return 0;
+  const date = punchDate(actual);
+  if (Number.isNaN(date.getTime())) return 0;
+  const actualMinutes = date.getHours() * 60 + date.getMinutes();
+  return Math.max(0, minutesFromTime(expectedTime) - actualMinutes);
+}
+
+function workedPeriodMinutes(start?: Punch, end?: Punch) {
+  if (!start || !end) return 0;
+  const startDate = punchDate(start);
+  const endDate = punchDate(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return 0;
+  return Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
+}
+
+function expectedDailyMinutes(employee: LocalEmployee) {
+  const schedule = employee.schedule;
+  return Math.max(0, minutesFromTime(schedule.breakStart) - minutesFromTime(schedule.start))
+    + Math.max(0, minutesFromTime(schedule.end) - minutesFromTime(schedule.breakEnd));
+}
+
 function buildMonthlyMirrorSummary(
   employee: LocalEmployee,
   punches: Punch[],
@@ -4301,6 +4348,8 @@ function buildMonthlyMirrorSummary(
     })
     .sort((first, second) => punchDate(first).getTime() - punchDate(second).getTime());
   const rows: MonthlyMirrorRow[] = [];
+  const expectedMinutes = expectedDailyMinutes(employee);
+  const scheduledWorkdays = Number(employee.schedule ? 5 : 5);
 
   for (let day = 1; day <= period.end.getDate(); day += 1) {
     const date = new Date(period.year, period.month - 1, day);
@@ -4311,26 +4360,63 @@ function buildMonthlyMirrorSummary(
     });
 
     const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+    const isWorkday = !isWeekend && date.getDay() <= scheduledWorkdays;
+    const morningComplete = Boolean(punchesByType.entry && punchesByType.lunch_out);
+    const afternoonComplete = Boolean(punchesByType.lunch_back && punchesByType.exit);
+    const missingMorning = isWorkday && !morningComplete;
+    const missingAfternoon = isWorkday && !afternoonComplete;
+    const workedMinutes =
+      workedPeriodMinutes(punchesByType.entry, punchesByType.lunch_out)
+      + workedPeriodMinutes(punchesByType.lunch_back, punchesByType.exit);
+    const lateMinutes =
+      positiveDifference(punchesByType.entry, employee.schedule.start)
+      + positiveDifference(punchesByType.lunch_back, employee.schedule.breakEnd);
+    const earlyLeaveMinutes =
+      earlyDifference(punchesByType.lunch_out, employee.schedule.breakStart)
+      + earlyDifference(punchesByType.exit, employee.schedule.end);
+    const balanceMinutes = isWorkday ? workedMinutes - expectedMinutes : workedMinutes;
+    const status = !isWorkday && !dayPunches.length
+      ? "Sem expediente aparente"
+      : missingMorning || missingAfternoon
+        ? "Conferir faltas/batidas"
+        : lateMinutes || earlyLeaveMinutes
+          ? "Com ocorrencia"
+          : "Completo";
+
     rows.push({
+      balanceMinutes,
       date,
+      earlyLeaveMinutes,
+      isWorkday,
       label: date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", weekday: "short" }),
+      lateMinutes,
+      missingAfternoon,
+      missingMorning,
       punches: punchesByType,
-      status: dayPunches.length
-        ? dayPunches.length >= 4
-          ? "Completo"
-          : "Conferir batidas"
-        : isWeekend
-          ? "Sem expediente aparente"
-          : "Sem batida",
+      status,
+      workedMinutes,
     });
   }
 
+  const missingMornings = rows.filter((row) => row.missingMorning).length;
+  const missingAfternoons = rows.filter((row) => row.missingAfternoon).length;
+  const lateMinutes = rows.reduce((total, row) => total + row.lateMinutes, 0);
+  const earlyLeaveMinutes = rows.reduce((total, row) => total + row.earlyLeaveMinutes, 0);
+  const totalWorkedMinutes = rows.reduce((total, row) => total + row.workedMinutes, 0);
+  const totalBalanceMinutes = rows.reduce((total, row) => total + row.balanceMinutes, 0);
+
   return {
+    earlyLeaveMinutes,
     employee,
-    pendingDays: rows.filter((row) => row.status === "Conferir batidas" || row.status === "Sem batida").length,
+    lateMinutes,
+    missingAfternoons,
+    missingMornings,
+    pendingDays: rows.filter((row) => row.status !== "Completo" && row.isWorkday).length,
     periodLabel: period.label,
     rows,
+    totalBalanceMinutes,
     totalPunches: validPunches.length,
+    totalWorkedMinutes,
   };
 }
 
@@ -4401,6 +4487,8 @@ function openPrintableMonthlyMirror({
             <th>Saida almoco</th>
             <th>Retorno</th>
             <th>Saida</th>
+            <th>Trabalhadas</th>
+            <th>Banco</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -4412,6 +4500,8 @@ function openPrintableMonthlyMirror({
               <td>${escapeHtml(punchTime(row.punches.lunch_out))}</td>
               <td>${escapeHtml(punchTime(row.punches.lunch_back))}</td>
               <td>${escapeHtml(punchTime(row.punches.exit))}</td>
+              <td>${escapeHtml(formatDurationClock(row.workedMinutes))}</td>
+              <td>${escapeHtml(formatDurationClock(row.balanceMinutes))}</td>
               <td>${escapeHtml(row.status)}</td>
             </tr>
           `).join("")}
@@ -4420,6 +4510,11 @@ function openPrintableMonthlyMirror({
 
       <div class="summary">
         <div><span>Total de batidas</span><strong>${summary.totalPunches}</strong></div>
+        <div><span>Falta manha</span><strong>${summary.missingMornings}</strong></div>
+        <div><span>Falta tarde</span><strong>${summary.missingAfternoons}</strong></div>
+        <div><span>Atrasos</span><strong>${escapeHtml(formatDurationClock(summary.lateMinutes))}</strong></div>
+        <div><span>Saida antecipada</span><strong>${escapeHtml(formatDurationClock(summary.earlyLeaveMinutes))}</strong></div>
+        <div><span>Banco de horas</span><strong>${escapeHtml(formatDurationClock(summary.totalBalanceMinutes))}</strong></div>
         <div><span>Dias pendentes</span><strong>${summary.pendingDays}</strong></div>
         <div><span>Responsavel</span><strong>${escapeHtml(responsible || "Nao informado")}</strong></div>
       </div>
@@ -4455,7 +4550,7 @@ function openPrintableMonthlyMirror({
           .period { min-width: 150px; text-align: right; }
           .period strong, .period span { display: block; }
           .period span { margin-top: 6px; color: #667085; font-size: 11px; }
-          .employee-grid, .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; }
+          .employee-grid, .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0; }
           .employee-grid div, .summary div { border: 1px solid #d9e0e7; border-radius: 6px; padding: 8px; }
           span { display: block; color: #667085; font-size: 10px; font-weight: 700; text-transform: uppercase; }
           strong { display: block; margin-top: 4px; font-size: 12px; }
