@@ -16,11 +16,12 @@ import {
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
-import type { PunchStatus, PunchType } from "@/lib/models";
+import type { Punch, PunchStatus, PunchType } from "@/lib/models";
 import { createFaceIdRecord, uploadFacePhoto } from "@/lib/services/face-id";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
-import { createPunch } from "@/lib/services/punches";
+import { createPunch, listEmployeePunches } from "@/lib/services/punches";
+import { getStorageFileUrl } from "@/lib/services/storage-files";
 import {
   acceptTenantInvite,
   consumeAiCredit,
@@ -64,6 +65,7 @@ type EmployeeRow = {
   name: string;
   phone?: string;
   pin?: string;
+  profilePhotoPath?: string;
   registration?: string;
   role: string;
   shift: string;
@@ -126,6 +128,7 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
     name: String(employee.name || "Colaborador sem nome"),
     phone: String(employee.phone || ""),
     pin: String(employee.pin || ""),
+    profilePhotoPath: String(employee.profilePhotoPath || ""),
     punchMode: (employee.punchMode || "automatic") as LocalEmployee["punchMode"],
     registration: String(employee.registration || ""),
     role: String(employee.role || "Nao informado"),
@@ -1646,6 +1649,9 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [localEmployees, setLocalEmployees] = useState<LocalEmployee[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState<LocalEmployee | null>(null);
+  const [selectedEmployeePunches, setSelectedEmployeePunches] = useState<Punch[]>([]);
+  const [selectedEmployeePunchesLoading, setSelectedEmployeePunchesLoading] = useState(false);
+  const [employeePhotoUrls, setEmployeePhotoUrls] = useState<Record<string, string>>({});
   const [showFaceCamera, setShowFaceCamera] = useState(false);
   const [employeeJourney, setEmployeeJourney] = useState({
     start: "07:00",
@@ -1665,6 +1671,38 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   const faceProgress = localEmployees.length
     ? Math.round((faceReadyCount / localEmployees.length) * 100)
     : 0;
+
+  async function loadEmployeePhoto(employee: LocalEmployee) {
+    if (!employee.profilePhotoPath || employeePhotoUrls[employee.employeeId]) return;
+
+    try {
+      const url = await getStorageFileUrl(employee.profilePhotoPath);
+      setEmployeePhotoUrls((current) => ({ ...current, [employee.employeeId]: url }));
+    } catch {
+      // A foto continua opcional; falha de exibicao nao pode bloquear a ficha.
+    }
+  }
+
+  async function loadEmployeePunches(employee: LocalEmployee) {
+    setSelectedEmployeePunchesLoading(true);
+    try {
+      const punches = await listEmployeePunches("main", employee.employeeId);
+      const sorted = punches.sort((first, second) =>
+        punchDate(second).getTime() - punchDate(first).getTime(),
+      );
+      setSelectedEmployeePunches(sorted);
+      setSelectedEmployee((current) =>
+        current?.employeeId === employee.employeeId
+          ? { ...current, lastPunch: sorted[0] ? formatPunchDateTime(sorted[0]) : "Sem batidas registradas" }
+          : current,
+      );
+    } catch {
+      setSelectedEmployeePunches([]);
+      onAction("Nao foi possivel carregar as batidas reais deste colaborador.");
+    } finally {
+      setSelectedEmployeePunchesLoading(false);
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -1693,6 +1731,16 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    localEmployees.forEach((employee) => {
+      if (!employee.profilePhotoPath || employeePhotoUrls[employee.employeeId]) return;
+
+      void getStorageFileUrl(employee.profilePhotoPath)
+        .then((url) => setEmployeePhotoUrls((current) => ({ ...current, [employee.employeeId]: url })))
+        .catch(() => undefined);
+    });
+  }, [employeePhotoUrls, localEmployees]);
 
   function updateEmployeeForm(field: keyof typeof employeeForm, value: string) {
     setEmployeeForm((current) => ({ ...current, [field]: value }));
@@ -1737,8 +1785,11 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   function viewEmployee(employee: EmployeeRow) {
     const selected = toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name);
     setSelectedEmployee(selected);
+    setSelectedEmployeePunches([]);
     setShowFaceCamera(false);
     onAction(`Visualizando cadastro de ${selected.name}.`);
+    void loadEmployeePhoto(selected);
+    void loadEmployeePunches(selected);
     window.setTimeout(
       () => document.getElementById("employee-detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }),
       50,
@@ -1944,16 +1995,26 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           companyId: "main",
           employeeId: current.employeeId,
           photoId: captureId,
-        }).then((photoPath) =>
-          createFaceIdRecord({
+        }).then((photoPath) => {
+          setEmployeePhotoUrls((urls) => ({ ...urls, [current.employeeId]: URL.createObjectURL(photoBlob) }));
+          setLocalEmployees((employees) =>
+            employees.map((employee) =>
+              employee.employeeId === current.employeeId ? { ...employee, profilePhotoPath: photoPath } : employee,
+            ),
+          );
+          setSelectedEmployee((employee) =>
+            employee?.employeeId === current.employeeId ? { ...employee, profilePhotoPath: photoPath } : employee,
+          );
+          void upsertEmployee("main", employeeDocumentId(current), { profilePhotoPath: photoPath });
+          void createFaceIdRecord({
             capturedBy: "web-kiosk",
             companyId: "main",
             consentAcceptedAt: new Date(),
             createdAt: new Date(),
             employeeId: current.employeeId,
             photoPath,
-          }),
-        );
+          });
+        });
       }
     }
 
@@ -2192,6 +2253,25 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
 
       {selectedEmployee && (
         <Panel title="Ficha do colaborador" subtitle="Conferencia do cadastro selecionado">
+          <div className="mb-4 flex flex-col gap-4 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4 sm:flex-row sm:items-center">
+            {employeePhotoUrls[selectedEmployee.employeeId] ? (
+              <img
+                alt={`Foto de ${selectedEmployee.name}`}
+                className="h-20 w-20 rounded-lg border border-[#d9e0e7] object-cover"
+                src={employeePhotoUrls[selectedEmployee.employeeId]}
+              />
+            ) : (
+              <div className="grid h-20 w-20 place-items-center rounded-lg border border-[#d9e0e7] bg-white text-2xl font-bold text-[#18594c]">
+                {selectedEmployee.name.slice(0, 1).toUpperCase()}
+              </div>
+            )}
+            <div>
+              <p className="text-lg font-semibold text-[#101923]">{selectedEmployee.name}</p>
+              <p className="mt-1 text-sm text-[#667085]">
+                {selectedEmployee.profilePhotoPath ? "Foto vinculada ao cadastro" : "Foto sera vinculada apos o cadastro do Face ID"}
+              </p>
+            </div>
+          </div>
           <div id="employee-detail-panel" className="grid gap-3 md:grid-cols-4">
             {[
               ["Nome", selectedEmployee.name],
@@ -2213,6 +2293,30 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
               </div>
             ))}
           </div>
+          <div className="mt-5 rounded-md border border-[#e3e8ee] bg-white">
+            <div className="border-b border-[#e3e8ee] px-4 py-3">
+              <p className="text-sm font-semibold text-[#26323f]">Batidas registradas</p>
+              <p className="mt-1 text-xs text-[#667085]">Consulta real no Firebase para este colaborador.</p>
+            </div>
+            <div className="grid gap-2 p-4">
+              {selectedEmployeePunchesLoading ? (
+                <p className="text-sm font-semibold text-[#667085]">Carregando batidas...</p>
+              ) : selectedEmployeePunches.length ? (
+                selectedEmployeePunches.slice(0, 8).map((punch) => (
+                  <div className="grid gap-2 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3 text-sm md:grid-cols-4" key={punch.id}>
+                    <span className="font-semibold text-[#101923]">{formatPunchType(punch.type)}</span>
+                    <span className="text-[#667085]">{formatPunchDateTime(punch)}</span>
+                    <span className="text-[#667085]">{formatPunchStatus(punch.status)}</span>
+                    <span className="truncate text-xs text-[#667085]">{punch.photoPath}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-md border border-[#efd9a8] bg-[#fff8e9] p-3 text-sm font-semibold text-[#8a5a00]">
+                  Nenhuma batida encontrada para este colaborador.
+                </p>
+              )}
+            </div>
+          </div>
           <ActionRow>
             <button className="secondary-button" onClick={() => editEmployee(selectedEmployee)} type="button">Editar cadastro</button>
             <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee)} type="button">Cadastrar Face ID</button>
@@ -2225,6 +2329,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
         onEdit={editEmployee}
         onNew={startNewEmployee}
         onView={viewEmployee}
+        photoUrls={employeePhotoUrls}
       />
     </>
   );
@@ -3352,6 +3457,7 @@ function EmployeesTable({
   onEdit,
   onNew,
   onView,
+  photoUrls = {},
   compact = false,
 }: {
   employeesList?: EmployeeRow[];
@@ -3359,6 +3465,7 @@ function EmployeesTable({
   onEdit?: (employee: EmployeeRow) => void;
   onNew?: () => void;
   onView?: (employee: EmployeeRow) => void;
+  photoUrls?: Record<string, string>;
   compact?: boolean;
 }) {
   return (
@@ -3397,7 +3504,22 @@ function EmployeesTable({
             ) : (
               employeesList.map((employee) => (
                 <tr className="border-t border-[#e3e8ee]" key={employee.employeeId || employee.name}>
-                  <td className="px-5 py-4 font-semibold text-[#101923]">{employee.name}</td>
+                  <td className="px-5 py-4 font-semibold text-[#101923]">
+                    <div className="flex items-center gap-3">
+                      {employee.employeeId && photoUrls[employee.employeeId] ? (
+                        <img
+                          alt={`Foto de ${employee.name}`}
+                          className="h-9 w-9 rounded-md border border-[#d9e0e7] object-cover"
+                          src={photoUrls[employee.employeeId]}
+                        />
+                      ) : (
+                        <span className="grid h-9 w-9 place-items-center rounded-md border border-[#d9e0e7] bg-[#fbfcfd] text-xs font-bold text-[#18594c]">
+                          {employee.name.slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                      <span>{employee.name}</span>
+                    </div>
+                  </td>
                   <td className="px-5 py-4 text-[#667085]">{employee.cpf}</td>
                   <td className="px-5 py-4 text-[#667085]">{employee.role}</td>
                   <td className="px-5 py-4 text-[#667085]">{employee.admissionDate || "-"}</td>
@@ -3631,6 +3753,49 @@ function mapPunchType(kind: string): PunchType {
   if (normalized.includes("retorno") || normalized.includes("volta")) return "lunch_back";
   if (normalized.includes("saida") || normalized.includes("saída")) return "exit";
   return "entry";
+}
+
+function punchDate(punch: Punch) {
+  const value = punch.occurredAt as unknown;
+  if (value instanceof Date) return value;
+  if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+    return value.toDate() as Date;
+  }
+  return new Date(String(value));
+}
+
+function formatPunchDateTime(punch: Punch) {
+  const date = punchDate(punch);
+  if (Number.isNaN(date.getTime())) return "Horario indisponivel";
+  return date.toLocaleString("pt-BR", {
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function formatPunchType(type: PunchType) {
+  const labels: Record<PunchType, string> = {
+    entry: "Entrada",
+    exit: "Saida",
+    lunch_back: "Retorno",
+    lunch_out: "Intervalo",
+  };
+  return labels[type];
+}
+
+function formatPunchStatus(status: PunchStatus) {
+  const labels: Record<PunchStatus, string> = {
+    early: "Adiantado",
+    external_work: "Trabalho externo",
+    late: "Atraso",
+    on_time: "No horario",
+    outside_shift: "Fora da jornada",
+    possible_forgotten: "Possivel esquecimento",
+  };
+  return labels[status];
 }
 
 async function createAuditHash(payload: Record<string, unknown>) {
