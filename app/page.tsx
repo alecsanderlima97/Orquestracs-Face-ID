@@ -16,11 +16,11 @@ import {
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
-import type { Punch, PunchStatus, PunchType } from "@/lib/models";
+import type { AdjustmentType, Punch, PunchStatus, PunchType } from "@/lib/models";
 import { createFaceIdRecord, uploadFacePhoto } from "@/lib/services/face-id";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
-import { createPunch, listEmployeePunchesByIds } from "@/lib/services/punches";
+import { createPunch, createPunchAdjustment, listEmployeePunchesByIds } from "@/lib/services/punches";
 import { getStorageFileUrl } from "@/lib/services/storage-files";
 import {
   acceptTenantInvite,
@@ -258,6 +258,8 @@ type MonthlyMirrorRow = {
   balanceMinutes: number;
   date: Date;
   earlyLeaveMinutes: number;
+  incompleteAfternoon: boolean;
+  incompleteMorning: boolean;
   isWorkday: boolean;
   label: string;
   lateMinutes: number;
@@ -272,6 +274,8 @@ type MonthlyMirrorSummary = {
   absencePoints: number;
   earlyLeaveMinutes: number;
   employee: LocalEmployee;
+  incompleteAfternoons: number;
+  incompleteMornings: number;
   lateMinutes: number;
   missingAfternoons: number;
   missingMornings: number;
@@ -1447,14 +1451,7 @@ export default function Home() {
 }
 
 function Metrics() {
-  const [dashboardMetrics, setDashboardMetrics] = useState([
-    ["Colaboradores", "0", "cadastros carregados"],
-    ["Face ID", "0", "cadastros prontos"],
-    ["Batidas hoje", "0", "registros locais do dia"],
-    ["Pendencias", "0", "Face ID pendente"],
-  ]);
-
-  useEffect(() => {
+  const dashboardMetrics = useMemo(() => {
     const employeesList = getLocalEmployees();
     const today = new Date().toDateString();
     const todayPunches = getLocalRecords().filter((record) => {
@@ -1464,12 +1461,12 @@ function Metrics() {
     const faceReady = employeesList.filter((employee) => employee.faceIdStatus === "registered").length;
     const pendingFace = employeesList.filter((employee) => employee.faceIdStatus !== "registered").length;
 
-    setDashboardMetrics([
+    return [
       ["Colaboradores", String(employeesList.length), "cadastros na base"],
       ["Face ID", String(faceReady), "cadastros prontos"],
       ["Batidas hoje", String(todayPunches.length), "registros do dia"],
       ["Pendencias", String(pendingFace), "Face ID pendente"],
-    ]);
+    ];
   }, []);
 
   return (
@@ -3225,6 +3222,12 @@ function MonthlyClosingScreen({
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("all");
   const [responsible, setResponsible] = useState("");
   const [lastSummary, setLastSummary] = useState<MonthlyMirrorSummary[]>([]);
+  const [adjustmentEmployeeId, setAdjustmentEmployeeId] = useState("");
+  const [adjustmentDate, setAdjustmentDate] = useState(now.toISOString().slice(0, 10));
+  const [adjustmentTime, setAdjustmentTime] = useState("07:00");
+  const [adjustmentPunchType, setAdjustmentPunchType] = useState<PunchType>("entry");
+  const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>("forgotten_with_evidence");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -3256,6 +3259,7 @@ function MonthlyClosingScreen({
     selectedEmployeeId === "all"
       ? employeesList
       : employeesList.filter((employee) => employee.employeeId === selectedEmployeeId);
+  const selectedAdjustmentEmployeeId = adjustmentEmployeeId || employeesList[0]?.employeeId || "";
   const workPolicy = getCompanyWorkPolicy(company);
 
   async function generateMonthlyMirror() {
@@ -3287,6 +3291,69 @@ function MonthlyClosingScreen({
     onAction("Espelho mensal aberto para impressao. Use Salvar como PDF se quiser arquivar.");
   }
 
+  async function saveManualAdjustment() {
+    const employee = employeesList.find((item) => item.employeeId === selectedAdjustmentEmployeeId);
+    if (!employee) {
+      onAction("Selecione um colaborador para registrar o ajuste.");
+      return;
+    }
+
+    if (!adjustmentDate || !adjustmentTime || !adjustmentReason.trim() || !responsible.trim()) {
+      onAction("Informe data, horario, motivo e responsavel antes de salvar o ajuste.");
+      return;
+    }
+
+    const adjustedAt = dateTimeFromInputs(adjustmentDate, adjustmentTime);
+    if (!adjustedAt) {
+      onAction("Data ou horario do ajuste invalido.");
+      return;
+    }
+
+    const punchPayload = {
+      companyId: "main",
+      deviceId: "manager-adjustment",
+      employeeId: employee.employeeId,
+      occurredAt: adjustedAt.toISOString(),
+      photoPath: "manual-adjustment-no-photo",
+      source: "manager" as const,
+      status: "possible_forgotten" as PunchStatus,
+      type: adjustmentPunchType,
+    };
+
+    try {
+      const punchDocument = await createPunch("main", {
+        ...punchPayload,
+        hash: await createAuditHash({
+          ...punchPayload,
+          adjustedBy: responsible.trim(),
+          reason: adjustmentReason.trim(),
+        }),
+        occurredAt: adjustedAt,
+        serverRecordedAt: new Date(),
+      });
+
+      await createPunchAdjustment("main", {
+        adjustedPunchType: adjustmentPunchType,
+        adjustedTime: adjustedAt,
+        companyId: "main",
+        createdAt: new Date(),
+        createdBy: responsible.trim(),
+        employeeId: employee.employeeId,
+        evidence: "Ajuste manual registrado no fechamento mensal.",
+        punchId: punchDocument.id,
+        reason: adjustmentReason.trim(),
+        type: adjustmentType,
+      });
+
+      setAdjustmentReason("");
+      onAction(`Ajuste de ${employee.name} salvo com justificativa.`);
+    } catch (error) {
+      console.error(error);
+      onAction("Nao foi possivel salvar o ajuste no Firebase. Verifique a conexao e tente novamente.");
+      throw error;
+    }
+  }
+
   function exportMonthlyCsv() {
     if (!lastSummary.length) {
       onAction("Gere o espelho mensal antes de exportar para o contador.");
@@ -3294,7 +3361,7 @@ function MonthlyClosingScreen({
     }
 
     const rows = [
-      ["Funcionario", "Matricula", "PIN", "Periodo", "Dias", "Batidas", "Falta manha", "Falta tarde", "Faltas calculadas", "Atrasos", "Banco", "Pendencias", "Responsavel"],
+      ["Funcionario", "Matricula", "PIN", "Periodo", "Dias", "Batidas", "Falta manha", "Falta tarde", "Batida incompleta", "Faltas calculadas", "Atrasos", "Banco", "Pendencias", "Responsavel"],
       ...lastSummary.map((summary) => [
         summary.employee.name,
         summary.employee.registration || "",
@@ -3304,6 +3371,7 @@ function MonthlyClosingScreen({
         String(summary.totalPunches),
         String(summary.missingMornings),
         String(summary.missingAfternoons),
+        String(summary.incompleteMornings + summary.incompleteAfternoons),
         String(summary.absencePoints),
         formatDurationClock(summary.lateMinutes),
         formatDurationClock(summary.totalBalanceMinutes),
@@ -3367,6 +3435,78 @@ function MonthlyClosingScreen({
         </ActionRow>
       </Panel>
 
+      <Panel title="Ajuste manual de batida" subtitle="Use somente para esquecimento, trabalho externo ou correcao aprovada">
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label="Colaborador">
+            <select
+              className="input"
+              disabled={loading}
+              onChange={(event) => setAdjustmentEmployeeId(event.target.value)}
+              value={selectedAdjustmentEmployeeId}
+            >
+              {employeesList.length === 0 ? (
+                <option value="">Nenhum colaborador cadastrado</option>
+              ) : (
+                employeesList.map((employee) => (
+                  <option key={employee.employeeId} value={employee.employeeId}>{employee.name}</option>
+                ))
+              )}
+            </select>
+          </Field>
+          <Field label="Data">
+            <input className="input" onChange={(event) => setAdjustmentDate(event.target.value)} type="date" value={adjustmentDate} />
+          </Field>
+          <TimeStepper label="Horario" onChange={setAdjustmentTime} value={adjustmentTime} />
+          <Field label="Batida">
+            <select className="input" onChange={(event) => setAdjustmentPunchType(event.target.value as PunchType)} value={adjustmentPunchType}>
+              <option value="entry">Entrada</option>
+              <option value="lunch_out">Intervalo</option>
+              <option value="lunch_back">Retorno</option>
+              <option value="exit">Saida</option>
+            </select>
+          </Field>
+          <Field label="Tipo de ajuste">
+            <select className="input" onChange={(event) => setAdjustmentType(event.target.value as AdjustmentType)} value={adjustmentType}>
+              <option value="forgotten_with_evidence">Esquecimento com evidencia</option>
+              <option value="external_work">Trabalho externo</option>
+              <option value="manager_entry">Lancado pelo responsavel</option>
+              <option value="operational_error">Erro operacional</option>
+            </select>
+          </Field>
+          <Field label="Motivo">
+            <input
+              className="input"
+              onChange={(event) => setAdjustmentReason(maskName(event.target.value))}
+              placeholder="Ex.: esqueceu a entrada, mas bateu intervalo"
+              value={adjustmentReason}
+            />
+          </Field>
+          <Field label="Responsavel">
+            <input
+              className="input"
+              onChange={(event) => setResponsible(maskName(event.target.value))}
+              placeholder="Nome Do Responsavel"
+              value={responsible}
+            />
+          </Field>
+        </div>
+        <ActionRow>
+          <SaveButton disabled={loading || !employeesList.length} onClick={saveManualAdjustment}>
+            Salvar ajuste
+          </SaveButton>
+          <button
+            className="secondary-button"
+            onClick={() => {
+              setAdjustmentReason("");
+              onAction("Ajuste manual limpo.");
+            }}
+            type="button"
+          >
+            Limpar ajuste
+          </button>
+        </ActionRow>
+      </Panel>
+
       <Panel title="Conferencia por funcionario" subtitle="Base do arquivo mensal e da ficha individual">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] border-collapse text-left text-sm">
@@ -3379,6 +3519,7 @@ function MonthlyClosingScreen({
                   "Dias",
                   "Falta manha",
                   "Falta tarde",
+                  "Batida incompleta",
                   "Atrasos",
                   "Banco",
                   "Observacao",
@@ -3390,7 +3531,7 @@ function MonthlyClosingScreen({
           <tbody>
             {lastSummary.length === 0 ? (
               <tr>
-                <td className="px-4 py-8 text-center text-[#667085]" colSpan={9}>
+                <td className="px-4 py-8 text-center text-[#667085]" colSpan={10}>
                   Gere o espelho mensal para visualizar a conferencia por funcionario.
                 </td>
               </tr>
@@ -3404,6 +3545,7 @@ function MonthlyClosingScreen({
                       String(summary.rows.length),
                       String(summary.missingMornings),
                       String(summary.missingAfternoons),
+                      String(summary.incompleteMornings + summary.incompleteAfternoons),
                       formatDurationClock(summary.lateMinutes),
                       formatDurationClock(summary.totalBalanceMinutes),
                       summary.pendingDays ? `${summary.pendingDays} dias com pendencia` : "Sem pendencia aparente",
@@ -3871,11 +4013,7 @@ function AssistantPanel({
   const creditsBlocked = aiCredits.status === "Bloqueado" || aiCredits.balance <= 0;
   const [selectedQuestion, setSelectedQuestion] = useState(current.questions[0]);
   const [assistantMessage, setAssistantMessage] = useState("");
-
-  useEffect(() => {
-    setSelectedQuestion(current.questions[0]);
-    setAssistantMessage("");
-  }, [active, current.questions]);
+  const visibleQuestion = current.questions.includes(selectedQuestion) ? selectedQuestion : current.questions[0];
 
   async function selectQuestion(question: string) {
     if (creditsBlocked) {
@@ -3944,7 +4082,7 @@ function AssistantPanel({
               </p>
             )}
             <div className="mt-3 rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-3 text-sm leading-6 text-[#24594d]">
-              <p className="font-semibold">{selectedQuestion}</p>
+              <p className="font-semibold">{visibleQuestion}</p>
               <p className="mt-1">
                 Siga o passo a passo desta tela. Quando a integracao real estiver
                 conectada, o assistente tambem podera abrir o modulo certo e validar
@@ -4240,9 +4378,10 @@ function MaskedField({
   const value = onChange && controlledValue !== undefined ? controlledValue : internalValue;
 
   useEffect(() => {
-    if (!onChange && controlledValue !== undefined) {
-      setInternalValue(controlledValue);
-    }
+    if (onChange || controlledValue === undefined) return undefined;
+
+    const syncId = window.setTimeout(() => setInternalValue(controlledValue), 0);
+    return () => window.clearTimeout(syncId);
   }, [controlledValue, onChange]);
 
   return (
@@ -4374,6 +4513,15 @@ function getMonthPeriod(year: number, month: number): MonthPeriod {
   return { end, label, month, start, year };
 }
 
+function dateTimeFromInputs(dateValue: string, timeValue: string) {
+  const [inputYear, inputMonth, inputDay] = dateValue.split("-").map(Number);
+  const [inputHour, inputMinute] = timeValue.split(":").map(Number);
+  if (![inputYear, inputMonth, inputDay, inputHour, inputMinute].every(Number.isFinite)) return null;
+
+  const date = new Date(inputYear, inputMonth - 1, inputDay, inputHour, inputMinute, 0, 0);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function sameDay(first: Date, second: Date) {
   return first.getFullYear() === second.getFullYear()
     && first.getMonth() === second.getMonth()
@@ -4448,10 +4596,12 @@ function buildMonthlyMirrorSummary(
     });
 
     const isWorkday = date.getDay() !== 0 && date.getDay() <= scheduledWorkdays;
-    const morningComplete = Boolean(punchesByType.entry && punchesByType.lunch_out);
-    const afternoonComplete = Boolean(punchesByType.lunch_back && punchesByType.exit);
-    const missingMorning = isWorkday && !morningComplete;
-    const missingAfternoon = isWorkday && !afternoonComplete;
+    const morningPunches = [punchesByType.entry, punchesByType.lunch_out].filter(Boolean).length;
+    const afternoonPunches = [punchesByType.lunch_back, punchesByType.exit].filter(Boolean).length;
+    const missingMorning = isWorkday && morningPunches === 0;
+    const missingAfternoon = isWorkday && afternoonPunches === 0;
+    const incompleteMorning = isWorkday && morningPunches === 1;
+    const incompleteAfternoon = isWorkday && afternoonPunches === 1;
     const workedMinutes =
       workedPeriodMinutes(punchesByType.entry, punchesByType.lunch_out)
       + workedPeriodMinutes(punchesByType.lunch_back, punchesByType.exit);
@@ -4466,8 +4616,12 @@ function buildMonthlyMirrorSummary(
       : 0;
     const status = !isWorkday && !dayPunches.length
       ? "Sem expediente aparente"
-      : missingMorning || missingAfternoon
-        ? "Conferir faltas/batidas"
+      : missingMorning && missingAfternoon
+        ? "Falta dia inteiro"
+        : missingMorning || missingAfternoon
+          ? "Falta por periodo"
+          : incompleteMorning || incompleteAfternoon
+            ? "Conferir esquecimento"
         : lateMinutes || earlyLeaveMinutes
           ? "Com ocorrencia"
           : "Completo";
@@ -4476,6 +4630,8 @@ function buildMonthlyMirrorSummary(
       balanceMinutes,
       date,
       earlyLeaveMinutes,
+      incompleteAfternoon,
+      incompleteMorning,
       isWorkday,
       label: date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", weekday: "short" }),
       lateMinutes,
@@ -4489,6 +4645,8 @@ function buildMonthlyMirrorSummary(
 
   const missingMornings = rows.filter((row) => row.missingMorning).length;
   const missingAfternoons = rows.filter((row) => row.missingAfternoon).length;
+  const incompleteMornings = rows.filter((row) => row.incompleteMorning).length;
+  const incompleteAfternoons = rows.filter((row) => row.incompleteAfternoon).length;
   const absencePoints = workPolicy.absenceMode === "day"
     ? rows.filter((row) => row.missingMorning || row.missingAfternoon).reduce(
         (total, row) =>
@@ -4508,6 +4666,8 @@ function buildMonthlyMirrorSummary(
     absencePoints,
     earlyLeaveMinutes,
     employee,
+    incompleteAfternoons,
+    incompleteMornings,
     lateMinutes,
     missingAfternoons,
     missingMornings,
@@ -4614,6 +4774,7 @@ function openPrintableMonthlyMirror({
         <div><span>Total de batidas</span><strong>${summary.totalPunches}</strong></div>
         <div><span>Falta manha</span><strong>${summary.missingMornings}</strong></div>
         <div><span>Falta tarde</span><strong>${summary.missingAfternoons}</strong></div>
+        <div><span>Batida incompleta</span><strong>${summary.incompleteMornings + summary.incompleteAfternoons}</strong></div>
         <div><span>Faltas calculadas</span><strong>${summary.absencePoints}</strong></div>
         <div><span>Atrasos</span><strong>${escapeHtml(formatDurationClock(summary.lateMinutes))}</strong></div>
         <div><span>Saida antecipada</span><strong>${escapeHtml(formatDurationClock(summary.earlyLeaveMinutes))}</strong></div>
@@ -4626,6 +4787,7 @@ function openPrintableMonthlyMirror({
         <strong>Regra aplicada</strong>
         <p>Controle de faltas: ${escapeHtml(workPolicy.absenceMode === "day" ? "por dia" : "por periodo")}.</p>
         <p>Peso das faltas: manha ${workPolicy.morningAbsenceWeight}, tarde ${workPolicy.afternoonAbsenceWeight}, dia inteiro ${workPolicy.fullDayAbsenceWeight}.</p>
+        <p>Batida parcial no periodo entra como pendencia de conferencia, nao como falta automatica.</p>
         <p>Jornada semanal: ${workPolicy.scheduledDays} dias. Tolerancia: ${workPolicy.toleranceMinutes} minutos. Banco de horas: ${workPolicy.bankHoursEnabled ? "ativo" : "inativo"}.</p>
         <p>Trabalho externo: ${escapeHtml(workPolicy.externalWorkPolicy)}. Ajuste/esquecimento: ${escapeHtml(workPolicy.forgottenPunchPolicy)}.</p>
       </div>
