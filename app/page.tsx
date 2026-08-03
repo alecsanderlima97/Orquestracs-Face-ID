@@ -206,6 +206,44 @@ const auditLogs = [
 
 const monthlyClosingRows: string[][] = [];
 
+const monthOptions = [
+  ["01", "Janeiro"],
+  ["02", "Fevereiro"],
+  ["03", "Marco"],
+  ["04", "Abril"],
+  ["05", "Maio"],
+  ["06", "Junho"],
+  ["07", "Julho"],
+  ["08", "Agosto"],
+  ["09", "Setembro"],
+  ["10", "Outubro"],
+  ["11", "Novembro"],
+  ["12", "Dezembro"],
+].map(([value, label]) => ({ label, value }));
+
+type MonthPeriod = {
+  end: Date;
+  label: string;
+  month: number;
+  start: Date;
+  year: number;
+};
+
+type MonthlyMirrorRow = {
+  date: Date;
+  label: string;
+  punches: Partial<Record<PunchType, Punch>>;
+  status: string;
+};
+
+type MonthlyMirrorSummary = {
+  employee: LocalEmployee;
+  pendingDays: number;
+  periodLabel: string;
+  rows: MonthlyMirrorRow[];
+  totalPunches: number;
+};
+
 const initialShifts = [
   {
     name: "Escala 07h as 17h15",
@@ -1292,7 +1330,7 @@ export default function Home() {
             />
           )}
           {active === "Banco de horas" && <HoursBankScreen onAction={demoAction} />}
-          {active === "Fechamento mensal" && <MonthlyClosingScreen onAction={demoAction} />}
+          {active === "Fechamento mensal" && <MonthlyClosingScreen company={companyProfile} onAction={demoAction} />}
           {active === "Relatorios" && <ReportsScreen onAction={demoAction} />}
           {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
           {active === "Admin" && (
@@ -3088,24 +3126,141 @@ function HoursBankScreen({ onAction }: { onAction: (action: string) => void }) {
   );
 }
 
-function MonthlyClosingScreen({ onAction }: { onAction: (action: string) => void }) {
+function MonthlyClosingScreen({
+  company,
+  onAction,
+}: {
+  company: MainCompanyProfile | null;
+  onAction: (action: string) => void;
+}) {
+  const now = new Date();
+  const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, "0"));
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("all");
+  const [responsible, setResponsible] = useState("");
+  const [lastSummary, setLastSummary] = useState<MonthlyMirrorSummary[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function load() {
+      try {
+        const savedInFirebase = await listEmployees("main");
+        if (!mounted) return;
+        setEmployeesList(
+          savedInFirebase.map((employee) =>
+            toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
+          ),
+        );
+      } catch {
+        if (mounted) setEmployeesList(getLocalEmployees());
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    void load();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const selectedEmployees =
+    selectedEmployeeId === "all"
+      ? employeesList
+      : employeesList.filter((employee) => employee.employeeId === selectedEmployeeId);
+
+  async function generateMonthlyMirror() {
+    if (!selectedEmployees.length) {
+      onAction("Nenhum colaborador selecionado para gerar espelho mensal.");
+      return;
+    }
+
+    const period = getMonthPeriod(Number(year), Number(month));
+    const summaries = await Promise.all(
+      selectedEmployees.map(async (employee) => {
+        const punches = await listEmployeePunchesByIds("main", [
+          employee.employeeId,
+          employee.pin ? `pin-${employee.pin}` : "",
+        ]);
+        return buildMonthlyMirrorSummary(employee, punches, period);
+      }),
+    );
+
+    setLastSummary(summaries);
+    openPrintableMonthlyMirror({
+      company,
+      generatedAt: new Date(),
+      period,
+      responsible,
+      summaries,
+    });
+    onAction("Espelho mensal aberto para impressao. Use Salvar como PDF se quiser arquivar.");
+  }
+
+  function exportMonthlyCsv() {
+    if (!lastSummary.length) {
+      onAction("Gere o espelho mensal antes de exportar para o contador.");
+      return;
+    }
+
+    const rows = [
+      ["Funcionario", "Matricula", "PIN", "Periodo", "Dias", "Batidas", "Pendencias", "Responsavel"],
+      ...lastSummary.map((summary) => [
+        summary.employee.name,
+        summary.employee.registration || "",
+        summary.employee.pin || "",
+        summary.periodLabel,
+        String(summary.rows.length),
+        String(summary.totalPunches),
+        String(summary.pendingDays),
+        responsible,
+      ]),
+    ];
+
+    downloadTextFile(
+      `espelho-ponto-contador-${year}-${month}.csv`,
+      rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n"),
+      "text/csv",
+    );
+    onAction("CSV mensal para contador gerado.");
+  }
+
   return (
     <>
       <Panel title="Fechamento mensal" subtitle="Conferencia antes de enviar para o contador">
         <div className="grid gap-3 md:grid-cols-4">
-          <Field label="Mes"><select className="input"><option>Junho</option><option>Julho</option><option>Agosto</option></select></Field>
-          <Field label="Ano"><input className="input" placeholder="2026" /></Field>
-          <Field label="Status"><select className="input"><option>Em conferencia</option><option>Fechado</option><option>Reaberto</option></select></Field>
-          <Field label="Responsavel"><input className="input" placeholder="Nome do responsavel" /></Field>
+          <Field label="Mes">
+            <select className="input" onChange={(event) => setMonth(event.target.value)} value={month}>
+              {monthOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Ano">
+            <input className="input" onChange={(event) => setYear(event.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="2026" value={year} />
+          </Field>
+          <Field label="Colaborador">
+            <select className="input" disabled={loading} onChange={(event) => setSelectedEmployeeId(event.target.value)} value={selectedEmployeeId}>
+              <option value="all">Todos os colaboradores</option>
+              {employeesList.map((employee) => (
+                <option key={employee.employeeId} value={employee.employeeId}>{employee.name}</option>
+              ))}
+            </select>
+          </Field>
+          <MaskedField label="Responsavel" mask="name" onChange={setResponsible} placeholder="Nome Do Responsavel" value={responsible} />
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-5">
           {[
-            ["Funcionarios", "0"],
-            ["Faltas manha", "0"],
-            ["Faltas tarde", "0"],
-            ["Atrasos", "00:00"],
-            ["Ajustes", "0"],
+            ["Funcionarios", String(selectedEmployees.length)],
+            ["Periodo", `${month}/${year}`],
+            ["Gerados", String(lastSummary.length)],
+            ["Pendencias", String(lastSummary.reduce((total, item) => total + item.pendingDays, 0))],
+            ["Batidas", String(lastSummary.reduce((total, item) => total + item.totalPunches, 0))],
           ].map(([label, value]) => (
             <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
               <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
@@ -3115,8 +3270,8 @@ function MonthlyClosingScreen({ onAction }: { onAction: (action: string) => void
         </div>
 
         <ActionRow>
-          <button className="primary-button" onClick={() => onAction("Folha mensal para contador")} type="button">Gerar folha do contador</button>
-          <button className="secondary-button" onClick={() => onAction("Ficha individual de ciencia")} type="button">Ficha para assinatura</button>
+          <button className="primary-button" disabled={loading} onClick={() => void generateMonthlyMirror()} type="button">Imprimir / salvar PDF</button>
+          <button className="secondary-button" onClick={exportMonthlyCsv} type="button">Exportar para contador</button>
           <button className="secondary-button" onClick={() => onAction("Fechamento mensal bloqueado")} type="button">Fechar mes</button>
         </ActionRow>
       </Panel>
@@ -3142,19 +3297,29 @@ function MonthlyClosingScreen({ onAction }: { onAction: (action: string) => void
               </tr>
           </thead>
           <tbody>
-            {monthlyClosingRows.length === 0 ? (
+            {lastSummary.length === 0 ? (
               <tr>
                 <td className="px-4 py-8 text-center text-[#667085]" colSpan={9}>
-                  Nenhum fechamento mensal gerado ainda.
+                  Gere o espelho mensal para visualizar a conferencia por funcionario.
                 </td>
               </tr>
             ) : (
-              monthlyClosingRows.map((row) => (
-                  <tr className="border-b border-[#e3e8ee]" key={`${row[0]}-${row[1]}`}>
-                    {row.map((cell, index) => (
+              lastSummary.map((summary) => (
+                  <tr className="border-b border-[#e3e8ee]" key={summary.employee.employeeId}>
+                    {[
+                      summary.employee.name,
+                      summary.employee.cpf,
+                      summary.employee.role,
+                      String(summary.rows.length),
+                      "Conferir",
+                      "Conferir",
+                      "Conferir",
+                      "Conferir",
+                      summary.pendingDays ? `${summary.pendingDays} dias com pendencia` : "Sem pendencia aparente",
+                    ].map((cell, index) => (
                       <td
                         className={`px-4 py-3 ${index === 0 ? "font-semibold text-[#101923]" : "text-[#667085]"}`}
-                        key={`${row[0]}-${cell}-${index}`}
+                        key={`${summary.employee.employeeId}-${cell}-${index}`}
                       >
                         {cell}
                       </td>
@@ -4109,6 +4274,220 @@ function formatPunchStatus(status: PunchStatus) {
     possible_forgotten: "Possivel esquecimento",
   };
   return labels[status];
+}
+
+function getMonthPeriod(year: number, month: number): MonthPeriod {
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0, 23, 59, 59, 999);
+  const label = start.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  return { end, label, month, start, year };
+}
+
+function sameDay(first: Date, second: Date) {
+  return first.getFullYear() === second.getFullYear()
+    && first.getMonth() === second.getMonth()
+    && first.getDate() === second.getDate();
+}
+
+function buildMonthlyMirrorSummary(
+  employee: LocalEmployee,
+  punches: Punch[],
+  period: MonthPeriod,
+): MonthlyMirrorSummary {
+  const validPunches = punches
+    .filter((punch) => {
+      const date = punchDate(punch);
+      return date >= period.start && date <= period.end;
+    })
+    .sort((first, second) => punchDate(first).getTime() - punchDate(second).getTime());
+  const rows: MonthlyMirrorRow[] = [];
+
+  for (let day = 1; day <= period.end.getDate(); day += 1) {
+    const date = new Date(period.year, period.month - 1, day);
+    const dayPunches = validPunches.filter((punch) => sameDay(punchDate(punch), date));
+    const punchesByType: Partial<Record<PunchType, Punch>> = {};
+    dayPunches.forEach((punch) => {
+      punchesByType[punch.type] = punch;
+    });
+
+    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+    rows.push({
+      date,
+      label: date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", weekday: "short" }),
+      punches: punchesByType,
+      status: dayPunches.length
+        ? dayPunches.length >= 4
+          ? "Completo"
+          : "Conferir batidas"
+        : isWeekend
+          ? "Sem expediente aparente"
+          : "Sem batida",
+    });
+  }
+
+  return {
+    employee,
+    pendingDays: rows.filter((row) => row.status === "Conferir batidas" || row.status === "Sem batida").length,
+    periodLabel: period.label,
+    rows,
+    totalPunches: validPunches.length,
+  };
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function punchTime(punch?: Punch) {
+  if (!punch) return "-";
+  const date = punchDate(punch);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function openPrintableMonthlyMirror({
+  company,
+  generatedAt,
+  period,
+  responsible,
+  summaries,
+}: {
+  company: MainCompanyProfile | null;
+  generatedAt: Date;
+  period: MonthPeriod;
+  responsible: string;
+  summaries: MonthlyMirrorSummary[];
+}) {
+  const address = (company?.address || {}) as Record<string, string>;
+  const companyName = String(company?.legalName || company?.tradeName || "Empresa");
+  const companyCnpj = String(company?.cnpj || "CNPJ nao informado");
+  const companyAddress = [address.street, address.number, address.district, address.city, address.state]
+    .filter(Boolean)
+    .join(", ");
+
+  const employeeSections = summaries.map((summary) => `
+    <section class="page">
+      <header class="doc-header">
+        <div>
+          <p class="eyebrow">Espelho de ponto mensal</p>
+          <h1>${escapeHtml(companyName)}</h1>
+          <p>CNPJ: ${escapeHtml(companyCnpj)}</p>
+          <p>${escapeHtml(companyAddress || "Endereco nao informado")}</p>
+        </div>
+        <div class="period">
+          <strong>${escapeHtml(period.label)}</strong>
+          <span>Gerado em ${escapeHtml(generatedAt.toLocaleString("pt-BR"))}</span>
+        </div>
+      </header>
+
+      <div class="employee-grid">
+        <div><span>Colaborador</span><strong>${escapeHtml(summary.employee.name)}</strong></div>
+        <div><span>Matricula</span><strong>${escapeHtml(summary.employee.registration || "-")}</strong></div>
+        <div><span>PIN</span><strong>${escapeHtml(summary.employee.pin || "-")}</strong></div>
+        <div><span>Cargo</span><strong>${escapeHtml(summary.employee.role || "-")}</strong></div>
+        <div><span>CPF</span><strong>${escapeHtml(summary.employee.cpf || "-")}</strong></div>
+        <div><span>Admissao</span><strong>${escapeHtml(summary.employee.admissionDate || "-")}</strong></div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Dia</th>
+            <th>Entrada</th>
+            <th>Saida almoco</th>
+            <th>Retorno</th>
+            <th>Saida</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${summary.rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.label)}</td>
+              <td>${escapeHtml(punchTime(row.punches.entry))}</td>
+              <td>${escapeHtml(punchTime(row.punches.lunch_out))}</td>
+              <td>${escapeHtml(punchTime(row.punches.lunch_back))}</td>
+              <td>${escapeHtml(punchTime(row.punches.exit))}</td>
+              <td>${escapeHtml(row.status)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+
+      <div class="summary">
+        <div><span>Total de batidas</span><strong>${summary.totalPunches}</strong></div>
+        <div><span>Dias pendentes</span><strong>${summary.pendingDays}</strong></div>
+        <div><span>Responsavel</span><strong>${escapeHtml(responsible || "Nao informado")}</strong></div>
+      </div>
+
+      <p class="statement">
+        Declaro que conferi o espelho de ponto do periodo acima. Em caso de divergencia, o colaborador podera registrar ressalva antes do fechamento definitivo.
+      </p>
+
+      <div class="signatures">
+        <div><span></span><strong>Assinatura do colaborador</strong></div>
+        <div><span></span><strong>Assinatura do responsavel/RH</strong></div>
+      </div>
+    </section>
+  `).join("");
+
+  const html = `<!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>Espelho de ponto - ${escapeHtml(period.label)}</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #eef2f5; color: #101923; font-family: Arial, Helvetica, sans-serif; }
+          .toolbar { position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; justify-content: flex-end; padding: 12px; background: #101923; }
+          button { border: 0; border-radius: 6px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+          .print { background: #38c793; color: #082c22; }
+          .close { background: #fff; color: #26323f; }
+          .page { width: 210mm; min-height: 297mm; margin: 14px auto; padding: 14mm; background: #fff; page-break-after: always; }
+          .doc-header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #101923; padding-bottom: 14px; }
+          .eyebrow { margin: 0 0 6px; color: #18594c; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+          h1 { margin: 0 0 8px; font-size: 20px; }
+          p { margin: 3px 0; font-size: 12px; line-height: 1.45; }
+          .period { min-width: 150px; text-align: right; }
+          .period strong, .period span { display: block; }
+          .period span { margin-top: 6px; color: #667085; font-size: 11px; }
+          .employee-grid, .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; }
+          .employee-grid div, .summary div { border: 1px solid #d9e0e7; border-radius: 6px; padding: 8px; }
+          span { display: block; color: #667085; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+          strong { display: block; margin-top: 4px; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th { background: #101923; color: white; text-align: left; }
+          th, td { border: 1px solid #d9e0e7; padding: 6px; }
+          tr:nth-child(even) td { background: #fbfcfd; }
+          .statement { margin-top: 18px; border: 1px solid #d9e0e7; border-radius: 6px; padding: 10px; }
+          .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 34px; }
+          .signatures span { height: 44px; border-bottom: 1px solid #101923; }
+          .signatures strong { text-align: center; }
+          @media print {
+            body { background: #fff; }
+            .toolbar { display: none; }
+            .page { margin: 0; box-shadow: none; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="toolbar">
+          <button class="close" onclick="window.close()">Fechar</button>
+          <button class="print" onclick="window.print()">Imprimir / salvar PDF</button>
+        </div>
+        ${employeeSections}
+      </body>
+    </html>`;
+
+  const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1100,height=800");
+  if (!printWindow) return;
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
 }
 
 async function createAuditHash(payload: Record<string, unknown>) {
