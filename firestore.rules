@@ -33,21 +33,63 @@ service cloud.firestore {
         || (belongsToTenant(tenantId) && tenantRole(tenantId) == "owner");
     }
 
-    match /companies/{targetCompanyId} {
-      allow read: if targetCompanyId == "main" && signedIn();
-      allow create, update: if targetCompanyId == "main" && signedIn();
-      allow delete: if isPlatformOwner();
+    match /companies/{companyId} {
+      allow read: if canReadTenant(companyId);
+      allow create, update: if canWriteTenant(companyId);
+      allow delete: if false;
+
+      match /employees/{employeeId} {
+        allow read: if canReadTenant(companyId);
+        allow create, update: if canWriteTenant(companyId);
+        allow delete: if false;
+
+        match /faceId/{recordId} {
+          allow read: if canReadTenant(companyId);
+          allow create: if canWriteTenant(companyId);
+          allow update, delete: if false;
+        }
+      }
+
+      match /journeys/{journeyId} {
+        allow read: if canReadTenant(companyId);
+        allow create, update: if canWriteTenant(companyId);
+        allow delete: if false;
+      }
+
+      match /punches/{punchId} {
+        allow read: if canReadTenant(companyId);
+        allow create: if canWriteTenant(companyId);
+        allow update, delete: if false;
+      }
+
+      match /adjustments/{adjustmentId} {
+        allow read: if canReadTenant(companyId);
+        allow create: if canWriteTenant(companyId);
+        allow update, delete: if false;
+      }
+
+      match /auditLogs/{logId} {
+        allow read: if canReadTenant(companyId);
+        allow create: if canWriteTenant(companyId);
+        allow update, delete: if false;
+      }
+
+      match /reports/{reportId} {
+        allow read: if canReadTenant(companyId);
+        allow create: if canWriteTenant(companyId);
+        allow update, delete: if false;
+      }
 
       match /{document=**} {
-        allow read: if targetCompanyId == "main" && signedIn();
-        allow create, update: if targetCompanyId == "main" && signedIn();
-        allow delete: if isPlatformOwner();
+        allow read: if canReadTenant(companyId);
+        allow write: if false;
       }
     }
 
     match /tenants/{tenantId} {
       allow read: if canReadTenant(tenantId);
-      allow create, update: if isPlatformOwner() || (signedIn() && request.resource.data.ownerId == request.auth.uid);
+      allow create: if isPlatformOwner();
+      allow update: if isTenantOwner(tenantId);
       allow delete: if false;
 
       match /users/{userId} {
@@ -61,13 +103,14 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.status == "Ativo"
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.expiresAt > request.time
           );
-        allow update: if isTenantOwner(tenantId) || (signedIn() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
+        allow update: if isTenantOwner(tenantId)
+          || (signedIn() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
         allow delete: if false;
       }
 
       match /{document=**} {
         allow read: if canReadTenant(tenantId);
-        allow write: if canWriteTenant(tenantId);
+        allow write: if false;
       }
     }
 

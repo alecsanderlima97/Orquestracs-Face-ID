@@ -208,25 +208,6 @@ const DEFAULT_WORK_POLICY: WorkPolicy = {
   toleranceMinutes: 10,
 };
 
-const VANMART_INITIAL_COMPANY_PROFILE = {
-  address: {
-    city: "Ribeirao Branco",
-    complement: "",
-    district: "",
-    number: "880",
-    state: "SP",
-    street: "Rua Capitao Elias Pereira",
-    zipCode: "",
-  },
-  cnpj: "44.215.194/0001-18",
-  contactEmail: "",
-  contactName: "",
-  contactPhone: "",
-  legalName: "COMERCIO DE MADEIRAS VANMART LTDA",
-  stateRegistration: "",
-  tradeName: "Vanmart",
-};
-
 const auditLogs = [
   ["Original imutavel", "Batidas bloqueadas contra edicao direta"],
   ["Ajuste rastreado", "Responsavel, motivo e horario obrigatorios"],
@@ -744,9 +725,8 @@ export default function Home() {
       return;
     }
 
-    await saveMainCompany(VANMART_INITIAL_COMPANY_PROFILE);
-    setCompanyProfile(VANMART_INITIAL_COMPANY_PROFILE as MainCompanyProfile);
-    setNotice("Dados iniciais da empresa salvos no Firebase.");
+    setCompanyProfile(null);
+    setNotice("Cadastre os dados reais da empresa para iniciar. Nenhum dado demonstrativo foi criado.");
   }
 
   async function refreshAccess(currentUser: User) {
@@ -1308,7 +1288,19 @@ export default function Home() {
   }
 
   const isDeveloperUser = appAccess?.role === "developer" || isPlatformOwnerEmail(user.email);
-  const visibleNavItems = navItems.filter((item) => item !== "Admin" || isDeveloperUser);
+  const canManage = isDeveloperUser || appAccess?.role === "owner" || appAccess?.role === "admin";
+  const readerSections: Section[] = [
+    "Painel",
+    "Empresa",
+    "Colaboradores",
+    "Banco de horas",
+    "Relatorios",
+    "LGPD e auditoria",
+  ];
+  const visibleNavItems = navItems.filter((item) =>
+    (item !== "Admin" || isDeveloperUser)
+    && (canManage || readerSections.includes(item)),
+  );
   const companyName =
     companyProfile?.tradeName || companyProfile?.legalName || "Empresa principal";
   const companyCnpj = companyProfile?.cnpj || "CNPJ nao cadastrado";
@@ -1419,15 +1411,17 @@ export default function Home() {
           {active === "Painel" && (
             <>
               <Metrics />
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_370px]">
-                <PunchCard
-                  onRegister={registerPunch}
-                  pin={pin}
-                  setPin={setPin}
-                />
+              <div className={`grid gap-5 ${canManage ? "xl:grid-cols-[minmax(0,1fr)_370px]" : "xl:grid-cols-1"}`}>
+                {canManage && (
+                  <PunchCard
+                    onRegister={registerPunch}
+                    pin={pin}
+                    setPin={setPin}
+                  />
+                )}
                 <ComplianceCard />
               </div>
-              <EmployeesTable onAction={demoAction} />
+              <EmployeesTable canEdit={canManage} onAction={demoAction} />
               <ReportPreview />
             </>
           )}
@@ -1440,8 +1434,8 @@ export default function Home() {
               onAction={demoAction}
             />
           )}
-          {active === "Colaboradores" && <EmployeesScreen onAction={demoAction} />}
-          {active === "Escalas" && <ShiftsScreen onAction={demoAction} />}
+          {active === "Colaboradores" && <EmployeesScreen canEdit={canManage} onAction={demoAction} />}
+          {active === "Escalas" && <ShiftsScreen canEdit={canManage} onAction={demoAction} />}
           {active === "Sala de ponto" && (
             <KioskScreen
               onAction={demoAction}
@@ -1461,7 +1455,7 @@ export default function Home() {
               setPin={setPin}
             />
           )}
-          {active === "Banco de horas" && <HoursBankScreen onAction={demoAction} />}
+          {active === "Banco de horas" && <HoursBankScreen canEdit={canManage} onAction={demoAction} />}
           {active === "Fechamento mensal" && <MonthlyClosingScreen company={companyProfile} onAction={demoAction} />}
           {active === "Relatorios" && <ReportsScreen onAction={demoAction} />}
           {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
@@ -1926,7 +1920,7 @@ function CompaniesScreen({
   );
 }
 
-function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
+function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (action: string) => void }) {
   const [journeyMode, setJourneyMode] = useState<"coletiva" | "individual">("coletiva");
   const emptyEmployeeForm = {
     admissionDate: "",
@@ -2056,6 +2050,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   }
 
   function startNewEmployee() {
+    if (!canEdit) return;
     setEmployeeForm(emptyEmployeeForm);
     setEditingEmployeeId(null);
     setSelectedEmployee(null);
@@ -2074,6 +2069,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   }
 
   function startFaceRegistration(employee?: EmployeeRow) {
+    if (!canEdit) return;
     const target = employee
       ? toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name)
       : facePendingEmployees[0];
@@ -2110,6 +2106,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   }
 
   function editEmployee(employee: EmployeeRow) {
+    if (!canEdit) return;
     const selected = toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name);
     setSelectedEmployee(selected);
     setEditingEmployeeId(employeeDocumentId(selected));
@@ -2136,6 +2133,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   }
 
   function importEmployeesFromJson(file?: File) {
+    if (!canEdit) return;
     if (!file) return;
 
     const reader = new FileReader();
@@ -2208,6 +2206,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   }
 
   async function saveEmployee() {
+    if (!canEdit) return;
     if (!employeeForm.name.trim() || employeeForm.pin.length < 4) {
       onAction("Informe o nome e um PIN de pelo menos 4 números.");
       return;
@@ -2294,6 +2293,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   }
 
   async function changeEmployeePhoto(file?: File) {
+    if (!canEdit) return;
     if (!file || !selectedEmployee) return;
 
     if (!file.type.startsWith("image/")) {
@@ -2503,16 +2503,17 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
           )}
         </div>
         <ActionRow>
-          <SaveButton onClick={saveEmployee}>{editingEmployeeId ? "Salvar alteracoes" : "Cadastrar colaborador"}</SaveButton>
+          <SaveButton disabled={!canEdit} onClick={saveEmployee}>{editingEmployeeId ? "Salvar alteracoes" : "Cadastrar colaborador"}</SaveButton>
           {editingEmployeeId && (
             <button className="secondary-button" onClick={cancelEmployeeEdit} type="button">Cancelar edicao</button>
           )}
-          <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee || undefined)} type="button">Cadastrar Face ID do selecionado</button>
-          <label className="secondary-button cursor-pointer">
+          <button className="secondary-button" disabled={!canEdit} onClick={() => startFaceRegistration(selectedEmployee || undefined)} type="button">Cadastrar Face ID do selecionado</button>
+          <label className={`secondary-button ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
             Importar holerite JSON
             <input
               accept="application/json"
               className="hidden"
+              disabled={!canEdit}
               onChange={(event) => importEmployeesFromJson(event.target.files?.[0])}
               type="file"
             />
@@ -2728,6 +2729,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
         subtitle={`${localEmployees.length} cadastros na base`}
       >
         <EmployeesTable
+          canEdit={canEdit}
           embedded
           employeesList={localEmployees}
           onAction={onAction}
@@ -2741,7 +2743,7 @@ function EmployeesScreen({ onAction }: { onAction: (action: string) => void }) {
   );
 }
 
-function ShiftsScreen({ onAction }: { onAction: (action: string) => void }) {
+function ShiftsScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (action: string) => void }) {
   const [shifts, setShifts] = useState(initialShifts);
   const [editingIndex, setEditingIndex] = useState(0);
   const [form, setForm] = useState(initialShifts[0]);
@@ -2757,6 +2759,7 @@ function ShiftsScreen({ onAction }: { onAction: (action: string) => void }) {
   }
 
   function saveShift() {
+    if (!canEdit) return;
     setShifts((current) =>
       current.map((shift, index) => (index === editingIndex ? form : shift)),
     );
@@ -2797,7 +2800,7 @@ function ShiftsScreen({ onAction }: { onAction: (action: string) => void }) {
             </Field>
           </div>
           <ActionRow>
-            <SaveButton onClick={saveShift}>Salvar alteracoes</SaveButton>
+            <SaveButton disabled={!canEdit} onClick={saveShift}>Salvar alteracoes</SaveButton>
             <button className="secondary-button" onClick={() => onAction("Previa de calculo do turno")} type="button">Ver calculo</button>
           </ActionRow>
         </Panel>
@@ -3458,16 +3461,18 @@ function KioskScreen({
   );
 }
 
-function HoursBankScreen({ onAction }: { onAction: (action: string) => void }) {
+function HoursBankScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (action: string) => void }) {
   return (
     <>
       <Metrics />
       <Panel title="Banco de horas" subtitle="Saldos por colaborador e periodo">
-        <EmployeesTable onAction={onAction} compact />
-        <ActionRow>
-          <button className="primary-button" onClick={() => onAction("Fechamento do banco")} type="button">Fechar periodo</button>
-          <button className="secondary-button" onClick={() => onAction("Abono de horas")} type="button">Registrar abono</button>
-        </ActionRow>
+        <EmployeesTable canEdit={canEdit} onAction={onAction} compact />
+        {canEdit && (
+          <ActionRow>
+            <button className="primary-button" onClick={() => onAction("Fechamento do banco")} type="button">Fechar periodo</button>
+            <button className="secondary-button" onClick={() => onAction("Abono de horas")} type="button">Registrar abono</button>
+          </ActionRow>
+        )}
       </Panel>
     </>
   );
@@ -4388,6 +4393,7 @@ function AssistantPanel({
 }
 
 function EmployeesTable({
+  canEdit = true,
   embedded = false,
   employeesList = employees,
   onAction,
@@ -4397,6 +4403,7 @@ function EmployeesTable({
   photoUrls = {},
   compact = false,
 }: {
+  canEdit?: boolean;
   embedded?: boolean;
   employeesList?: EmployeeRow[];
   onAction: (action: string) => void;
@@ -4414,7 +4421,9 @@ function EmployeesTable({
             <p className="text-sm font-medium text-[#667085]">Equipe</p>
             <h2 className="mt-1 text-xl font-semibold text-[#101923]">Colaboradores e banco de horas</h2>
           </div>
-          <button className="secondary-button w-fit" onClick={() => (onNew ? onNew() : onAction("Novo colaborador"))} type="button">Novo colaborador</button>
+          {canEdit && (
+            <button className="secondary-button w-fit" onClick={() => (onNew ? onNew() : onAction("Novo colaborador"))} type="button">Novo colaborador</button>
+          )}
         </div>
       )}
       <div className="overflow-x-auto">
@@ -4475,7 +4484,9 @@ function EmployeesTable({
                   </td>
                   <td className="px-5 py-4">
                   <div className="flex gap-2">
-                    <button className="mini-button" onClick={() => (onEdit ? onEdit(employee) : onAction(`Editar ${employee.name}`))} type="button">Editar</button>
+                    {canEdit && (
+                      <button className="mini-button" onClick={() => (onEdit ? onEdit(employee) : onAction(`Editar ${employee.name}`))} type="button">Editar</button>
+                    )}
                     <button className="mini-button" onClick={() => (onView ? onView(employee) : onAction(`Ver ${employee.name}`))} type="button">Ver</button>
                   </div>
                   </td>

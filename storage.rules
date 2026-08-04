@@ -6,29 +6,62 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    match /companies/main/profile/{fileName} {
-      allow read: if signedIn();
-      allow write: if signedIn()
+    function isPlatformOwner() {
+      return signedIn() && request.auth.token.email == "orquestracs@gmail.com";
+    }
+
+    function belongsToTenant(companyId) {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/tenants/$(companyId)/users/$(request.auth.uid));
+    }
+
+    function canReadTenant(companyId) {
+      return isPlatformOwner() || belongsToTenant(companyId);
+    }
+
+    function canWriteTenant(companyId) {
+      return isPlatformOwner()
+        || (
+          belongsToTenant(companyId)
+          && firestore.get(/databases/(default)/documents/tenants/$(companyId)/users/$(request.auth.uid)).data.role in ["owner", "admin"]
+        );
+    }
+
+    function validImage() {
+      return request.resource != null
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
 
-    match /companies/main/employees/{employeeId}/face-id/{fileName} {
-      allow read: if signedIn();
-      allow write: if signedIn()
-        && request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+    match /companies/{companyId}/profile/{fileName} {
+      allow read: if canReadTenant(companyId);
+      allow create, update: if canWriteTenant(companyId) && validImage();
+      allow delete: if false;
     }
 
-    match /companies/main/employees/{employeeId}/punches/{date}/{fileName} {
-      allow read: if signedIn();
-      allow write: if signedIn()
-        && request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*');
+    match /companies/{companyId}/employees/{employeeId}/face-id/{fileName} {
+      allow read: if canReadTenant(companyId);
+      allow create, update: if canWriteTenant(companyId) && validImage();
+      allow delete: if false;
     }
 
-    match /companies/main/{allPaths=**} {
-      allow read: if signedIn();
+    match /companies/{companyId}/employees/{employeeId}/punches/{date}/{fileName} {
+      allow read: if canReadTenant(companyId);
+      allow create: if canWriteTenant(companyId) && validImage();
+      allow update, delete: if false;
+    }
+
+    match /companies/{companyId}/reports/{fileName} {
+      allow read: if canReadTenant(companyId);
+      allow create: if canWriteTenant(companyId)
+        && request.resource != null
+        && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType == 'application/pdf';
+      allow update, delete: if false;
+    }
+
+    match /companies/{companyId}/{allPaths=**} {
+      allow read: if canReadTenant(companyId);
       allow write: if false;
     }
   }
