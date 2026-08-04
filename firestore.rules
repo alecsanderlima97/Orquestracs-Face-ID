@@ -102,9 +102,15 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.tenantId == tenantId
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.status == "Ativo"
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.expiresAt > request.time
+            && request.resource.data.role == get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.role
+            && request.resource.data.role in ["owner", "admin", "reader"]
           );
         allow update: if isTenantOwner(tenantId)
-          || (signedIn() && request.auth.uid == userId && request.resource.data.role == resource.data.role);
+          || (
+            signedIn()
+            && request.auth.uid == userId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["name", "email", "updatedAt"])
+          );
         allow delete: if false;
       }
 
@@ -121,6 +127,7 @@ service cloud.firestore {
           signedIn()
           && request.auth.uid == userId
           && exists(/databases/$(database)/documents/tenants/$(tenantId)/users/$(userId))
+          && request.resource.data.role == get(/databases/$(database)/documents/tenants/$(tenantId)/users/$(userId)).data.role
         );
       allow update, delete: if false;
     }
@@ -141,6 +148,7 @@ service cloud.firestore {
           && request.resource.data.usedBy == request.auth.uid
           && request.resource.data.tenantId == resource.data.tenantId
           && request.resource.data.role == resource.data.role
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "usedAt", "usedBy"])
         )
       );
       allow delete: if false;

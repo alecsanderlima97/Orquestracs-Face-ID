@@ -62,10 +62,15 @@ export async function getUserTenantAccess(user: User): Promise<TenantAccess | nu
 
   const membership = memberships.docs[0];
   const data = membership.data();
+  const tenantUser = await getDoc(doc(db, `tenants/${membership.id}/users/${user.uid}`));
+
+  if (!tenantUser.exists()) return null;
+
+  const canonicalAccess = tenantUser.data();
 
   return {
     companyName: String(data.companyName || "Empresa"),
-    role: (data.role || "reader") as TenantRole,
+    role: (canonicalAccess.role || "reader") as TenantRole,
     tenantId: membership.id,
   };
 }
