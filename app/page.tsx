@@ -18,6 +18,7 @@ import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
 import type { AdjustmentType, Punch, PunchStatus, PunchType } from "@/lib/models";
 import { createFaceIdRecord, uploadFacePhoto } from "@/lib/services/face-id";
+import { saveEmployeePin, verifyEmployeePin } from "@/lib/services/employee-pins";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
 import { createPunch, createPunchAdjustment, listEmployeePunchesByIds } from "@/lib/services/punches";
@@ -68,6 +69,7 @@ type EmployeeRow = {
   name: string;
   phone?: string;
   pin?: string;
+  pinConfigured?: boolean;
   profilePhotoPath?: string;
   registration?: string;
   role: string;
@@ -79,6 +81,7 @@ type LocalEmployee = EmployeeRow & {
   employeeId: string;
   faceIdStatus: "not_registered" | "registered";
   pin: string;
+  pinConfigured: boolean;
   punchMode: "automatic" | "manual";
   schedule: {
     breakEnd: string;
@@ -111,7 +114,12 @@ const REQUIRED_FACE_CAPTURES = 3;
 
 function getLocalEmployees() {
   try {
-    return JSON.parse(window.localStorage.getItem(LOCAL_EMPLOYEES_KEY) || "[]") as LocalEmployee[];
+    const saved = JSON.parse(window.localStorage.getItem(LOCAL_EMPLOYEES_KEY) || "[]") as LocalEmployee[];
+    return saved.map((employee) => ({
+      ...employee,
+      pin: "",
+      pinConfigured: Boolean(employee.pinConfigured || employee.pin),
+    }));
   } catch {
     return [];
   }
@@ -132,7 +140,8 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
     lastPunch: String(employee.lastPunch || "Sem batida hoje"),
     name: String(employee.name || "Colaborador sem nome"),
     phone: String(employee.phone || ""),
-    pin: String(employee.pin || ""),
+    pin: "",
+    pinConfigured: Boolean(employee.pinHash || employee.pin || employee.pinConfigured),
     profilePhotoPath: String(employee.profilePhotoPath || ""),
     punchMode: (employee.punchMode || "automatic") as LocalEmployee["punchMode"],
     registration: String(employee.registration || ""),
@@ -1099,14 +1108,26 @@ export default function Home() {
     context: PunchContext = {},
   ) {
     if (!employee && !pin.trim()) {
-      setNotice("Informe um PIN para simular a batida.");
+      setNotice("Informe o PIN do colaborador.");
       return false;
     }
 
     const occurredAt = new Date();
     const serverRecordedAt = new Date();
-    const employeeName = employee?.name || "Colaborador identificado por PIN";
-    const employeeId = employee?.employeeId || `pin-${pin.trim()}`;
+    let employeeName = employee?.name || "";
+    let employeeId = employee?.employeeId || "";
+
+    if (!employee) {
+      try {
+        const verified = await verifyEmployeePin("main", pin.trim());
+        employeeName = verified.name;
+        employeeId = verified.employeeId;
+      } catch (error) {
+        console.error(error);
+        setNotice("PIN nao reconhecido. Confira os numeros ou procure o responsavel.");
+        return false;
+      }
+    }
     const punchId = crypto.randomUUID();
     let photoPath = employee ? "face-id-local-profile" : "pending-storage-photo";
 
@@ -1157,7 +1178,7 @@ export default function Home() {
 
     appendLocalRecord(`Batida: ${kind}`, external ? "Ponto externo" : "Sala de ponto", {
       Colaborador: employeeName,
-      "ID do colaborador": employee?.employeeId || "Identificação por PIN",
+      "ID do colaborador": employeeId,
       Horário: occurredAt.toISOString(),
       Método: employee ? "Face ID" : "PIN + foto",
       Origem: external ? "Externa" : "Sala de ponto",
@@ -1988,7 +2009,6 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     try {
       const punches = await listEmployeePunchesByIds("main", [
         employee.employeeId,
-        employee.pin ? `pin-${employee.pin}` : "",
       ]);
       const sorted = punches.sort((first, second) =>
         punchDate(second).getTime() - punchDate(first).getTime(),
@@ -2018,6 +2038,19 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
         const savedInFirebase = await listEmployees("main");
         if (!mounted) return;
 
+        const legacyPins = savedInFirebase
+          .map((employee) => ({
+            employeeId: employee.id,
+            pin: String((employee as unknown as Record<string, unknown>).pin || ""),
+          }))
+          .filter((employee) => employee.pin);
+
+        if (canEdit && legacyPins.length) {
+          await Promise.all(legacyPins.map((employee) =>
+            saveEmployeePin("main", employee.employeeId, employee.pin),
+          ));
+        }
+
         const mapped = savedInFirebase.map((employee) =>
           toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
         );
@@ -2033,7 +2066,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [canEdit]);
 
   useEffect(() => {
     localEmployees.forEach((employee) => {
@@ -2159,6 +2192,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             name: employee.name.trim(),
             phone: employee.phone || "",
             pin: employee.pin || "",
+            pinConfigured: Boolean(employee.pin),
             punchMode: "automatic",
             registration: employee.registration || "",
             role: employee.role || "Nao informado",
@@ -2178,24 +2212,26 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           return;
         }
 
-        await Promise.all(
-          mappedEmployees.map((employee) =>
-            upsertEmployee("main", employeeDocumentId(employee), {
-              ...employee,
-              importSource: "holerite",
-              importedAt: new Date().toISOString(),
-            }),
-          ),
-        );
+        await Promise.all(mappedEmployees.map(async (employee) => {
+          const documentId = employeeDocumentId(employee);
+          const { pin: importedPin, ...employeeWithoutPin } = employee;
+          await upsertEmployee("main", documentId, {
+            ...employeeWithoutPin,
+            importSource: "holerite",
+            importedAt: new Date().toISOString(),
+          });
+          if (importedPin) await saveEmployeePin("main", documentId, importedPin);
+        }));
 
         const existingIds = new Set(mappedEmployees.map((employee) => employeeDocumentId(employee)));
+        const sanitizedEmployees = mappedEmployees.map((employee) => ({ ...employee, pin: "" }));
         const updated = [
-          ...mappedEmployees,
+          ...sanitizedEmployees,
           ...localEmployees.filter((employee) => !existingIds.has(employeeDocumentId(employee))),
         ];
         window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
         setLocalEmployees(updated);
-        setSelectedEmployee(mappedEmployees[0]);
+        setSelectedEmployee(sanitizedEmployees[0]);
         onAction(`${mappedEmployees.length} colaboradores salvos no Firebase para revisao.`);
       } catch {
         onAction("Nao foi possivel importar os colaboradores. Verifique login e permissoes.");
@@ -2207,7 +2243,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
 
   async function saveEmployee() {
     if (!canEdit) return;
-    if (!employeeForm.name.trim() || employeeForm.pin.length < 4) {
+    if (!employeeForm.name.trim() || (!editingEmployeeId && employeeForm.pin.length < 4)) {
       onAction("Informe o nome e um PIN de pelo menos 4 números.");
       return;
     }
@@ -2241,7 +2277,8 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
       lastPunch: "Sem batida hoje",
       name: employeeForm.name.trim(),
       phone: employeeForm.phone || "",
-      pin: employeeForm.pin,
+      pin: "",
+      pinConfigured: Boolean(employeeForm.pin || selectedEmployee?.pinConfigured),
       punchMode: employeeForm.punchMode,
       registration: employeeForm.registration || "",
       role: employeeForm.role || "Não informado",
@@ -2254,11 +2291,15 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
       ? localEmployees.map((item) => (employeeDocumentId(item) === documentId ? employee : item))
       : [employee, ...localEmployees];
 
+    const employeeWithoutPin = Object.fromEntries(
+      Object.entries(employee).filter(([key]) => key !== "pin"),
+    );
     await upsertEmployee("main", documentId, {
-      ...employee,
+      ...employeeWithoutPin,
       ...(editingEmployeeId ? {} : { createdAt: new Date().toISOString() }),
       source: "manual",
     });
+    if (employeeForm.pin) await saveEmployeePin("main", documentId, employeeForm.pin);
 
     window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
     setLocalEmployees(updated);
@@ -2392,7 +2433,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
         <div className="mt-3 grid gap-3 md:grid-cols-4">
           <MaskedField label="Nome" mask="name" onChange={(value) => updateEmployeeForm("name", value)} placeholder="Primeira Letra Maiuscula" value={employeeForm.name} />
           <MaskedField label="CPF" mask="cpf" onChange={(value) => updateEmployeeForm("cpf", value)} placeholder="000.000.000-00" value={employeeForm.cpf} />
-          <MaskedField label="PIN" mask="pin" onChange={(value) => updateEmployeeForm("pin", value)} placeholder="0000" value={employeeForm.pin} />
+          <MaskedField label={editingEmployeeId ? "Novo PIN (opcional)" : "PIN"} mask="pin" onChange={(value) => updateEmployeeForm("pin", value)} placeholder="0000" value={employeeForm.pin} />
           <MaskedField label="Celular" mask="phone" onChange={(value) => updateEmployeeForm("phone", value)} placeholder="(00) 00000-0000" value={employeeForm.phone} />
         </div>
 
@@ -2665,7 +2706,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             {[
               ["Nome", selectedEmployee.name],
               ["Matricula", selectedEmployee.registration || "-"],
-              ["PIN", selectedEmployee.pin ? `${selectedEmployee.pin} - pronto` : "Pendente"],
+              ["PIN", selectedEmployee.pinConfigured ? "Configurado" : "Pendente"],
               ["CPF", selectedEmployee.cpf || "-"],
               ["Admissao", selectedEmployee.admissionDate || "-"],
               ["Cargo", selectedEmployee.role || "-"],
@@ -2948,7 +2989,7 @@ function ExternalPunchScreen({
     return () => { mounted = false; };
   }, []);
 
-  function identifyExternalEmployee(employee: RecognizedFace, photoBlob?: Blob) {
+  async function identifyExternalEmployee(employee: RecognizedFace, photoBlob?: Blob) {
     setConfirmation("");
     setLocation(null);
     const registered = employeesList.find((item) => item.employeeId === employee.employeeId);
@@ -2963,9 +3004,23 @@ function ExternalPunchScreen({
       onAction(`${registered.name} nao possui autorizacao para ponto externo.`);
       return;
     }
-    if (!pin || registered.pin !== pin) {
+    if (!pin) {
       setRecognizedEmployee(null);
-      onAction("O PIN informado nao corresponde ao rosto reconhecido.");
+      onAction("Informe o PIN do colaborador.");
+      return;
+    }
+
+    try {
+      const verified = await verifyEmployeePin("main", pin);
+      if (verified.employeeId !== registered.employeeId) {
+        setRecognizedEmployee(null);
+        onAction("O PIN informado nao corresponde ao rosto reconhecido.");
+        return;
+      }
+    } catch (error) {
+      console.error(error);
+      setRecognizedEmployee(null);
+      onAction("PIN nao reconhecido. Confira os numeros ou procure o responsavel.");
       return;
     }
 
@@ -3544,7 +3599,6 @@ function MonthlyClosingScreen({
       selectedEmployees.map(async (employee) => {
         const punches = await listEmployeePunchesByIds("main", [
           employee.employeeId,
-          employee.pin ? `pin-${employee.pin}` : "",
         ]);
         return buildMonthlyMirrorSummary(employee, punches, period, workPolicy);
       }),
@@ -3632,11 +3686,10 @@ function MonthlyClosingScreen({
     }
 
     const rows = [
-      ["Funcionario", "Matricula", "PIN", "Periodo", "Dias", "Batidas", "Falta manha", "Falta tarde", "Batida incompleta", "Faltas calculadas", "Atrasos", "Banco", "Pendencias", "Responsavel"],
+      ["Funcionario", "Matricula", "Periodo", "Dias", "Batidas", "Falta manha", "Falta tarde", "Batida incompleta", "Faltas calculadas", "Atrasos", "Banco", "Pendencias", "Responsavel"],
       ...lastSummary.map((summary) => [
         summary.employee.name,
         summary.employee.registration || "",
-        summary.employee.pin || "",
         summary.periodLabel,
         String(summary.rows.length),
         String(summary.totalPunches),
@@ -4477,7 +4530,7 @@ function EmployeesTable({
                     <span className="rounded-full border border-[#d8e1ff] bg-[#f2f5ff] px-3 py-1 text-xs font-semibold text-[#3446a3]">
                       {employee.faceIdStatus === "registered"
                         ? "Face ID cadastrado"
-                        : employee.pin
+                        : employee.pinConfigured
                           ? "PIN pronto - Face ID pendente"
                           : employee.status}
                     </span>
@@ -5021,7 +5074,7 @@ function openPrintableMonthlyMirror({
       <div class="employee-grid">
         <div><span>Colaborador</span><strong>${escapeHtml(summary.employee.name)}</strong></div>
         <div><span>Matricula</span><strong>${escapeHtml(summary.employee.registration || "-")}</strong></div>
-        <div><span>PIN</span><strong>${escapeHtml(summary.employee.pin || "-")}</strong></div>
+        <div><span>PIN</span><strong>${summary.employee.pinConfigured ? "Configurado" : "Pendente"}</strong></div>
         <div><span>Cargo</span><strong>${escapeHtml(summary.employee.role || "-")}</strong></div>
         <div><span>CPF</span><strong>${escapeHtml(summary.employee.cpf || "-")}</strong></div>
         <div><span>Admissao</span><strong>${escapeHtml(summary.employee.admissionDate || "-")}</strong></div>

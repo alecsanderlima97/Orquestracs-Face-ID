@@ -40,7 +40,10 @@ service cloud.firestore {
 
       match /employees/{employeeId} {
         allow read: if canReadTenant(companyId);
-        allow create, update: if canWriteTenant(companyId);
+        allow create: if canWriteTenant(companyId)
+          && !request.resource.data.keys().hasAny(["pin", "pinHash", "pinUpdatedAt"]);
+        allow update: if canWriteTenant(companyId)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["pin", "pinHash", "pinUpdatedAt"]);
         allow delete: if false;
 
         match /faceId/{recordId} {
