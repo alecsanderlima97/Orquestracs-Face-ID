@@ -61,8 +61,17 @@ service cloud.firestore {
 
       match /punches/{punchId} {
         allow read: if canReadTenant(companyId);
-        allow create: if canWriteTenant(companyId);
-        allow update, delete: if false;
+        allow create, update, delete: if false;
+      }
+
+      match /arpRecords/{recordId} {
+        allow read: if canReadTenant(companyId);
+        allow create, update, delete: if false;
+      }
+
+      match /repState/{stateId} {
+        allow read: if canReadTenant(companyId);
+        allow create, update, delete: if false;
       }
 
       match /adjustments/{adjustmentId} {

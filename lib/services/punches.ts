@@ -10,10 +10,6 @@ function adjustmentsRef(companyId: string) {
   return collection(db, "companies", companyId, "adjustments");
 }
 
-export async function createPunch(companyId: string, punch: Omit<Punch, "id">) {
-  return addDoc(punchesRef(companyId), punch);
-}
-
 export async function listEmployeePunches(companyId: string, employeeId: string) {
   const snapshot = await getDocs(
     query(punchesRef(companyId), where("employeeId", "==", employeeId)),

@@ -21,7 +21,8 @@ import { createFaceIdRecord, uploadFacePhoto } from "@/lib/services/face-id";
 import { saveEmployeePin, verifyEmployeePin } from "@/lib/services/employee-pins";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
-import { createPunch, createPunchAdjustment, listEmployeePunchesByIds } from "@/lib/services/punches";
+import { createPunchAdjustment, listEmployeePunchesByIds } from "@/lib/services/punches";
+import { generateRepExports, registerRepPunch, type RepPunchReceipt } from "@/lib/services/rep-p";
 import { getStorageFileUrl } from "@/lib/services/storage-files";
 import {
   acceptTenantInvite,
@@ -725,6 +726,7 @@ export default function Home() {
   const [loginMessage, setLoginMessage] = useState("");
   const [notice, setNotice] = useState("Sistema pronto. Cadastre empresa, usuarios e colaboradores para iniciar.");
   const [pin, setPin] = useState("");
+  const [lastPunchReceipt, setLastPunchReceipt] = useState<RepPunchReceipt | null>(null);
   const [user, setUser] = useState<User | null>(null);
 
   async function refreshCompanyProfile() {
@@ -1113,7 +1115,6 @@ export default function Home() {
     }
 
     const occurredAt = new Date();
-    const serverRecordedAt = new Date();
     let employeeName = employee?.name || "";
     let employeeId = employee?.employeeId || "";
 
@@ -1148,28 +1149,33 @@ export default function Home() {
 
     const external = context.origin === "external";
     const punchPayload = {
-      companyId: "main",
       deviceId: context.deviceId || getPunchDeviceId(),
       employeeId,
       externalReason: context.externalReason || "",
       location: context.location || { status: "unavailable" as const },
-      occurredAt: occurredAt.toISOString(),
       origin: external ? "external" as const : "kiosk" as const,
       photoPath,
       source: employee
         ? external ? "external_face_id" as const : "face_id" as const
         : external ? "external_pin_photo" as const : "pin_photo" as const,
-      status: (external ? "external_work" : exception ? "outside_shift" : "on_time") as PunchStatus,
       type: mapPunchType(kind),
     };
 
     try {
-      await createPunch("main", {
-        ...punchPayload,
-        hash: await createAuditHash(punchPayload),
-        occurredAt,
-        serverRecordedAt,
+      const registered = await registerRepPunch({ companyId: "main", ...punchPayload });
+      setLastPunchReceipt(registered.receipt);
+      appendLocalRecord("Comprovante de ponto", external ? "Ponto externo" : "Sala de ponto", {
+        Hash: registered.receipt.hash,
+        NSR: String(registered.receipt.nsr),
+        "Modo de conformidade": registered.complianceMode,
+        "Pendencias cadastrais": registered.missingFields.join(", ") || "Nenhuma",
       });
+      setNotice(
+        `${employeeName}: ${kind.toLowerCase()} registrada. NSR ${registered.receipt.nsr}.` +
+        (registered.missingFields.length
+          ? ` Piloto: regularize ${registered.missingFields.join(", ")}.`
+          : ""),
+      );
     } catch (error) {
       console.error(error);
       setNotice("Nao foi possivel salvar a batida no Firebase. Verifique a conexao e tente novamente.");
@@ -1192,9 +1198,6 @@ export default function Home() {
           }
         : {}),
     });
-    setNotice(
-      `${employeeName}: ${kind.toLowerCase()} registrada às ${occurredAt.toLocaleTimeString("pt-BR")}.`,
-    );
     setPin("");
     return true;
   }
@@ -1429,6 +1432,13 @@ export default function Home() {
             </div>
           </header>
 
+          {lastPunchReceipt && (
+            <PunchReceiptCard
+              onClose={() => setLastPunchReceipt(null)}
+              receipt={lastPunchReceipt}
+            />
+          )}
+
           {active === "Painel" && (
             <>
               <Metrics />
@@ -1562,6 +1572,47 @@ function Metrics() {
         </div>
       ))}
     </div>
+  );
+}
+
+function PunchReceiptCard({
+  onClose,
+  receipt,
+}: {
+  onClose: () => void;
+  receipt: RepPunchReceipt;
+}) {
+  const missingLegalData = !receipt.inpiRegistration || receipt.employeeCpf.length !== 11 || receipt.companyCnpj.length !== 14;
+
+  function printReceipt() {
+    const printWindow = window.open("", "_blank", "width=760,height=900");
+    if (!printWindow) return;
+    printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Comprovante NSR ${receipt.nsr}</title><style>body{font-family:Arial,sans-serif;color:#17202a;padding:40px;line-height:1.5}main{max-width:680px;margin:auto;border:1px solid #cfd8e3;padding:28px}h1{font-size:20px;margin:0 0 24px}dl{display:grid;grid-template-columns:180px 1fr;gap:10px;margin:0}dt{color:#667085}dd{margin:0;font-weight:700;overflow-wrap:anywhere}.warning{margin-top:24px;padding:12px;border:1px solid #e3b04b;background:#fff8e9}.signature{margin-top:24px;font-size:12px;color:#667085}@media print{body{padding:0}main{border:0}}</style></head><body><main><h1>${escapeHtml(receipt.title)}</h1><dl><dt>NSR</dt><dd>${receipt.nsr}</dd><dt>Data e horario</dt><dd>${escapeHtml(new Date(receipt.occurredAt).toLocaleString("pt-BR"))}</dd><dt>Empregador</dt><dd>${escapeHtml(receipt.companyName || "Nao informado")}</dd><dt>CNPJ</dt><dd>${escapeHtml(maskCnpj(receipt.companyCnpj) || "Nao informado")}</dd><dt>Trabalhador</dt><dd>${escapeHtml(receipt.employeeName)}</dd><dt>CPF</dt><dd>${escapeHtml(maskCpf(receipt.employeeCpf) || "Nao informado")}</dd><dt>Registro INPI</dt><dd>${escapeHtml(receipt.inpiRegistration || "Pendente")}</dd><dt>Hash SHA-256</dt><dd>${escapeHtml(receipt.hash)}</dd></dl>${missingLegalData ? '<p class="warning"><strong>Documento de piloto.</strong> Ainda nao possui todos os dados necessarios para uso como comprovante REP-P oficial.</p>' : ""}<p class="signature">Assinatura digital PAdES: pendente de configuracao do certificado ICP-Brasil.</p></main><script>window.print()</script></body></html>`);
+    printWindow.document.close();
+  }
+
+  return (
+    <section aria-live="polite" className="rounded-lg border border-[#b9ddd3] bg-[#f1faf7] p-5 shadow-sm">
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase text-[#18594c]">Comprovante da marcacao</p>
+          <h2 className="mt-1 text-lg font-semibold text-[#101923]">NSR {receipt.nsr}</h2>
+          <p className="mt-1 text-sm text-[#51606f]">
+            {receipt.employeeName} · {new Date(receipt.occurredAt).toLocaleString("pt-BR")}
+          </p>
+          <p className="mt-2 break-all text-xs text-[#667085]">SHA-256: {receipt.hash}</p>
+          {missingLegalData && (
+            <p className="mt-3 text-sm font-semibold text-[#8a5a00]">
+              Piloto: complete CPF, CNPJ e registro INPI antes do modo oficial.
+            </p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button className="primary-button" onClick={printReceipt} type="button">Imprimir</button>
+          <button className="secondary-button" onClick={onClose} type="button">Fechar</button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -3634,29 +3685,7 @@ function MonthlyClosingScreen({
       return;
     }
 
-    const punchPayload = {
-      companyId: "main",
-      deviceId: "manager-adjustment",
-      employeeId: employee.employeeId,
-      occurredAt: adjustedAt.toISOString(),
-      photoPath: "manual-adjustment-no-photo",
-      source: "manager" as const,
-      status: "possible_forgotten" as PunchStatus,
-      type: adjustmentPunchType,
-    };
-
     try {
-      const punchDocument = await createPunch("main", {
-        ...punchPayload,
-        hash: await createAuditHash({
-          ...punchPayload,
-          adjustedBy: responsible.trim(),
-          reason: adjustmentReason.trim(),
-        }),
-        occurredAt: adjustedAt,
-        serverRecordedAt: new Date(),
-      });
-
       await createPunchAdjustment("main", {
         adjustedPunchType: adjustmentPunchType,
         adjustedTime: adjustedAt,
@@ -3665,7 +3694,6 @@ function MonthlyClosingScreen({
         createdBy: responsible.trim(),
         employeeId: employee.employeeId,
         evidence: "Ajuste manual registrado no fechamento mensal.",
-        punchId: punchDocument.id,
         reason: adjustmentReason.trim(),
         type: adjustmentType,
       });
@@ -3916,6 +3944,37 @@ function MonthlyClosingScreen({
 }
 
 function ReportsScreen({ onAction }: { onAction: (action: string) => void }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = `${today.slice(0, 8)}01`;
+  const [startDate, setStartDate] = useState(monthStart);
+  const [endDate, setEndDate] = useState(today);
+  const [exporting, setExporting] = useState(false);
+
+  async function exportFiscalFiles() {
+    if (!startDate || !endDate || startDate > endDate) {
+      onAction("Informe um periodo valido para a exportacao fiscal.");
+      return;
+    }
+    setExporting(true);
+    try {
+      const exported = await generateRepExports("main", startDate, endDate);
+      downloadTextFile(exported.filenames.afd, exported.afd, "text/plain;charset=iso-8859-1");
+      window.setTimeout(() => {
+        downloadTextFile(exported.filenames.aej, exported.aej, "text/plain;charset=iso-8859-1");
+      }, 300);
+      onAction(
+        exported.officialReady
+          ? "AFD e AEJ gerados com configuracao fiscal completa."
+          : `Previas AFD e AEJ geradas. Pendencias: ${exported.missingFields.join(", ") || "certificado ICP-Brasil"}.`,
+      );
+    } catch (error) {
+      console.error(error);
+      onAction("Nao foi possivel gerar AFD e AEJ. Confira o periodo e os dados obrigatorios.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <>
       <Panel title="Gerar relatorio" subtitle="Espelho de ponto e jornada detalhada">
@@ -3925,13 +3984,15 @@ function ReportsScreen({ onAction }: { onAction: (action: string) => void }) {
               <option>Nenhum colaborador cadastrado</option>
             </select>
           </Field>
-          <Field label="Inicio"><input className="input" placeholder="01/06/2026" /></Field>
-          <Field label="Fim"><input className="input" placeholder="30/06/2026" /></Field>
+          <Field label="Inicio"><input className="input" onChange={(event) => setStartDate(event.target.value)} type="date" value={startDate} /></Field>
+          <Field label="Fim"><input className="input" onChange={(event) => setEndDate(event.target.value)} type="date" value={endDate} /></Field>
           <Field label="Tipo"><select className="input"><option>Jornada detalhada</option><option>Espelho de ponto</option><option>Banco de horas</option></select></Field>
         </div>
         <ActionRow>
           <button className="primary-button" onClick={() => onAction("Geracao de PDF")} type="button">Gerar PDF</button>
-          <button className="secondary-button" onClick={() => onAction("Exportacao fiscal")} type="button">Exportar fiscal</button>
+          <button className="secondary-button" disabled={exporting} onClick={() => void exportFiscalFiles()} type="button">
+            {exporting ? "Gerando..." : "Exportar AFD + AEJ"}
+          </button>
         </ActionRow>
       </Panel>
       <ReportPreview />
@@ -5197,15 +5258,6 @@ function openPrintableMonthlyMirror({
   printWindow.document.write(html);
   printWindow.document.close();
   printWindow.focus();
-}
-
-async function createAuditHash(payload: Record<string, unknown>) {
-  const value = JSON.stringify(payload);
-  const data = new TextEncoder().encode(value);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function SaveButton({
