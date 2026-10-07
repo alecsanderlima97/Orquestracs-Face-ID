@@ -23,6 +23,16 @@ export function punchPhotoPath(
   return `companies/${companyId}/employees/${employeeId}/punches/${date}/${punchId}.webp`;
 }
 
+export function attendanceEvidencePath(
+  companyId: string,
+  employeeId: string,
+  date: string,
+  evidenceId: string,
+  extension: string,
+) {
+  return `companies/${companyId}/employees/${employeeId}/attendance-evidence/${date}/${evidenceId}.${extension}`;
+}
+
 export function reportPath(companyId: string, reportId: string) {
   return `companies/${companyId}/reports/${reportId}.pdf`;
 }

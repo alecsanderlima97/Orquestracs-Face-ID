@@ -33,6 +33,15 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
+    function validAttendanceEvidence() {
+      return request.resource != null
+        && request.resource.size < 10 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/pdf'
+        );
+    }
+
     match /companies/{companyId}/profile/{fileName} {
       allow read: if canReadTenant(companyId);
       allow create, update: if canWriteTenant(companyId) && validImage();
@@ -48,6 +57,12 @@ service firebase.storage {
     match /companies/{companyId}/employees/{employeeId}/punches/{date}/{fileName} {
       allow read: if canReadTenant(companyId);
       allow create: if canWriteTenant(companyId) && validImage();
+      allow update, delete: if false;
+    }
+
+    match /companies/{companyId}/employees/{employeeId}/attendance-evidence/{date}/{fileName} {
+      allow read: if canReadTenant(companyId);
+      allow create: if canWriteTenant(companyId) && validAttendanceEvidence();
       allow update, delete: if false;
     }
 

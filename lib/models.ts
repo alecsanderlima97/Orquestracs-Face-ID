@@ -156,6 +156,30 @@ export type PunchAdjustment = {
   createdAt: Date;
 };
 
+export type AttendanceJustificationType =
+  | "medical_certificate"
+  | "external_work"
+  | "forgotten_punch"
+  | "late_justification"
+  | "other";
+
+export type AttendanceJustificationPeriod = "morning" | "afternoon" | "full_day";
+
+export type AttendanceJustification = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  date: string;
+  period: AttendanceJustificationPeriod;
+  type: AttendanceJustificationType;
+  reason: string;
+  evidencePath?: string;
+  evidenceName?: string;
+  status: "approved" | "pending" | "rejected";
+  createdBy: string;
+  createdAt: Date;
+};
+
 export type AuditLog = {
   id: string;
   companyId: string;

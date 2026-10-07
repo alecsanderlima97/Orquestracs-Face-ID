@@ -16,12 +16,25 @@ import {
 import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
-import type { AdjustmentType, Punch, PunchStatus, PunchType } from "@/lib/models";
+import type {
+  AttendanceJustification,
+  AttendanceJustificationPeriod,
+  AttendanceJustificationType,
+  AdjustmentType,
+  Punch,
+  PunchStatus,
+  PunchType,
+} from "@/lib/models";
 import { createFaceIdRecord, uploadFacePhoto } from "@/lib/services/face-id";
 import { saveEmployeePin, verifyEmployeePin } from "@/lib/services/employee-pins";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
 import { createPunchAdjustment, listEmployeePunchesByIds } from "@/lib/services/punches";
+import {
+  createAttendanceJustification,
+  listAttendanceJustifications,
+  uploadAttendanceEvidence,
+} from "@/lib/services/attendance-justifications";
 import {
   generateRepExports,
   listOwnRepReceipts,
@@ -285,6 +298,8 @@ type MonthlyMirrorRow = {
   incompleteAfternoon: boolean;
   incompleteMorning: boolean;
   isWorkday: boolean;
+  justifiedAfternoon: boolean;
+  justifiedMorning: boolean;
   label: string;
   lateMinutes: number;
   missingAfternoon: boolean;
@@ -1812,7 +1827,16 @@ function Metrics() {
   );
 }
 
-type DailyStatusKey = "break" | "done" | "off" | "pending" | "waiting" | "working";
+type DailyStatusKey =
+  | "absence_afternoon"
+  | "absence_full_day"
+  | "absence_morning"
+  | "break"
+  | "done"
+  | "off"
+  | "pending"
+  | "waiting"
+  | "working";
 
 type DailyEmployeeRow = {
   employee: LocalEmployee;
@@ -1919,6 +1943,7 @@ function getDailyPendingPunches(
   punches: Punch[],
   now: Date,
   scheduledDays: number,
+  justifications: AttendanceJustification[] = [],
 ): PunchType[] {
   if (!isScheduledWorkday(now, scheduledDays)) return [];
 
@@ -1930,15 +1955,46 @@ function getDailyPendingPunches(
   const lunchOut = getTimeMinutes(schedule.breakStart);
   const lunchBack = getTimeMinutes(schedule.breakEnd);
   const end = getTimeMinutes(schedule.end);
+  const morningJustified = hasApprovedAbsenceJustification(justifications, employee.employeeId, now, "morning");
+  const afternoonJustified = hasApprovedAbsenceJustification(justifications, employee.employeeId, now, "afternoon");
 
   if (currentMinutes < start) return [];
 
   const pending: PunchType[] = [];
-  if (!hasPunch("entry")) pending.push("entry");
-  if (currentMinutes >= lunchOut && !hasPunch("lunch_out")) pending.push("lunch_out");
-  if (currentMinutes >= lunchBack && !hasPunch("lunch_back")) pending.push("lunch_back");
-  if (currentMinutes >= end && !hasPunch("exit")) pending.push("exit");
+  if (!hasPunch("entry") && !morningJustified) pending.push("entry");
+  if (currentMinutes >= lunchOut && !hasPunch("lunch_out") && !morningJustified) pending.push("lunch_out");
+  if (currentMinutes >= lunchBack && !hasPunch("lunch_back") && !afternoonJustified) pending.push("lunch_back");
+  if (currentMinutes >= end && !hasPunch("exit") && !afternoonJustified) pending.push("exit");
   return pending;
+}
+
+function getDailyAbsencePeriods(
+  employee: LocalEmployee,
+  punches: Punch[],
+  now: Date,
+  scheduledDays: number,
+  justifications: AttendanceJustification[] = [],
+) {
+  if (!isScheduledWorkday(now, scheduledDays)) {
+    return { afternoon: false, fullDay: false, morning: false };
+  }
+
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const schedule = employee.schedule;
+  const todayPunches = punches.filter((punch) => isSameCalendarDay(punchDate(punch), now));
+  const hasPunch = (type: PunchType) => todayPunches.some((punch) => punch.type === type);
+  const morningClosed = currentMinutes >= getTimeMinutes(schedule.breakEnd);
+  const afternoonClosed = currentMinutes >= getTimeMinutes(schedule.end);
+  const morningJustified = hasApprovedAbsenceJustification(justifications, employee.employeeId, now, "morning");
+  const afternoonJustified = hasApprovedAbsenceJustification(justifications, employee.employeeId, now, "afternoon");
+  const morningMissing = morningClosed && !morningJustified && !hasPunch("entry") && !hasPunch("lunch_out");
+  const afternoonMissing = afternoonClosed && !afternoonJustified && !hasPunch("lunch_back") && !hasPunch("exit");
+
+  return {
+    afternoon: afternoonMissing && !morningMissing,
+    fullDay: morningMissing && afternoonMissing,
+    morning: morningMissing && !afternoonMissing,
+  };
 }
 
 function getDailyEmployeeStatus(
@@ -1946,6 +2002,7 @@ function getDailyEmployeeStatus(
   punches: Punch[],
   now: Date,
   scheduledDays: number,
+  justifications: AttendanceJustification[] = [],
 ): DailyStatusKey {
   if (!isScheduledWorkday(now, scheduledDays)) return "off";
 
@@ -1957,7 +2014,11 @@ function getDailyEmployeeStatus(
   const end = getTimeMinutes(schedule.end);
 
   if (currentMinutes < start) return "waiting";
-  if (getDailyPendingPunches(employee, punches, now, scheduledDays).length > 0) return "pending";
+  const absencePeriods = getDailyAbsencePeriods(employee, punches, now, scheduledDays, justifications);
+  if (absencePeriods.fullDay) return "absence_full_day";
+  if (absencePeriods.morning) return "absence_morning";
+  if (absencePeriods.afternoon) return "absence_afternoon";
+  if (getDailyPendingPunches(employee, punches, now, scheduledDays, justifications).length > 0) return "pending";
   if (currentMinutes < lunchOut) return "working";
   if (currentMinutes < lunchBack) return "break";
   if (currentMinutes < end) return "working";
@@ -1966,6 +2027,9 @@ function getDailyEmployeeStatus(
 
 function dailyStatusLabel(statusKey: DailyStatusKey) {
   const labels: Record<DailyStatusKey, string> = {
+    absence_afternoon: "Falta tarde - justificar",
+    absence_full_day: "Falta dia inteiro - justificar",
+    absence_morning: "Falta manhã - justificar",
     break: "Intervalo",
     done: "Jornada concluída",
     off: "Fora da escala",
@@ -1978,6 +2042,9 @@ function dailyStatusLabel(statusKey: DailyStatusKey) {
 
 function dailyStatusClass(statusKey: DailyStatusKey) {
   const classes: Record<DailyStatusKey, string> = {
+    absence_afternoon: "border-[#d0443e] bg-[#fff0ef] text-[#a33a3a]",
+    absence_full_day: "border-[#d0443e] bg-[#fff0ef] text-[#a33a3a]",
+    absence_morning: "border-[#d0443e] bg-[#fff0ef] text-[#a33a3a]",
     break: "border-[#efd9a8] bg-[#fff8e9] text-[#8a5a00]",
     done: "border-[#b9ddd3] bg-[#f1faf7] text-[#18594c]",
     off: "border-[#d9e0e7] bg-[#f8fafb] text-[#667085]",
@@ -1988,9 +2055,17 @@ function dailyStatusClass(statusKey: DailyStatusKey) {
   return classes[statusKey];
 }
 
+function isDailyAttentionStatus(statusKey: DailyStatusKey) {
+  return statusKey === "pending"
+    || statusKey === "absence_afternoon"
+    || statusKey === "absence_full_day"
+    || statusKey === "absence_morning";
+}
+
 function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
   const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
   const [punches, setPunches] = useState<Punch[]>([]);
+  const [attendanceJustifications, setAttendanceJustifications] = useState<AttendanceJustification[]>([]);
   const [employeePhotoUrls, setEmployeePhotoUrls] = useState<Record<string, string>>({});
   const [now, setNow] = useState(new Date());
   const [loading, setLoading] = useState(true);
@@ -2015,10 +2090,14 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
         const mapped = saved.map((employee) =>
           toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
         );
-        const recentPunches = await listEmployeePunchesByIds("main", mapped.map((employee) => employee.employeeId));
+        const [recentPunches, savedJustifications] = await Promise.all([
+          listEmployeePunchesByIds("main", mapped.map((employee) => employee.employeeId)),
+          listAttendanceJustifications("main"),
+        ]);
         if (!mounted) return;
         setEmployeesList(mapped);
         setPunches(recentPunches);
+        setAttendanceJustifications(savedJustifications);
       } catch (loadError) {
         console.error(loadError);
         if (!mounted) return;
@@ -2053,11 +2132,11 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
       const employeePunches = punches
         .filter((punch) => punch.employeeId === employee.employeeId)
         .sort((first, second) => punchDate(second).getTime() - punchDate(first).getTime());
-      const statusKey = getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays);
+      const statusKey = getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays, attendanceJustifications);
       return {
         employee,
         latestPunch: employeePunches[0] || null,
-        pendingPunches: getDailyPendingPunches(employee, employeePunches, now, scheduledDays),
+        pendingPunches: getDailyPendingPunches(employee, employeePunches, now, scheduledDays, attendanceJustifications),
         punches: employeePunches,
         statusKey,
         statusLabel: dailyStatusLabel(statusKey),
@@ -2069,12 +2148,12 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
       .filter((row) => !query || [row.employee.name, row.employee.role, row.employee.shift].some((value) => value.toLocaleLowerCase("pt-BR").includes(query)))
       .filter((row) => statusFilter === "all" || row.statusKey === statusFilter)
       .sort((first, second) => Number(second.statusKey === "pending") - Number(first.statusKey === "pending"));
-  }, [employeesList, now, punches, scheduledDays, search, statusFilter]);
+  }, [attendanceJustifications, employeesList, now, punches, scheduledDays, search, statusFilter]);
 
   const todayPunches = punches.filter((punch) => isSameCalendarDay(punchDate(punch), now));
   const pendingCount = employeesList.filter((employee) => {
     const employeePunches = punches.filter((punch) => punch.employeeId === employee.employeeId);
-    return getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays) === "pending";
+    return isDailyAttentionStatus(getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays, attendanceJustifications));
   }).length;
   const okCount = employeesList.length - pendingCount;
 
@@ -2115,7 +2194,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
             ["Colaboradores", String(employeesList.length), "cadastros ativos"],
             ["Batidas hoje", String(todayPunches.length), "registros recebidos"],
             ["Sem pendência", String(okCount), "acompanhamento normal"],
-            ["Batida pendente", String(pendingCount), "conferir justificativa"],
+            ["Pendências e faltas", String(pendingCount), "bater ou justificar"],
           ].map(([label, value, detail], index) => (
             <div className={`rounded-md border p-4 ${index === 3 && pendingCount ? "border-[#f2b8b5] bg-[#fff0ef]" : "border-[#e3e8ee] bg-[#fbfcfd]"}`} key={label}>
               <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
@@ -2144,6 +2223,9 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
             <select className="input" onChange={(event) => setStatusFilter(event.target.value as DailyStatusKey | "all")} value={statusFilter}>
               <option value="all">Todos</option>
               <option value="pending">Batida pendente</option>
+              <option value="absence_morning">Falta manhã</option>
+              <option value="absence_afternoon">Falta tarde</option>
+              <option value="absence_full_day">Falta dia inteiro</option>
               <option value="working">Em jornada</option>
               <option value="break">Intervalo</option>
               <option value="done">Jornada concluída</option>
@@ -2166,7 +2248,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
               {!loading && rows.length === 0 ? (
                 <tr><td className="px-4 py-10 text-center text-[#667085]" colSpan={8}>{employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}</td></tr>
               ) : rows.map((row) => (
-                <tr className={`border-t ${row.statusKey === "pending" ? "border-[#f2b8b5] bg-[#fff8f7]" : "border-[#e3e8ee]"}`} key={row.employee.employeeId}>
+                <tr className={`border-t ${isDailyAttentionStatus(row.statusKey) ? "border-[#f2b8b5] bg-[#fff8f7]" : "border-[#e3e8ee]"}`} key={row.employee.employeeId}>
                   <td className="px-4 py-4 font-semibold text-[#101923]">
                     <div className="flex items-center gap-3">
                       {employeePhotoUrls[row.employee.employeeId] ? (
@@ -2196,7 +2278,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
           </table>
         </div>
         <div className="border-t border-[#e3e8ee] px-5 py-4 text-sm leading-6 text-[#667085]">
-          <strong className="text-[#a33a3a]">Batida pendente</strong> é um alerta operacional. Ao final do período, sem justificativa ou atestado aprovado, o responsável poderá classificar a ocorrência como falta conforme a política da empresa.
+          <strong className="text-[#a33a3a]">Pendência ou falta indicada</strong> exige batida, atestado ou justificativa aprovada antes do fechamento. A batida original nunca é apagada.
         </div>
       </section>
     </>
@@ -4514,25 +4596,34 @@ function MonthlyClosingScreen({
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("all");
   const [responsible, setResponsible] = useState("");
   const [lastSummary, setLastSummary] = useState<MonthlyMirrorSummary[]>([]);
+  const [attendanceJustifications, setAttendanceJustifications] = useState<AttendanceJustification[]>([]);
   const [adjustmentEmployeeId, setAdjustmentEmployeeId] = useState("");
   const [adjustmentDate, setAdjustmentDate] = useState(now.toISOString().slice(0, 10));
   const [adjustmentTime, setAdjustmentTime] = useState("07:00");
   const [adjustmentPunchType, setAdjustmentPunchType] = useState<PunchType>("entry");
   const [adjustmentType, setAdjustmentType] = useState<AdjustmentType>("forgotten_with_evidence");
   const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [justificationPeriod, setJustificationPeriod] = useState<AttendanceJustificationPeriod>("morning");
+  const [justificationType, setJustificationType] = useState<AttendanceJustificationType>("medical_certificate");
+  const [justificationFile, setJustificationFile] = useState<File | null>(null);
+  const [justificationSaving, setJustificationSaving] = useState(false);
 
   useEffect(() => {
     let mounted = true;
 
     async function load() {
       try {
-        const savedInFirebase = await listEmployees("main");
+        const [savedInFirebase, savedJustifications] = await Promise.all([
+          listEmployees("main"),
+          listAttendanceJustifications("main"),
+        ]);
         if (!mounted) return;
         setEmployeesList(
           savedInFirebase.map((employee) =>
             toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
           ),
         );
+        setAttendanceJustifications(savedJustifications);
       } catch {
         if (mounted) setEmployeesList(getLocalEmployees());
       } finally {
@@ -4566,7 +4657,7 @@ function MonthlyClosingScreen({
         const punches = await listEmployeePunchesByIds("main", [
           employee.employeeId,
         ]);
-        return buildMonthlyMirrorSummary(employee, punches, period, workPolicy);
+        return buildMonthlyMirrorSummary(employee, punches, period, workPolicy, attendanceJustifications);
       }),
     );
 
@@ -4619,6 +4710,60 @@ function MonthlyClosingScreen({
       console.error(error);
       onAction("Nao foi possivel salvar o ajuste no Firebase. Verifique a conexao e tente novamente.");
       throw error;
+    }
+  }
+
+  async function saveAttendanceJustification() {
+    const employee = employeesList.find((item) => item.employeeId === selectedAdjustmentEmployeeId);
+    if (!employee) {
+      onAction("Selecione um colaborador para registrar a justificativa.");
+      return;
+    }
+
+    if (!adjustmentDate || !adjustmentReason.trim() || !responsible.trim()) {
+      onAction("Informe data, justificativa e responsável antes de salvar.");
+      return;
+    }
+
+    if (justificationFile && (!justificationFile.type.match(/^(image\/|application\/pdf$)/) || justificationFile.size > 10 * 1024 * 1024)) {
+      onAction("O anexo deve ser uma imagem ou PDF de até 10 MB.");
+      return;
+    }
+
+    setJustificationSaving(true);
+    try {
+      const evidenceId = crypto.randomUUID();
+      const evidencePath = justificationFile
+        ? await uploadAttendanceEvidence({
+            blob: justificationFile,
+            companyId: "main",
+            date: adjustmentDate,
+            employeeId: employee.employeeId,
+            evidenceId,
+          })
+        : undefined;
+      const justification: Omit<AttendanceJustification, "id"> = {
+        companyId: "main",
+        createdAt: new Date(),
+        createdBy: responsible.trim(),
+        date: adjustmentDate,
+        employeeId: employee.employeeId,
+        ...(evidencePath ? { evidencePath, evidenceName: justificationFile?.name } : {}),
+        period: justificationPeriod,
+        reason: adjustmentReason.trim(),
+        status: "approved",
+        type: justificationType,
+      };
+      const created = await createAttendanceJustification("main", justification);
+      setAttendanceJustifications((current) => [...current, { ...justification, id: created.id }]);
+      setJustificationFile(null);
+      setAdjustmentReason("");
+      onAction(`Justificativa de ${employee.name} aprovada e registrada.`);
+    } catch (error) {
+      console.error(error);
+      onAction("Não foi possível salvar a justificativa. Verifique a conexão e as permissões.");
+    } finally {
+      setJustificationSaving(false);
     }
   }
 
@@ -4771,6 +4916,44 @@ function MonthlyClosingScreen({
           >
             Limpar ajuste
           </button>
+        </ActionRow>
+      </Panel>
+
+      <Panel title="Atestado ou justificativa" subtitle="Resolva falta, esquecimento, trabalho externo ou atraso acima da tolerância">
+        <div className="grid gap-3 md:grid-cols-4">
+          <Field label="Período da ocorrência">
+            <select className="input" onChange={(event) => setJustificationPeriod(event.target.value as AttendanceJustificationPeriod)} value={justificationPeriod}>
+              <option value="morning">Manhã</option>
+              <option value="afternoon">Tarde</option>
+              <option value="full_day">Dia inteiro</option>
+            </select>
+          </Field>
+          <Field label="Tipo de justificativa">
+            <select className="input" onChange={(event) => setJustificationType(event.target.value as AttendanceJustificationType)} value={justificationType}>
+              <option value="medical_certificate">Atestado médico</option>
+              <option value="external_work">Trabalho externo</option>
+              <option value="forgotten_punch">Esquecimento de batida</option>
+              <option value="late_justification">Atraso justificado</option>
+              <option value="other">Outra justificativa</option>
+            </select>
+          </Field>
+          <Field label="Anexo opcional">
+            <input
+              accept="image/*,application/pdf"
+              className="input"
+              onChange={(event) => setJustificationFile(event.target.files?.[0] || null)}
+              type="file"
+            />
+          </Field>
+          <div className="rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-3 text-xs leading-5 text-[#24594d]">
+            <strong>Classificação:</strong> a ocorrência fica aprovada pelo responsável informado e deixa de contar como falta no espelho mensal.
+          </div>
+        </div>
+        {justificationFile && <p className="mt-3 text-xs text-[#667085]">Anexo selecionado: {justificationFile.name}</p>}
+        <ActionRow>
+          <SaveButton disabled={loading || justificationSaving || !employeesList.length} onClick={saveAttendanceJustification}>
+            {justificationSaving ? "Salvando justificativa..." : "Salvar justificativa"}
+          </SaveButton>
         </ActionRow>
       </Panel>
 
@@ -5974,11 +6157,46 @@ function expectedDailyMinutes(employee: LocalEmployee) {
     + Math.max(0, minutesFromTime(schedule.end) - minutesFromTime(schedule.breakEnd));
 }
 
+function localDateKey(date: Date) {
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("-");
+}
+
+function hasApprovedAbsenceJustification(
+  justifications: AttendanceJustification[],
+  employeeId: string,
+  date: Date,
+  period: "morning" | "afternoon",
+) {
+  return justifications.some((justification) =>
+    justification.employeeId === employeeId
+    && justification.date === localDateKey(date)
+    && justification.status === "approved"
+    && justification.type !== "late_justification"
+    && (justification.period === period || justification.period === "full_day"),
+  );
+}
+
+function hasApprovedLateJustification(
+  justifications: AttendanceJustification[],
+  employeeId: string,
+  date: Date,
+  period: "morning" | "afternoon",
+) {
+  return justifications.some((justification) =>
+    justification.employeeId === employeeId
+    && justification.date === localDateKey(date)
+    && justification.status === "approved"
+    && justification.type === "late_justification"
+    && (justification.period === period || justification.period === "full_day"),
+  );
+}
+
 function buildMonthlyMirrorSummary(
   employee: LocalEmployee,
   punches: Punch[],
   period: MonthPeriod,
   workPolicy: WorkPolicy,
+  justifications: AttendanceJustification[] = [],
 ): MonthlyMirrorSummary {
   const validPunches = punches
     .filter((punch) => {
@@ -6001,22 +6219,35 @@ function buildMonthlyMirrorSummary(
     const isWorkday = date.getDay() !== 0 && date.getDay() <= scheduledWorkdays;
     const morningPunches = [punchesByType.entry, punchesByType.lunch_out].filter(Boolean).length;
     const afternoonPunches = [punchesByType.lunch_back, punchesByType.exit].filter(Boolean).length;
-    const missingMorning = isWorkday && morningPunches === 0;
-    const missingAfternoon = isWorkday && afternoonPunches === 0;
-    const incompleteMorning = isWorkday && morningPunches === 1;
-    const incompleteAfternoon = isWorkday && afternoonPunches === 1;
+    const justifiedMorning = hasApprovedAbsenceJustification(justifications, employee.employeeId, date, "morning");
+    const justifiedAfternoon = hasApprovedAbsenceJustification(justifications, employee.employeeId, date, "afternoon");
+    const rawMissingMorning = isWorkday && morningPunches === 0;
+    const rawMissingAfternoon = isWorkday && afternoonPunches === 0;
+    const missingMorning = rawMissingMorning && !justifiedMorning;
+    const missingAfternoon = rawMissingAfternoon && !justifiedAfternoon;
+    const incompleteMorning = isWorkday && morningPunches === 1 && !justifiedMorning;
+    const incompleteAfternoon = isWorkday && afternoonPunches === 1 && !justifiedAfternoon;
     const workedMinutes =
       workedPeriodMinutes(punchesByType.entry, punchesByType.lunch_out)
       + workedPeriodMinutes(punchesByType.lunch_back, punchesByType.exit);
     const lateMinutes =
-      positiveDifference(punchesByType.entry, employee.schedule.start, workPolicy.toleranceMinutes)
-      + positiveDifference(punchesByType.lunch_back, employee.schedule.breakEnd, workPolicy.toleranceMinutes);
+      (hasApprovedLateJustification(justifications, employee.employeeId, date, "morning")
+        ? 0
+        : positiveDifference(punchesByType.entry, employee.schedule.start, workPolicy.toleranceMinutes))
+      + (hasApprovedLateJustification(justifications, employee.employeeId, date, "afternoon")
+        ? 0
+        : positiveDifference(punchesByType.lunch_back, employee.schedule.breakEnd, workPolicy.toleranceMinutes));
     const earlyLeaveMinutes =
       earlyDifference(punchesByType.lunch_out, employee.schedule.breakStart, workPolicy.toleranceMinutes)
       + earlyDifference(punchesByType.exit, employee.schedule.end, workPolicy.toleranceMinutes);
     const balanceMinutes = workPolicy.bankHoursEnabled
       ? isWorkday ? workedMinutes - expectedMinutes : workedMinutes
       : 0;
+    const hasApprovedJustification = justifications.some((justification) =>
+      justification.employeeId === employee.employeeId
+      && justification.date === localDateKey(date)
+      && justification.status === "approved",
+    );
     const status = !isWorkday && !dayPunches.length
       ? "Sem expediente aparente"
       : missingMorning && missingAfternoon
@@ -6027,6 +6258,8 @@ function buildMonthlyMirrorSummary(
             ? "Conferir esquecimento"
         : lateMinutes || earlyLeaveMinutes
           ? "Com ocorrencia"
+          : hasApprovedJustification
+            ? "Justificado"
           : "Completo";
 
     rows.push({
@@ -6036,6 +6269,8 @@ function buildMonthlyMirrorSummary(
       incompleteAfternoon,
       incompleteMorning,
       isWorkday,
+      justifiedAfternoon,
+      justifiedMorning,
       label: date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", weekday: "short" }),
       lateMinutes,
       missingAfternoon,
@@ -6074,7 +6309,7 @@ function buildMonthlyMirrorSummary(
     lateMinutes,
     missingAfternoons,
     missingMornings,
-    pendingDays: rows.filter((row) => row.status !== "Completo" && row.isWorkday).length,
+    pendingDays: rows.filter((row) => !["Completo", "Justificado"].includes(row.status) && row.isWorkday).length,
     periodLabel: period.label,
     rows,
     totalBalanceMinutes,

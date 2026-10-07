@@ -80,6 +80,12 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      match /attendanceJustifications/{justificationId} {
+        allow read: if canReadTenant(companyId);
+        allow create: if canWriteTenant(companyId);
+        allow update, delete: if false;
+      }
+
       match /auditLogs/{logId} {
         allow read: if canReadTenant(companyId);
         allow create: if canWriteTenant(companyId);
