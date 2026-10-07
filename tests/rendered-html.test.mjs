@@ -54,6 +54,9 @@ test("mantem batidas originais no fluxo protegido do servidor", async () => {
   assert.match(repService, /listOwnRepReceipts/);
   assert.match(functions, /export const listOwnRepReceipts/);
   assert.match(page, /Consultar comprovantes das últimas 48 horas/);
+  assert.match(page, /Momento do dia/);
+  assert.match(page, /border-2 border-\[#d0443e\]/);
+  assert.match(page, /getDailyPendingPunch/);
 });
 
 test("mantem navegacao responsiva para celular e tablet", async () => {

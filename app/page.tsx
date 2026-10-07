@@ -1375,6 +1375,18 @@ export default function Home() {
   const companyName =
     companyProfile?.tradeName || companyProfile?.legalName || "Empresa principal";
   const companyCnpj = companyProfile?.cnpj || "CNPJ nao cadastrado";
+  const headerMoment = new Date();
+  const headerDaypart = getDaypart(headerMoment);
+  const headerDate = headerMoment.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "long",
+    weekday: "long",
+  });
+  const headerTime = headerMoment.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[#f4f6f8] text-[#17202a]">
@@ -1403,7 +1415,7 @@ export default function Home() {
             </div>
           </div>
           <div className="shrink-0 text-right">
-            <p className="text-[10px] font-semibold uppercase text-[#667085]">Agora</p>
+            <p className="text-[10px] font-semibold uppercase text-[#667085]">{headerDaypart.icon} {headerDaypart.label}</p>
             <p className="whitespace-nowrap text-xs font-bold text-[#101923]">
               {currentDateTime.split(", ").at(-1) || currentDateTime}
             </p>
@@ -1537,7 +1549,7 @@ export default function Home() {
                   Orquestracs Face ID
                 </p>
                 <h1 className="mt-1 text-xl font-semibold text-[#101923] sm:text-2xl">
-                  {title}
+                  {active === "Painel" ? "Controle de jornada" : title}
                 </h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-[#667085]">
                   Ponto inteligente com reconhecimento facial, auditoria e fechamento mensal.
@@ -1545,9 +1557,23 @@ export default function Home() {
               </div>
 
               <div className="hidden flex-wrap items-center gap-2 lg:flex lg:justify-end">
-                <div className="rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-3 py-2 text-right">
-                  <p className="text-xs font-semibold uppercase text-[#667085]">Data e hora</p>
-                  <p className="text-sm font-bold text-[#101923]">{currentDateTime}</p>
+                <div className="min-w-[320px] rounded-lg border border-[#b9ddd3] bg-[#f1faf7] px-3 py-2.5">
+                  <div className="flex items-center gap-3">
+                    <span aria-hidden="true" className="text-3xl leading-none">{headerDaypart.icon}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#2d6c5d]">Momento do dia</p>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-[#2d6c5d]">
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#2d6c5d]" /> ao vivo
+                        </span>
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                        <p className="text-sm font-bold text-[#143f37]">{headerDaypart.label}</p>
+                        <p className="font-mono text-xl font-bold tracking-normal text-[#101923]">{headerTime}</p>
+                      </div>
+                      <p className="mt-0.5 text-xs capitalize text-[#54716a]">{headerDate} · {headerDaypart.detail}</p>
+                    </div>
+                  </div>
                 </div>
                 <button
                   className="secondary-button"
@@ -1704,6 +1730,7 @@ type DailyStatusKey = "break" | "done" | "off" | "pending" | "waiting" | "workin
 
 type DailyEmployeeRow = {
   employee: LocalEmployee;
+  pendingPunch: PunchType | null;
   punches: Punch[];
   statusKey: DailyStatusKey;
   statusLabel: string;
@@ -1727,6 +1754,48 @@ function isSameCalendarDay(date: Date, reference: Date) {
   return date.getFullYear() === reference.getFullYear()
     && date.getMonth() === reference.getMonth()
     && date.getDate() === reference.getDate();
+}
+
+type Daypart = {
+  detail: string;
+  icon: string;
+  label: string;
+};
+
+function getDaypart(date: Date): Daypart {
+  const minutes = date.getHours() * 60 + date.getMinutes();
+  if (minutes < 6 * 60) return { detail: "A operação ainda não começou.", icon: "🌙", label: "Madrugada" };
+  if (minutes < 9 * 60) return { detail: "Início da jornada e conferência de entradas.", icon: "🌅", label: "Bom dia" };
+  if (minutes < 12 * 60) return { detail: "Jornada da manhã em andamento.", icon: "☀️", label: "Manhã" };
+  if (minutes < 14 * 60) return { detail: "Janela de almoço e intervalo.", icon: "🍽️", label: "Intervalo" };
+  if (minutes < 18 * 60) return { detail: "Jornada da tarde em andamento.", icon: "☀️", label: "Tarde" };
+  if (minutes < 20 * 60) return { detail: "Conferência do encerramento da jornada.", icon: "🌇", label: "Entardecer" };
+  return { detail: "A jornada do dia foi encerrada.", icon: "🌙", label: "Noite" };
+}
+
+function getDailyPendingPunch(
+  employee: LocalEmployee,
+  punches: Punch[],
+  now: Date,
+  scheduledDays: number,
+): PunchType | null {
+  if (!isScheduledWorkday(now, scheduledDays)) return null;
+
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const schedule = employee.schedule;
+  const todayPunches = punches.filter((punch) => isSameCalendarDay(punchDate(punch), now));
+  const hasPunch = (type: PunchType) => todayPunches.some((punch) => punch.type === type);
+  const start = getTimeMinutes(schedule.start);
+  const lunchOut = getTimeMinutes(schedule.breakStart);
+  const lunchBack = getTimeMinutes(schedule.breakEnd);
+  const end = getTimeMinutes(schedule.end);
+
+  if (currentMinutes < start) return null;
+  if (!hasPunch("entry")) return "entry";
+  if (currentMinutes >= lunchOut && !hasPunch("lunch_out")) return "lunch_out";
+  if (currentMinutes >= lunchBack && !hasPunch("lunch_back")) return "lunch_back";
+  if (currentMinutes >= end && !hasPunch("exit")) return "exit";
+  return null;
 }
 
 function getDailyEmployeeStatus(
@@ -1839,6 +1908,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
       return {
         employee,
         latestPunch: employeePunches[0] || null,
+        pendingPunch: statusKey === "pending" ? getDailyPendingPunch(employee, employeePunches, now, scheduledDays) : null,
         punches: employeePunches,
         statusKey,
         statusLabel: dailyStatusLabel(statusKey),
@@ -1858,8 +1928,29 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
     return getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays) === "pending";
   }).length;
   const okCount = employeesList.length - pendingCount;
-  const currentPeriod = now.getHours() < 12 ? "Manhã" : now.getHours() < 18 ? "Tarde" : "Após a jornada";
+  const daypart = getDaypart(now);
+  const currentPeriod = daypart.label;
   const overallStatus = pendingCount ? `${pendingCount} pendência(s) para conferir` : "Operação sem pendências";
+
+  function renderPunchCell(row: DailyEmployeeRow, type: PunchType, expected: string) {
+    const confirmed = row.punches.some(
+      (punch) => punch.type === type && isSameCalendarDay(punchDate(punch), now),
+    );
+    const pending = row.pendingPunch === type;
+    return (
+      <span
+        className={`inline-flex min-w-[58px] justify-center rounded-md px-2 py-1 text-xs font-semibold ${
+          pending
+            ? "border-2 border-[#d0443e] bg-[#fff0ef] text-[#a33a3a]"
+            : confirmed
+              ? "border border-[#b9ddd3] bg-[#f1faf7] text-[#18594c]"
+              : "border border-transparent text-[#667085]"
+        }`}
+      >
+        {confirmed ? "OK" : expected}
+      </span>
+    );
+  }
 
   return (
     <>
@@ -1870,18 +1961,15 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
             <h2 className="mt-1 text-xl font-semibold text-[#101923]">Visão geral da operação</h2>
             <p className="mt-1 text-sm leading-6 text-[#667085]">Acompanhe as marcações do dia e identifique pendências antes do fechamento.</p>
           </div>
-          <div className="grid gap-2 text-left sm:grid-cols-3 lg:min-w-[430px] lg:text-right">
-            <div>
-              <span className="block text-xs font-semibold uppercase text-[#667085]">Data</span>
-              <strong className="text-sm text-[#101923]">{now.toLocaleDateString("pt-BR")}</strong>
+          <div className="flex flex-wrap items-center gap-2 lg:max-w-[430px] lg:justify-end">
+            <span aria-hidden="true" className="rounded-md border border-[#b9ddd3] bg-[#f1faf7] px-2.5 py-2 text-2xl leading-none">{daypart.icon}</span>
+            <div className="rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-3 py-2">
+              <span className="block text-xs font-semibold uppercase text-[#667085]">Período atual</span>
+              <strong className="text-sm text-[#101923]">{currentPeriod}</strong>
             </div>
-            <div>
-              <span className="block text-xs font-semibold uppercase text-[#667085]">Hora local</span>
-              <strong className="font-mono text-lg tracking-normal text-[#101923]">{now.toLocaleTimeString("pt-BR")}</strong>
-            </div>
-            <div>
-              <span className="block text-xs font-semibold uppercase text-[#667085]">Período / status</span>
-              <strong className={pendingCount ? "text-sm text-[#a33a3a]" : "text-sm text-[#18594c]"}>{currentPeriod} · {overallStatus}</strong>
+            <div className={`rounded-md border px-3 py-2 ${pendingCount ? "border-[#f2b8b5] bg-[#fff0ef]" : "border-[#b9ddd3] bg-[#f1faf7]"}`}>
+              <span className="block text-xs font-semibold uppercase text-[#667085]">Status</span>
+              <strong className={pendingCount ? "text-sm text-[#a33a3a]" : "text-sm text-[#18594c]"}>{overallStatus}</strong>
             </div>
           </div>
         </div>
@@ -1944,10 +2032,10 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
                 <tr className={`border-t ${row.statusKey === "pending" ? "border-[#f2b8b5] bg-[#fff8f7]" : "border-[#e3e8ee]"}`} key={row.employee.employeeId}>
                   <td className="px-4 py-4 font-semibold text-[#101923]">{row.employee.name}</td>
                   <td className="px-4 py-4 text-[#667085]">{row.employee.shift}</td>
-                  <td className="px-4 py-4 text-[#667085]">{row.punches.some((punch) => punch.type === "entry" && isSameCalendarDay(punchDate(punch), now)) ? "OK" : row.employee.schedule.start}</td>
-                  <td className="px-4 py-4 text-[#667085]">{row.punches.some((punch) => punch.type === "lunch_out" && isSameCalendarDay(punchDate(punch), now)) ? "OK" : row.employee.schedule.breakStart}</td>
-                  <td className="px-4 py-4 text-[#667085]">{row.punches.some((punch) => punch.type === "lunch_back" && isSameCalendarDay(punchDate(punch), now)) ? "OK" : row.employee.schedule.breakEnd}</td>
-                  <td className="px-4 py-4 text-[#667085]">{row.punches.some((punch) => punch.type === "exit" && isSameCalendarDay(punchDate(punch), now)) ? "OK" : row.employee.schedule.end}</td>
+                  <td className="px-4 py-4">{renderPunchCell(row, "entry", row.employee.schedule.start)}</td>
+                  <td className="px-4 py-4">{renderPunchCell(row, "lunch_out", row.employee.schedule.breakStart)}</td>
+                  <td className="px-4 py-4">{renderPunchCell(row, "lunch_back", row.employee.schedule.breakEnd)}</td>
+                  <td className="px-4 py-4">{renderPunchCell(row, "exit", row.employee.schedule.end)}</td>
                   <td className="px-4 py-4 text-[#667085]">{row.latestPunch ? formatPunchDateTime(row.latestPunch) : "Sem batida hoje"}</td>
                   <td className="px-4 py-4"><span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${dailyStatusClass(row.statusKey)}`}>{row.statusLabel}</span></td>
                 </tr>
