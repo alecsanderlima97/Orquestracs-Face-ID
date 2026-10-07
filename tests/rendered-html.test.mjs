@@ -96,8 +96,8 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(camera, /loadRemoteProfiles/);
   assert.match(camera, /fetchImage\(source\.photoUrl\)/);
   assert.match(page, /listFaceIdRecords\("main", employee\.employeeId\)/);
-  assert.match(page, /photoPaths\.push/);
   assert.match(page, /faceRecords\.slice\(0, 3\)/);
+  assert.match(page, /if \(!photoPaths\.length && employee\.profilePhotoPath\)/);
   assert.match(camera, /referência\(s\) facial/);
   assert.match(page, /Editar foto principal/);
   assert.match(page, /Refazer Face ID/);

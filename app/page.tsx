@@ -4321,12 +4321,15 @@ function KioskScreen({
         const sources = (await Promise.all(
           registered.map(async (employee) => {
             try {
-              const photoPaths = [employee.profilePhotoPath || ""];
+              let photoPaths: string[] = [];
               try {
                 const faceRecords = await listFaceIdRecords("main", employee.employeeId);
-                photoPaths.push(...faceRecords.slice(0, 3).map((record) => record.photoPath));
+                photoPaths = faceRecords.slice(0, 3).map((record) => record.photoPath);
               } catch (error) {
                 console.warn(`Não foi possível consultar o histórico facial de ${employee.name}.`, error);
+              }
+              if (!photoPaths.length && employee.profilePhotoPath) {
+                photoPaths = [employee.profilePhotoPath];
               }
 
               const employeeSources: FaceProfileSource[] = [];
