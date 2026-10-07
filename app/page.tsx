@@ -1634,7 +1634,7 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="mt-4 flex justify-center lg:absolute lg:left-1/2 lg:top-0 lg:mt-0 lg:w-[360px] lg:-translate-x-1/2">
+              <div className="mt-4 flex justify-center lg:absolute lg:right-[72px] lg:top-3 lg:mt-0 lg:w-[360px]">
                 <div className={`w-full max-w-[360px] rounded-lg border px-3 py-2.5 ${headerWeather.shellClass}`}>
                   <div className="flex items-center gap-3">
                     <span aria-hidden="true" className="min-w-[3.5rem] text-center text-3xl leading-none">{headerWeather.icon}</span>
