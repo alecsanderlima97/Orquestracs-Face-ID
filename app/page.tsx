@@ -2235,7 +2235,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
           </Field>
         </div>
         {error && <p className="m-4 rounded-md border border-[#f2b8b5] bg-[#fff0ef] p-3 text-sm font-semibold text-[#a33a3a]">{error}</p>}
-        <div className="overflow-x-auto">
+        <div className="table-scroll">
           <table className="w-full min-w-[920px] border-collapse text-left text-sm">
             <thead className="bg-[#f8fafb] text-xs uppercase text-[#667085]">
               <tr>
@@ -3887,7 +3887,7 @@ function ShiftsScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (acti
       </TwoColumn>
 
       <Panel title="Turnos cadastrados" subtitle="Selecione um turno para editar">
-        <div className="overflow-x-auto">
+        <div className="table-scroll">
           <table className="w-full min-w-[860px] border-collapse text-left text-sm">
             <thead className="bg-[#f8fafb] text-xs uppercase text-[#667085]">
               <tr>
@@ -4958,7 +4958,7 @@ function MonthlyClosingScreen({
       </Panel>
 
       <Panel title="Conferencia por funcionario" subtitle="Base do arquivo mensal e da ficha individual">
-        <div className="overflow-x-auto">
+        <div className="table-scroll">
           <table className="w-full min-w-[980px] border-collapse text-left text-sm">
             <thead className="bg-[#101923] text-xs uppercase text-white">
               <tr>
@@ -5208,7 +5208,7 @@ function AdminScreen({
               <p className="text-sm font-semibold text-[#26323f]">Clientes do SaaS</p>
               <p className="mt-1 text-xs text-[#667085]">Controle comercial e operacional das empresas contratantes.</p>
             </div>
-            <div className="overflow-x-auto">
+            <div className="table-scroll">
               <table className="w-full min-w-[760px] border-collapse text-left text-sm">
                 <thead className="bg-[#f6f8fa] text-xs uppercase text-[#667085]">
                   <tr>
@@ -5720,7 +5720,7 @@ function EmployeesTable({
           )}
         </div>
       )}
-      <div className="overflow-x-auto">
+      <div className="table-scroll">
         <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
           <thead className="bg-[#f8fafb] text-xs uppercase text-[#667085]">
             <tr>
@@ -5846,7 +5846,7 @@ function ReportPreview() {
         ))}
       </div>
 
-      <div className="overflow-x-auto px-5 pb-5">
+      <div className="table-scroll px-5 pb-5">
         <table className="w-full min-w-[840px] border-collapse text-left text-sm">
           <thead className="bg-[#101923] text-xs uppercase text-white">
             <tr>

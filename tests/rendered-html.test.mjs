@@ -60,9 +60,10 @@ test("mantem batidas originais no fluxo protegido do servidor", async () => {
 });
 
 test("mantem navegacao responsiva para celular e tablet", async () => {
-  const [page, css] = await Promise.all([
+  const [page, css, layout] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /mobileMenuOpen/);
@@ -71,5 +72,9 @@ test("mantem navegacao responsiva para celular e tablet", async () => {
   assert.match(page, /md:grid-cols-\[minmax\(0,1fr\)_300px\]/);
   assert.match(css, /@media \(max-width: 639px\)/);
   assert.match(css, /touch-action:\s*manipulation/);
+  assert.match(css, /\.table-scroll/);
+  assert.match(css, /touch-action:\s*pan-x pan-y pinch-zoom/);
+  assert.match(page, /className="table-scroll/);
+  assert.match(layout, /width:\s*"device-width"/);
   assert.match(css, /prefers-reduced-motion/);
 });
