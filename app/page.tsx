@@ -1621,8 +1621,8 @@ export default function Home() {
 
         <section className="grid min-w-0 gap-4 sm:gap-5">
           <header className="rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5">
-            <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(320px,390px)_auto] lg:items-center">
-              <div className="min-w-0">
+            <div className="relative">
+              <div className="min-w-0 lg:max-w-[320px]">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
                   Orquestracs Face ID
                 </p>
@@ -1634,7 +1634,7 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="hidden lg:flex lg:justify-center">
+              <div className="mt-4 flex justify-center lg:absolute lg:left-1/2 lg:top-0 lg:mt-0 lg:w-[390px] lg:-translate-x-1/2">
                 <div className={`w-full max-w-[390px] rounded-lg border px-3 py-2.5 ${headerWeather.shellClass}`}>
                   <div className="flex items-center gap-3">
                     <span aria-hidden="true" className="min-w-[3.5rem] text-center text-3xl leading-none">{headerWeather.icon}</span>
@@ -1655,7 +1655,7 @@ export default function Home() {
                 </div>
               </div>
               <button
-                className="secondary-button hidden lg:block"
+                className="secondary-button absolute right-0 top-0 hidden lg:block"
                 onClick={handleLogout}
                 type="button"
               >
