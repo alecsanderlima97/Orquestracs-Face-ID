@@ -166,13 +166,16 @@ a {
 .primary-button,
 .secondary-button,
 .mini-button {
+  position: relative;
+  overflow: hidden;
   border-radius: 6px;
   font-weight: 700;
-  transition: border-color 160ms ease, box-shadow 160ms ease, color 160ms ease, background 160ms ease, transform 160ms ease;
+  transition: border-color 180ms ease, box-shadow 180ms ease, color 180ms ease, background 180ms ease, transform 180ms ease;
 }
 
 .primary-button {
   height: 40px;
+  border: 1px solid #18594c;
   background: #18594c;
   padding: 0 16px;
   color: #ffffff;
@@ -180,8 +183,8 @@ a {
 
 .primary-button:hover {
   background: #12463c;
-  box-shadow: 0 8px 18px rgb(18 70 60 / 18%);
-  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgb(18 70 60 / 22%);
+  transform: translateY(-2px);
 }
 
 .primary-button:disabled {
@@ -261,17 +264,18 @@ a {
 
 .secondary-button {
   height: 40px;
-  border: 1px solid #cbd5df;
-  background: #ffffff;
+  border: 1px solid #b7cde2;
+  background: #f3f8fc;
   padding: 0 16px;
-  color: #26323f;
+  color: #1d527d;
 }
 
 .secondary-button:hover {
-  border-color: #18594c;
-  box-shadow: 0 8px 18px rgb(16 25 35 / 8%);
-  color: #18594c;
-  transform: translateY(-1px);
+  border-color: #2f72a7;
+  background: #e8f2fa;
+  box-shadow: 0 8px 18px rgb(29 82 125 / 16%);
+  color: #174669;
+  transform: translateY(-2px);
 }
 
 .google-button {
@@ -309,17 +313,19 @@ a {
 
 .mini-button {
   height: 32px;
-  border: 1px solid #d9e0e7;
-  background: #fbfcfd;
+  border: 1px solid #c7cbea;
+  background: #f5f6ff;
   padding: 0 10px;
-  color: #52616f;
+  color: #3f4b91;
   font-size: 12px;
 }
 
 .mini-button:hover {
-  border-color: #18594c;
-  color: #18594c;
-  transform: translateY(-1px);
+  border-color: #6977c7;
+  background: #eceeff;
+  box-shadow: 0 6px 14px rgb(63 75 145 / 14%);
+  color: #303b7c;
+  transform: translateY(-2px);
 }
 
 .punch-actions {
@@ -339,7 +345,16 @@ a {
 .mini-button:active,
 .google-button:active,
 .assistant-launcher:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.98);
+}
+
+.primary-button:focus-visible,
+.secondary-button:focus-visible,
+.mini-button:focus-visible,
+.google-button:focus-visible,
+.assistant-launcher:focus-visible {
+  outline: 3px solid rgb(47 114 167 / 28%);
+  outline-offset: 2px;
 }
 
 .info-note {
