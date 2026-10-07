@@ -50,6 +50,11 @@ function getProfiles() {
   }
 }
 
+export function clearLocalFaceProfile(employeeId: string) {
+  const profiles = getProfiles().filter((profile) => profile.employeeId !== employeeId);
+  window.localStorage.setItem(FACE_PROFILES_KEY, JSON.stringify(profiles));
+}
+
 export function FaceCamera({
   compact = false,
   employee,

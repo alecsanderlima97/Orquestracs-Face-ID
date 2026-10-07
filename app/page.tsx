@@ -13,7 +13,7 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { FaceCamera, type FaceProfileSource, type RecognizedFace } from "@/app/components/FaceCamera";
+import { clearLocalFaceProfile, FaceCamera, type FaceProfileSource, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
 import type {
@@ -77,6 +77,7 @@ type EmployeeSection = "detail" | "face" | "form" | "list";
 const employees: EmployeeRow[] = [];
 
 type EmployeeRow = {
+  active?: boolean;
   admissionDate?: string;
   bank: string;
   cbo?: string;
@@ -147,7 +148,7 @@ function getLocalEmployees() {
       ...employee,
       pin: "",
       pinConfigured: Boolean(employee.pinConfigured || employee.pin),
-    }));
+    })).filter((employee) => employee.active !== false);
   } catch {
     return [];
   }
@@ -157,6 +158,7 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
   const schedule = (employee.schedule || {}) as LocalEmployee["schedule"];
 
   return {
+    active: employee.active !== false,
     admissionDate: String(employee.admissionDate || "Nao informado"),
     bank: String(employee.bank || "00:00"),
     cbo: String(employee.cbo || ""),
@@ -2999,9 +3001,9 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           ));
         }
 
-        const mapped = savedInFirebase.map((employee) =>
-          toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
-        );
+        const mapped = savedInFirebase
+          .map((employee) => toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id))
+          .filter((employee) => employee.active !== false);
         setLocalEmployees(mapped);
         window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(mapped));
       } catch {
@@ -3314,6 +3316,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             toleranceMinutes: Number.parseInt(companyShift.tolerance, 10) || 10,
           };
     const employee: LocalEmployee = {
+      active: selectedEmployee?.active !== false,
       admissionDate: employeeForm.admissionDate || "Nao informado",
       bank: "00:00",
       cbo: employeeForm.cbo || "",
@@ -3406,6 +3409,68 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     } catch (error) {
       console.error(error);
       onAction("Nao foi possivel salvar a foto do colaborador. Verifique Storage e permissao.");
+    }
+  }
+
+  async function resetFaceId(employee: LocalEmployee) {
+    if (!canEdit) return;
+    const confirmed = window.confirm(
+      `Limpar o Face ID de ${employee.name}? O cadastro facial ativo será removido e será necessário fazer novas capturas. A foto principal e o histórico serão preservados.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await upsertEmployee("main", employeeDocumentId(employee), {
+        faceCaptureCount: 0,
+        faceIdStatus: "not_registered",
+        faceRegisteredAt: null,
+        status: "Face ID pendente",
+      });
+      clearLocalFaceProfile(employee.employeeId);
+      const updated = localEmployees.map((item) =>
+        item.employeeId === employee.employeeId
+          ? { ...item, faceIdStatus: "not_registered" as const, status: "Face ID pendente" }
+          : item,
+      );
+      window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
+      setLocalEmployees(updated);
+      setSelectedEmployee((current) =>
+        current?.employeeId === employee.employeeId
+          ? { ...current, faceIdStatus: "not_registered", status: "Face ID pendente" }
+          : current,
+      );
+      setReplaceFaceProfile(false);
+      onAction(`Face ID de ${employee.name} limpo. O histórico antigo foi preservado.`);
+    } catch (error) {
+      console.error(error);
+      onAction("Não foi possível limpar o Face ID. Verifique sua sessão e tente novamente.");
+    }
+  }
+
+  async function deactivateEmployee(employee: LocalEmployee) {
+    if (!canEdit) return;
+    const confirmed = window.confirm(
+      `Desativar ${employee.name}? Ele sairá da lista ativa e da sala de ponto, mas as batidas e relatórios antigos serão preservados.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await upsertEmployee("main", employeeDocumentId(employee), {
+        active: false,
+        status: "Inativo",
+      });
+      const updated = localEmployees.filter((item) => item.employeeId !== employee.employeeId);
+      window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
+      setLocalEmployees(updated);
+      setSelectedEmployee(null);
+      setSelectedEmployeePunches([]);
+      setShowFaceCamera(false);
+      setReplaceFaceProfile(false);
+      setOpenEmployeeSections({ detail: false, face: false, form: false, list: true });
+      onAction(`${employee.name} foi desativado. Histórico preservado.`);
+    } catch (error) {
+      console.error(error);
+      onAction("Não foi possível desativar o colaborador. Verifique sua sessão e tente novamente.");
     }
   }
 
@@ -3861,10 +3926,11 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             </div>
           </div>
           <ActionRow>
-            <button className="secondary-button" onClick={() => editEmployee(selectedEmployee)} type="button">Editar cadastro</button>
-                 <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee, { replace: selectedEmployee.faceIdStatus === "registered" })} type="button">
-                   {selectedEmployee.faceIdStatus === "registered" ? "Refazer Face ID" : "Cadastrar Face ID"}
-                 </button>
+           <button className="secondary-button" onClick={() => editEmployee(selectedEmployee)} type="button">Editar cadastro</button>
+            <button className="secondary-button" disabled={!canEdit} onClick={() => startFaceRegistration(selectedEmployee, { replace: selectedEmployee.faceIdStatus === "registered" })} type="button">
+              {selectedEmployee.faceIdStatus === "registered" ? "Refazer Face ID" : "Cadastrar Face ID"}
+            </button>
+            <button className="secondary-button border-[#e5b6b1] bg-[#fff5f3] text-[#a33a3a] hover:border-[#c94c43] hover:bg-[#ffe9e6]" disabled={!canEdit} onClick={() => void resetFaceId(selectedEmployee)} type="button">Limpar Face ID</button>
             <label className={`secondary-button ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
               Editar foto principal
               <input
@@ -3875,6 +3941,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
                 type="file"
               />
             </label>
+            <button className="secondary-button border-[#e5b6b1] bg-[#fff5f3] text-[#a33a3a] hover:border-[#c94c43] hover:bg-[#ffe9e6]" disabled={!canEdit} onClick={() => void deactivateEmployee(selectedEmployee)} type="button">Desativar colaborador</button>
           </ActionRow>
         </CollapsiblePanel>
       )}
@@ -4316,7 +4383,7 @@ function KioskScreen({
         const saved = await listEmployees("main");
         const registered = saved
           .map((employee) => toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id))
-          .filter((employee) => employee.faceIdStatus === "registered");
+          .filter((employee) => employee.active !== false && employee.faceIdStatus === "registered");
 
         const sources = (await Promise.all(
           registered.map(async (employee) => {
