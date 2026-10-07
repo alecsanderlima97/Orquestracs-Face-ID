@@ -39,6 +39,7 @@ type FaceCameraProps = {
   onRecognized?: (employee: RecognizedFace, photoBlob?: Blob) => void;
   onStatus?: (message: string) => void;
   profileSources?: FaceProfileSource[];
+  replaceProfile?: boolean;
 };
 
 function getProfiles() {
@@ -57,6 +58,7 @@ export function FaceCamera({
   onRecognized,
   onStatus,
   profileSources = [],
+  replaceProfile = false,
 }: FaceCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -65,10 +67,15 @@ export function FaceCamera({
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState("Ative a câmera para começar.");
   const remoteProfilesRef = useRef<StoredFaceProfile[] | null>(null);
+  const replacementStartedRef = useRef(false);
 
   useEffect(() => {
     remoteProfilesRef.current = null;
   }, [profileSources]);
+
+  useEffect(() => {
+    replacementStartedRef.current = false;
+  }, [employee?.employeeId, replaceProfile]);
 
   useEffect(() => {
     onCameraState?.(cameraState);
@@ -246,7 +253,8 @@ export function FaceCamera({
 
       const profiles = getProfiles();
       const existingIndex = profiles.findIndex((profile) => profile.employeeId === employee.employeeId);
-      const existing = existingIndex >= 0 ? profiles[existingIndex] : null;
+      const replacingNow = replaceProfile && !replacementStartedRef.current;
+      const existing = !replacingNow && existingIndex >= 0 ? profiles[existingIndex] : null;
       const descriptors = [
         ...(existing?.descriptors || []),
         Array.from(detection.descriptor),
@@ -257,13 +265,17 @@ export function FaceCamera({
         updatedAt: new Date().toISOString(),
       };
 
-      if (existingIndex >= 0) {
+      const nextProfiles = replacingNow
+        ? profiles.filter((profile) => profile.employeeId !== employee.employeeId)
+        : profiles;
+      if (existingIndex >= 0 && !replacingNow) {
         profiles[existingIndex] = profile;
       } else {
-        profiles.push(profile);
+        nextProfiles.push(profile);
       }
 
-      window.localStorage.setItem(FACE_PROFILES_KEY, JSON.stringify(profiles));
+      replacementStartedRef.current = true;
+      window.localStorage.setItem(FACE_PROFILES_KEY, JSON.stringify(nextProfiles));
       onProfileUpdated?.(descriptors.length, await captureFrame());
       updateMessage(
         `${employee.name}: captura ${descriptors.length}/${MAX_CAPTURES_PER_EMPLOYEE} salva neste aparelho.`,

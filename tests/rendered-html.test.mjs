@@ -100,7 +100,10 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(page, /faceRecords\.slice\(0, 3\)/);
   assert.match(camera, /referência\(s\) facial/);
   assert.match(page, /Editar foto principal/);
+  assert.match(page, /Refazer Face ID/);
+  assert.match(page, /replaceProfile=\{replaceFaceProfile\}/);
   assert.doesNotMatch(page, /updateEmployeeProfilePhoto\(current, photoPath/);
+  assert.match(camera, /replacementStartedRef/);
   assert.match(css, /\.kiosk-app-shell/);
   assert.match(css, /\.kiosk-clock-card/);
 });

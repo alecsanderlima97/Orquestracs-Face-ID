@@ -2917,6 +2917,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     list: true,
   });
   const [showFaceCamera, setShowFaceCamera] = useState(false);
+  const [replaceFaceProfile, setReplaceFaceProfile] = useState(false);
   const [employeeJourney, setEmployeeJourney] = useState({
     start: "07:00",
     lunchOut: "11:30",
@@ -3037,6 +3038,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setEditingEmployeeId(null);
     setSelectedEmployee(null);
     setShowFaceCamera(false);
+    setReplaceFaceProfile(false);
     setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
     onAction("Novo colaborador: formulario limpo para cadastro.");
     document.getElementById("employee-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -3048,11 +3050,12 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setEmployeeSource("manual");
     setEditingEmployeeId(null);
     setShowFaceCamera(false);
+    setReplaceFaceProfile(false);
     setEmployeeSection("form", false);
     onAction("Edicao cancelada. Nenhuma alteracao foi salva.");
   }
 
-  function startFaceRegistration(employee?: EmployeeRow) {
+  function startFaceRegistration(employee?: EmployeeRow, options?: { replace?: boolean }) {
     if (!canEdit) return;
     const target = employee
       ? toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name)
@@ -3065,9 +3068,10 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
 
     setSelectedEmployee(target);
     setEditingEmployeeId(null);
+    setReplaceFaceProfile(options?.replace === true);
     setShowFaceCamera(true);
     setOpenEmployeeSections({ detail: false, face: true, form: false, list: true });
-    onAction(`Cadastro de Face ID iniciado para ${target.name}.`);
+    onAction(options?.replace ? `Refazendo o Face ID de ${target.name}. As capturas antigas serão mantidas no histórico.` : `Cadastro de Face ID iniciado para ${target.name}.`);
     window.setTimeout(
       () => document.getElementById("face-id-flow-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }),
       50,
@@ -3079,6 +3083,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setSelectedEmployee(selected);
     setSelectedEmployeePunches([]);
     setShowFaceCamera(false);
+    setReplaceFaceProfile(false);
     setOpenEmployeeSections({ detail: true, face: false, form: false, list: true });
     onAction(`Visualizando cadastro de ${selected.name}.`);
     void loadEmployeePhoto(selected);
@@ -3097,6 +3102,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setEmployeeSource("manual");
     setEditingEmployeeId(employeeDocumentId(selected));
     setShowFaceCamera(false);
+    setReplaceFaceProfile(false);
     setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
     setEmployeeForm({
       admissionDate: selected.admissionDate || "",
@@ -3452,6 +3458,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     }
 
     if (completed) {
+      setReplaceFaceProfile(false);
       onAction(
         nextPending
           ? `${selectedEmployee.name}: Face ID concluido. Proximo: ${nextPending.name}.`
@@ -3591,7 +3598,9 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           {editingEmployeeId && (
             <button className="secondary-button" onClick={cancelEmployeeEdit} type="button">Cancelar edicao</button>
           )}
-          <button className="secondary-button" disabled={!canEdit} onClick={() => startFaceRegistration(selectedEmployee || undefined)} type="button">Cadastrar Face ID do selecionado</button>
+           <button className="secondary-button" disabled={!canEdit} onClick={() => startFaceRegistration(selectedEmployee || undefined, { replace: selectedEmployee?.faceIdStatus === "registered" })} type="button">
+             {selectedEmployee?.faceIdStatus === "registered" ? "Refazer Face ID" : "Cadastrar Face ID do selecionado"}
+           </button>
           <label className={`secondary-button ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
             {holeriteImportLoading ? "Lendo holerite..." : "Importar holerite PDF"}
             <input
@@ -3660,16 +3669,16 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           <div className="mt-5 grid gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white lg:grid-cols-[minmax(0,1fr)_280px]">
             <FaceCamera
               compact
-              employee={{
+               employee={{
                 employeeId: selectedEmployee!.employeeId,
                 externalPunchAllowed: selectedEmployee!.externalPunchAllowed,
                 name: selectedEmployee!.name,
                 punchMode: selectedEmployee!.punchMode || "automatic",
                 schedule: selectedEmployee!.schedule,
-              }}
-              onProfileUpdated={markFaceRegistered}
-              onStatus={onAction}
-            />
+               }}
+               onProfileUpdated={markFaceRegistered}
+               onStatus={onAction}
+             />
             <div>
               <p className="text-sm font-semibold text-[#b7d7ce]">Face ID de {selectedEmployee!.name}</p>
               <p className="mt-2 text-xs leading-5 text-white/65">
@@ -3711,7 +3720,9 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             <ActionRow>
               <button className="primary-button" onClick={() => startFaceRegistration()} type="button">Iniciar proximo pendente</button>
               {selectedEmployee && (
-                <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee)} type="button">Capturar selecionado</button>
+                <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee, { replace: selectedEmployee.faceIdStatus === "registered" })} type="button">
+                  {selectedEmployee.faceIdStatus === "registered" ? "Refazer Face ID" : "Capturar selecionado"}
+                </button>
               )}
             </ActionRow>
           </div>
@@ -3746,10 +3757,11 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
                 name: selectedEmployee!.name,
                 punchMode: selectedEmployee!.punchMode || "automatic",
                 schedule: selectedEmployee!.schedule,
-              }}
-              onProfileUpdated={markFaceRegistered}
-              onStatus={onAction}
-            />
+               }}
+               onProfileUpdated={markFaceRegistered}
+               onStatus={onAction}
+               replaceProfile={replaceFaceProfile}
+             />
             <div>
               <p className="text-sm font-semibold text-[#b7d7ce]">Face ID de {selectedEmployee!.name}</p>
               <p className="mt-2 text-xs leading-5 text-white/65">
@@ -3850,7 +3862,9 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           </div>
           <ActionRow>
             <button className="secondary-button" onClick={() => editEmployee(selectedEmployee)} type="button">Editar cadastro</button>
-            <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee)} type="button">Cadastrar Face ID</button>
+                 <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee, { replace: selectedEmployee.faceIdStatus === "registered" })} type="button">
+                   {selectedEmployee.faceIdStatus === "registered" ? "Refazer Face ID" : "Cadastrar Face ID"}
+                 </button>
             <label className={`secondary-button ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
               Editar foto principal
               <input
