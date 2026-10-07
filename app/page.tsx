@@ -1622,7 +1622,7 @@ export default function Home() {
         <section className="grid min-w-0 gap-4 sm:gap-5">
           <header className="rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5">
             <div className="relative">
-              <div className="min-w-0 lg:max-w-[320px]">
+              <div className="min-w-0 lg:max-w-[280px]">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
                   Orquestracs Face ID
                 </p>
@@ -1634,8 +1634,8 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="mt-4 flex justify-center lg:absolute lg:right-[72px] lg:top-0 lg:mt-0 lg:w-[390px]">
-                <div className={`w-full max-w-[390px] rounded-lg border px-3 py-2.5 ${headerWeather.shellClass}`}>
+              <div className="mt-4 flex justify-center lg:absolute lg:left-1/2 lg:top-0 lg:mt-0 lg:w-[360px] lg:-translate-x-1/2">
+                <div className={`w-full max-w-[360px] rounded-lg border px-3 py-2.5 ${headerWeather.shellClass}`}>
                   <div className="flex items-center gap-3">
                     <span aria-hidden="true" className="min-w-[3.5rem] text-center text-3xl leading-none">{headerWeather.icon}</span>
                     <div className="min-w-0 flex-1">
