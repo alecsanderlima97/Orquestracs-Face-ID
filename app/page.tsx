@@ -2079,9 +2079,10 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
   const okCount = employeesList.length - pendingCount;
 
   function renderPunchCell(row: DailyEmployeeRow, type: PunchType, expected: string) {
-    const confirmed = row.punches.some(
+    const punch = row.punches.find(
       (punch) => punch.type === type && isSameCalendarDay(punchDate(punch), now),
     );
+    const confirmed = Boolean(punch);
     const pending = row.pendingPunches.includes(type);
     return (
       <span
@@ -2092,8 +2093,9 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
               ? "border border-[#b9ddd3] bg-[#f1faf7] text-[#18594c]"
               : "border border-transparent text-[#667085]"
         }`}
+        title={punch ? `Batida registrada às ${formatPunchDateTime(punch)}` : undefined}
       >
-        {confirmed ? "OK" : expected}
+        {confirmed && punch ? formatPunchTime(punch) : expected}
       </span>
     );
   }
@@ -5877,6 +5879,12 @@ function formatPunchDateTime(punch: Punch) {
     month: "2-digit",
     year: "numeric",
   });
+}
+
+function formatPunchTime(punch: Punch) {
+  const date = punchDate(punch);
+  if (Number.isNaN(date.getTime())) return "--:--";
+  return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
 function formatPunchType(type: PunchType) {
