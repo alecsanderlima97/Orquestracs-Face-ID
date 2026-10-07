@@ -2181,7 +2181,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
 
   return (
     <>
-      <section className="rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
+      <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">Acompanhamento diário</p>
@@ -2205,7 +2205,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
         </div>
       </section>
 
-      <section className="rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+      <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
         <div className="flex flex-col gap-3 border-b border-[#e3e8ee] p-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-medium text-[#667085]">Controle em tempo real</p>
@@ -2235,7 +2235,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
           </Field>
         </div>
         {error && <p className="m-4 rounded-md border border-[#f2b8b5] bg-[#fff0ef] p-3 text-sm font-semibold text-[#a33a3a]">{error}</p>}
-        <div className="table-scroll">
+        <div className="table-scroll hidden lg:block">
           <table className="w-full min-w-[920px] border-collapse text-left text-sm">
             <thead className="bg-[#f8fafb] text-xs uppercase text-[#667085]">
               <tr>
@@ -2276,6 +2276,56 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="space-y-3 p-4 lg:hidden">
+          {loading ? (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4 text-sm text-[#667085]">Carregando colaboradores...</div>
+          ) : rows.length === 0 ? (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4 text-center text-sm text-[#667085]">
+              {employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}
+            </div>
+          ) : rows.map((row) => (
+            <article className={`min-w-0 rounded-md border p-3 ${isDailyAttentionStatus(row.statusKey) ? "border-[#f2b8b5] bg-[#fff8f7]" : "border-[#e3e8ee] bg-white"}`} key={`mobile-${row.employee.employeeId}`}>
+              <div className="flex min-w-0 items-start gap-3">
+                {employeePhotoUrls[row.employee.employeeId] ? (
+                  <img
+                    alt={`Foto de ${row.employee.name}`}
+                    className="h-10 w-10 shrink-0 rounded-md border border-[#d9e0e7] object-cover"
+                    src={employeePhotoUrls[row.employee.employeeId]}
+                  />
+                ) : (
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-[#d9e0e7] bg-[#fbfcfd] text-sm font-bold text-[#18594c]">
+                    {row.employee.name.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                    <p className="min-w-0 break-words text-sm font-semibold text-[#101923]">{row.employee.name}</p>
+                    <span className={`inline-flex max-w-full rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-4 ${dailyStatusClass(row.statusKey)}`}>
+                      {row.statusLabel}
+                    </span>
+                  </div>
+                  <p className="mt-1 break-words text-xs text-[#667085]">{row.employee.shift}</p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {[
+                  { label: "Entrada", value: renderPunchCell(row, "entry", row.employee.schedule.start) },
+                  { label: "Intervalo", value: renderPunchCell(row, "lunch_out", row.employee.schedule.breakStart) },
+                  { label: "Retorno", value: renderPunchCell(row, "lunch_back", row.employee.schedule.breakEnd) },
+                  { label: "Saída", value: renderPunchCell(row, "exit", row.employee.schedule.end) },
+                ].map(({ label, value }) => (
+                  <div className="min-w-0 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] px-2 py-2" key={label}>
+                    <p className="text-[10px] font-semibold uppercase text-[#667085]">{label}</p>
+                    <div className="mt-1 min-w-0">{value}</div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-3 break-words text-xs text-[#667085]">
+                Última batida: <span className="font-semibold text-[#26323f]">{row.latestPunch ? formatPunchDateTime(row.latestPunch) : "Sem batida hoje"}</span>
+              </p>
+            </article>
+          ))}
         </div>
         <div className="border-t border-[#e3e8ee] px-5 py-4 text-sm leading-6 text-[#667085]">
           <strong className="text-[#a33a3a]">Pendência ou falta indicada</strong> exige batida, atestado ou justificativa aprovada antes do fechamento. A batida original nunca é apagada.
@@ -5794,11 +5844,11 @@ function EmployeesTable({
   );
 
   if (embedded) {
-    return <div className="overflow-hidden rounded-md border border-[#e3e8ee]">{tableContent}</div>;
+    return <div className="min-w-0 overflow-hidden rounded-md border border-[#e3e8ee]">{tableContent}</div>;
   }
 
   return (
-    <section className="rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+    <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
       {tableContent}
     </section>
   );
@@ -5924,7 +5974,7 @@ function Panel({
   title: string;
 }) {
   return (
-    <section className="rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
+    <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
       <p className="text-sm font-medium text-[#667085]">{subtitle}</p>
       <h2 className="mt-1 text-xl font-semibold text-[#101923]">{title}</h2>
       <div className="mt-5">{children}</div>

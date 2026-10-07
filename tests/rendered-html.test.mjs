@@ -75,6 +75,7 @@ test("mantem navegacao responsiva para celular e tablet", async () => {
   assert.match(css, /\.table-scroll/);
   assert.match(css, /touch-action:\s*pan-x pan-y pinch-zoom/);
   assert.match(page, /className="table-scroll/);
+  assert.match(page, /className="space-y-3 p-4 lg:hidden"/);
   assert.match(layout, /width:\s*"device-width"/);
   assert.match(css, /prefers-reduced-motion/);
 });
