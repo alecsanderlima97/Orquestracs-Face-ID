@@ -4305,40 +4305,35 @@ function KioskScreen({
           registered.map(async (employee) => {
             try {
               const photoPaths = [employee.profilePhotoPath || ""];
-              if (!employee.profilePhotoPath) {
-                try {
-                  const faceRecords = await listFaceIdRecords("main", employee.employeeId);
-                  photoPaths.push(...faceRecords.map((record) => record.photoPath));
-                } catch (error) {
-                  console.warn(`Não foi possível consultar o histórico facial de ${employee.name}.`, error);
-                }
+              try {
+                const faceRecords = await listFaceIdRecords("main", employee.employeeId);
+                photoPaths.push(...faceRecords.slice(0, 3).map((record) => record.photoPath));
+              } catch (error) {
+                console.warn(`Não foi possível consultar o histórico facial de ${employee.name}.`, error);
               }
 
-              let photoUrl = "";
+              const employeeSources: FaceProfileSource[] = [];
               for (const photoPath of [...new Set(photoPaths.filter(Boolean))]) {
                 try {
-                  photoUrl = await getStorageFileUrl(photoPath);
-                  break;
+                  const photoUrl = await getStorageFileUrl(photoPath);
+                  employeeSources.push({
+                    employeeId: employee.employeeId,
+                    name: employee.name,
+                    photoUrl,
+                    punchMode: employee.punchMode || "automatic",
+                    schedule: employee.schedule,
+                  });
                 } catch {
                   // Tenta a próxima captura histórica quando a foto resumida não existe mais.
                 }
               }
-              if (!photoUrl) return null;
-
-              return {
-                employeeId: employee.employeeId,
-                name: employee.name,
-                photoUrl,
-                punchMode: employee.punchMode || "automatic",
-                schedule: employee.schedule,
-              };
+              return employeeSources;
             } catch {
-              return null;
+              return [];
             }
           }),
         ))
-          .filter(Boolean)
-          .map((source) => source as FaceProfileSource);
+          .flat();
 
         if (mounted) setFaceProfileSources(sources);
       } catch (error) {

@@ -141,8 +141,8 @@ export function FaceCamera({
         const syncedProfiles = await loadRemoteProfiles(faceApi);
         updateMessage(
           syncedProfiles.length
-            ? `${syncedProfiles.length} rosto(s) sincronizado(s). Mantenha apenas um rosto centralizado.`
-            : "Nenhum rosto facial válido foi encontrado no cadastro da empresa.",
+            ? `${syncedProfiles.length} referência(s) facial(is) sincronizada(s). Mantenha apenas um rosto centralizado.`
+            : "Nenhuma referência facial válida foi encontrada no cadastro da empresa.",
         );
       } else {
         updateMessage("Câmera ativa. Cadastre os rostos dos colaboradores antes de reconhecer.");
