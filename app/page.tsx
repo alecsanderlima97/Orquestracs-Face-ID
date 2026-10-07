@@ -1816,7 +1816,7 @@ type DailyStatusKey = "break" | "done" | "off" | "pending" | "waiting" | "workin
 
 type DailyEmployeeRow = {
   employee: LocalEmployee;
-  pendingPunch: PunchType | null;
+  pendingPunches: PunchType[];
   punches: Punch[];
   statusKey: DailyStatusKey;
   statusLabel: string;
@@ -1914,13 +1914,13 @@ function getWeatherVisual(daypart: Daypart, weather: WeatherSnapshot | null, loa
   };
 }
 
-function getDailyPendingPunch(
+function getDailyPendingPunches(
   employee: LocalEmployee,
   punches: Punch[],
   now: Date,
   scheduledDays: number,
-): PunchType | null {
-  if (!isScheduledWorkday(now, scheduledDays)) return null;
+): PunchType[] {
+  if (!isScheduledWorkday(now, scheduledDays)) return [];
 
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const schedule = employee.schedule;
@@ -1931,12 +1931,14 @@ function getDailyPendingPunch(
   const lunchBack = getTimeMinutes(schedule.breakEnd);
   const end = getTimeMinutes(schedule.end);
 
-  if (currentMinutes < start) return null;
-  if (!hasPunch("entry")) return "entry";
-  if (currentMinutes >= lunchOut && !hasPunch("lunch_out")) return "lunch_out";
-  if (currentMinutes >= lunchBack && !hasPunch("lunch_back")) return "lunch_back";
-  if (currentMinutes >= end && !hasPunch("exit")) return "exit";
-  return null;
+  if (currentMinutes < start) return [];
+
+  const pending: PunchType[] = [];
+  if (!hasPunch("entry")) pending.push("entry");
+  if (currentMinutes >= lunchOut && !hasPunch("lunch_out")) pending.push("lunch_out");
+  if (currentMinutes >= lunchBack && !hasPunch("lunch_back")) pending.push("lunch_back");
+  if (currentMinutes >= end && !hasPunch("exit")) pending.push("exit");
+  return pending;
 }
 
 function getDailyEmployeeStatus(
@@ -1949,21 +1951,16 @@ function getDailyEmployeeStatus(
 
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const schedule = employee.schedule;
-  const todayPunches = punches.filter((punch) => isSameCalendarDay(punchDate(punch), now));
-  const hasPunch = (type: PunchType) => todayPunches.some((punch) => punch.type === type);
   const start = getTimeMinutes(schedule.start);
   const lunchOut = getTimeMinutes(schedule.breakStart);
   const lunchBack = getTimeMinutes(schedule.breakEnd);
   const end = getTimeMinutes(schedule.end);
 
   if (currentMinutes < start) return "waiting";
-  if (!hasPunch("entry")) return "pending";
+  if (getDailyPendingPunches(employee, punches, now, scheduledDays).length > 0) return "pending";
   if (currentMinutes < lunchOut) return "working";
-  if (!hasPunch("lunch_out")) return "pending";
   if (currentMinutes < lunchBack) return "break";
-  if (!hasPunch("lunch_back")) return "pending";
   if (currentMinutes < end) return "working";
-  if (!hasPunch("exit")) return "pending";
   return "done";
 }
 
@@ -1994,6 +1991,7 @@ function dailyStatusClass(statusKey: DailyStatusKey) {
 function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
   const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
   const [punches, setPunches] = useState<Punch[]>([]);
+  const [employeePhotoUrls, setEmployeePhotoUrls] = useState<Record<string, string>>({});
   const [now, setNow] = useState(new Date());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -2040,6 +2038,16 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
     };
   }, [refreshToken]);
 
+  useEffect(() => {
+    employeesList.forEach((employee) => {
+      if (!employee.profilePhotoPath || employeePhotoUrls[employee.employeeId]) return;
+
+      void getStorageFileUrl(employee.profilePhotoPath)
+        .then((url) => setEmployeePhotoUrls((current) => ({ ...current, [employee.employeeId]: url })))
+        .catch(() => undefined);
+    });
+  }, [employeePhotoUrls, employeesList]);
+
   const rows = useMemo<DailyEmployeeRow[]>(() => {
     const currentRows = employeesList.map((employee) => {
       const employeePunches = punches
@@ -2049,7 +2057,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
       return {
         employee,
         latestPunch: employeePunches[0] || null,
-        pendingPunch: statusKey === "pending" ? getDailyPendingPunch(employee, employeePunches, now, scheduledDays) : null,
+        pendingPunches: getDailyPendingPunches(employee, employeePunches, now, scheduledDays),
         punches: employeePunches,
         statusKey,
         statusLabel: dailyStatusLabel(statusKey),
@@ -2074,7 +2082,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
     const confirmed = row.punches.some(
       (punch) => punch.type === type && isSameCalendarDay(punchDate(punch), now),
     );
-    const pending = row.pendingPunch === type;
+    const pending = row.pendingPunches.includes(type);
     return (
       <span
         className={`inline-flex min-w-[58px] justify-center rounded-md px-2 py-1 text-xs font-semibold ${
@@ -2157,7 +2165,22 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
                 <tr><td className="px-4 py-10 text-center text-[#667085]" colSpan={8}>{employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}</td></tr>
               ) : rows.map((row) => (
                 <tr className={`border-t ${row.statusKey === "pending" ? "border-[#f2b8b5] bg-[#fff8f7]" : "border-[#e3e8ee]"}`} key={row.employee.employeeId}>
-                  <td className="px-4 py-4 font-semibold text-[#101923]">{row.employee.name}</td>
+                  <td className="px-4 py-4 font-semibold text-[#101923]">
+                    <div className="flex items-center gap-3">
+                      {employeePhotoUrls[row.employee.employeeId] ? (
+                        <img
+                          alt={`Foto de ${row.employee.name}`}
+                          className="h-9 w-9 rounded-md border border-[#d9e0e7] object-cover"
+                          src={employeePhotoUrls[row.employee.employeeId]}
+                        />
+                      ) : (
+                        <span className="grid h-9 w-9 place-items-center rounded-md border border-[#d9e0e7] bg-[#fbfcfd] text-xs font-bold text-[#18594c]">
+                          {row.employee.name.slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                      <span>{row.employee.name}</span>
+                    </div>
+                  </td>
                   <td className="px-4 py-4 text-[#667085]">{row.employee.shift}</td>
                   <td className="px-4 py-4">{renderPunchCell(row, "entry", row.employee.schedule.start)}</td>
                   <td className="px-4 py-4">{renderPunchCell(row, "lunch_out", row.employee.schedule.breakStart)}</td>
