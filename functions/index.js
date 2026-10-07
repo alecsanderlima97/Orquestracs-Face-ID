@@ -159,6 +159,23 @@ function minutesFromTime(value) {
   return hours * 60 + minutes;
 }
 
+function classifyPunchStatus({ employee, occurredAt, origin, scheduledPunch }) {
+  if (origin === "external") return "external_work";
+
+  const expectedByPunch = {
+    "Entrada 1": employee.schedule?.start,
+    "Saída 1": employee.schedule?.breakStart,
+    "Entrada 2": employee.schedule?.breakEnd,
+    "Saída 2": employee.schedule?.end,
+  };
+  const expectedMinutes = minutesFromTime(expectedByPunch[scheduledPunch]);
+  const currentMinutes = occurredAt.getHours() * 60 + occurredAt.getMinutes();
+  const toleranceMinutes = Number(employee.schedule?.toleranceMinutes || 10);
+
+  if (expectedMinutes === null || Math.abs(currentMinutes - expectedMinutes) <= toleranceMinutes) return "on_time";
+  return currentMinutes < expectedMinutes ? "early" : "late";
+}
+
 function buildAfdHeader({ company, firstDate, generatedAt, inpiRegistration, lastDate }) {
   const employerId = digits(company.cnpj || company.cpf);
   const developerId = digits(company.repP?.developerCnpj || company.repP?.developerCpf);
@@ -257,6 +274,7 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
   const requestedEmployeeId = normalizedText(request.data?.employeeId);
   const type = normalizedText(request.data?.type);
   const source = normalizedText(request.data?.source);
+  const scheduledPunch = normalizedText(request.data?.scheduledPunch);
   const origin = normalizedText(request.data?.origin);
   const deviceId = normalizedText(request.data?.deviceId).slice(0, 160);
   const photoPath = normalizedText(request.data?.photoPath).slice(0, 500);
@@ -264,12 +282,16 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
   const validTypes = ["entry", "lunch_out", "lunch_back", "exit"];
   const validSources = ["face_id", "pin_photo", "external_face_id", "external_pin_photo", "manager"];
   const validOrigins = ["kiosk", "external", "manager_adjustment"];
+  const validScheduledPunches = ["Entrada 1", "Saída 1", "Entrada 2", "Saída 2"];
 
   if (!companyId || !requestedEmployeeId || !validTypes.includes(type)) {
     throw new HttpsError("invalid-argument", "Empresa, colaborador e tipo de marcacao sao obrigatorios.");
   }
   if (!validSources.includes(source) || !validOrigins.includes(origin) || !deviceId) {
     throw new HttpsError("invalid-argument", "Origem, metodo e dispositivo invalidos.");
+  }
+  if (scheduledPunch && !validScheduledPunches.includes(scheduledPunch)) {
+    throw new HttpsError("invalid-argument", "Etapa da jornada invalida.");
   }
 
   await requireManager(request, companyId);
@@ -316,7 +338,7 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       recordedAt: repDateTime,
     });
     const hash = afdRecord.hash;
-    const status = origin === "external" ? "external_work" : "on_time";
+    const status = classifyPunchStatus({ employee, occurredAt: now.toDate(), origin, scheduledPunch });
     const punch = {
       companyId,
       deviceId,

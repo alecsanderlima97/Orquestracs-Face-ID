@@ -29,7 +29,7 @@ import { createFaceIdRecord, listFaceIdRecords, uploadFacePhoto } from "@/lib/se
 import { saveEmployeePin, verifyEmployeePin } from "@/lib/services/employee-pins";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
-import { createPunchAdjustment, listEmployeePunchesByIds } from "@/lib/services/punches";
+import { createPunchAdjustment, listEmployeePunches, listEmployeePunchesByIds } from "@/lib/services/punches";
 import {
   createAttendanceJustification,
   listAttendanceJustifications,
@@ -600,6 +600,7 @@ type PunchException = {
   currentTime: string;
   differenceMinutes: number;
   expectedTime: string;
+  timingLabel: string;
 };
 
 type PunchLocation = NonNullable<Punch["location"]>;
@@ -650,6 +651,26 @@ function getLocalRecords() {
   ) as LocalRecord[];
 }
 
+function inferNextPunchFromHistory(punches: Array<Pick<Punch, "occurredAt" | "type">>) {
+  const orderedPunches = punches
+    .map((punch) => ({ punch, date: punchDate(punch as Punch) }))
+    .filter((item) => !Number.isNaN(item.date.getTime()))
+    .sort((first, second) => first.date.getTime() - second.date.getTime())
+    .map((item) => item.punch);
+
+  const latestPunch = orderedPunches.at(-1);
+  if (!latestPunch) return "Entrada 1";
+  if (latestPunch.type === "exit") return null;
+  if (latestPunch.type === "lunch_out") return "Entrada 2";
+  if (latestPunch.type === "lunch_back") return "Saída 2";
+  if (latestPunch.type === "entry") {
+    const entryCount = orderedPunches.filter((punch) => punch.type === "entry").length;
+    return entryCount >= 2 ? "Saída 2" : "Saída 1";
+  }
+
+  return "Entrada 1";
+}
+
 function inferNextPunch(employeeId: string) {
   const today = new Date().toDateString();
   const punches = getLocalRecords()
@@ -661,22 +682,26 @@ function inferNextPunch(employeeId: string) {
         new Date(timestamp).toDateString() === today
       );
     })
-    .sort((a, b) => Date.parse(b.savedAt) - Date.parse(a.savedAt));
+    .map((record) => ({
+      occurredAt: new Date(record.fields.Horário || record.savedAt),
+      type: mapPunchType(record.fields.Tipo || ""),
+    }));
 
-  if (!punches.length) return "Entrada 1";
+  return inferNextPunchFromHistory(punches);
+}
 
-  const nextByLastPunch: Record<string, string | null> = {
-    Entrada: "Saída 1",
-    "Entrada 1": "Saída 1",
-    "Saída almoço": "Entrada 2",
-    "Saída 1": "Entrada 2",
-    "Volta almoço": "Saída 2",
-    "Entrada 2": "Saída 2",
-    "Fim do dia": null,
-    "Saída 2": null,
-  };
+async function resolveNextPunch(employeeId: string) {
+  const localNextPunch = inferNextPunch(employeeId);
 
-  return nextByLastPunch[punches[0].fields.Tipo] ?? "Entrada 1";
+  try {
+    const serverPunches = await listEmployeePunches("main", employeeId);
+    const today = new Date();
+    const todayPunches = serverPunches.filter((punch) => sameDay(punchDate(punch), today));
+    return todayPunches.length ? inferNextPunchFromHistory(todayPunches) : localNextPunch;
+  } catch (error) {
+    console.warn("Não foi possível consultar a sequência real das batidas; usando o histórico local.", error);
+    return localNextPunch;
+  }
 }
 
 function minutesFromTime(value: string) {
@@ -736,11 +761,22 @@ function getPunchTiming(employee: RecognizedFace, punchType: string) {
   const now = new Date();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const differenceMinutes = currentMinutes - minutesFromTime(expectedTime);
+  const isExitPunch = ["Saída almoço", "Saída 1", "Fim do dia", "Saída 2"].includes(punchType);
+  const timingLabel = Math.abs(differenceMinutes) <= schedule.toleranceMinutes
+    ? "No horário"
+    : differenceMinutes < 0
+      ? isExitPunch
+        ? punchType === "Saída 2" || punchType === "Fim do dia" ? "Saída antecipada" : "Intervalo antecipado"
+        : "Entrada antecipada"
+      : isExitPunch
+        ? punchType === "Saída 2" || punchType === "Fim do dia" ? "Saída após o horário" : "Intervalo iniciado após o horário"
+        : "Entrada atrasada";
 
   return {
     currentTime: now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     differenceMinutes,
     expectedTime,
+    timingLabel,
     outsideTolerance: Math.abs(differenceMinutes) > schedule.toleranceMinutes,
   };
 }
@@ -1292,6 +1328,7 @@ export default function Home() {
       source: employee
         ? external ? "external_face_id" as const : "face_id" as const
         : external ? "external_pin_photo" as const : "pin_photo" as const,
+      scheduledPunch: kind as "Entrada 1" | "Saída 1" | "Entrada 2" | "Saída 2",
       type: mapPunchType(kind),
     };
 
@@ -1328,6 +1365,7 @@ export default function Home() {
         ? {
             "Confirmação de exceção": "Sim",
             "Diferença": formatDurationClock(exception.differenceMinutes),
+            "Classificação": exception.timingLabel,
             "Horário previsto": exception.expectedTime,
           }
         : {}),
@@ -4399,6 +4437,7 @@ function KioskScreen({
   const [recognizedEmployee, setRecognizedEmployee] = useState<RecognizedFace | null>(null);
   const [selectedPunch, setSelectedPunch] = useState("Entrada 1");
   const [journeyFinished, setJourneyFinished] = useState(false);
+  const [sequenceLoading, setSequenceLoading] = useState(false);
   const [timingWarning, setTimingWarning] = useState<PunchException | null>(null);
   const [recognizedPhoto, setRecognizedPhoto] = useState<Blob | undefined>();
   const [cameraState, setCameraState] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -4500,15 +4539,17 @@ function KioskScreen({
     window.speechSynthesis.speak(voiceMessage);
   }
 
-  function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
-    const nextPunch = inferNextPunch(employee.employeeId);
+  async function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
+    setSequenceLoading(true);
+    const nextPunch = await resolveNextPunch(employee.employeeId);
+    setSequenceLoading(false);
     setTimingWarning(null);
     setBlockingMessage("");
     setRecognizedPhoto(photoBlob);
     setRecognizedEmployee(employee);
     setJourneyFinished(nextPunch === null);
     if (employee.punchMode !== "manual" && nextPunch) setSelectedPunch(nextPunch);
-    onAction(`${employee.name} reconhecido experimentalmente neste aparelho`);
+    onAction(`${employee.name} reconhecido. Sequência atualizada pela última batida registrada.`);
     if (nextPunch === null) {
       speak(`${employee.name}, jornada encerrada.`);
     } else if (employee.punchMode === "manual") {
@@ -4563,10 +4604,11 @@ function KioskScreen({
         currentTime: timing.currentTime,
         differenceMinutes: timing.differenceMinutes,
         expectedTime: timing.expectedTime,
+        timingLabel: timing.timingLabel,
       };
       setTimingWarning(warning);
       const direction = timing.differenceMinutes < 0 ? "antes" : "depois";
-      speak(`${selectedPunch} fora do horário. ${formatDurationSpeech(timing.differenceMinutes)} ${direction}. Confirme novamente.`);
+      speak(`${timing.timingLabel}. ${formatDurationSpeech(timing.differenceMinutes)} ${direction} do horário. Confirme novamente.`);
       return;
     }
 
@@ -4661,9 +4703,11 @@ function KioskScreen({
               profileSources={faceProfileSources}
             />
             <p className="mt-3 text-center text-sm text-white/55">
-              {recognizedEmployee
-                ? `${recognizedEmployee.name} reconhecido - pronto para confirmar a batida`
-                : "Teste experimental: cadastre e reconheça o rosto neste aparelho"}
+                {sequenceLoading
+                  ? "Conferindo a última batida registrada..."
+                  : recognizedEmployee
+                    ? `${recognizedEmployee.name} reconhecido - pronto para confirmar a batida`
+                    : "Teste experimental: cadastre e reconheça o rosto neste aparelho"}
             </p>
           </div>
         </div>
@@ -4717,13 +4761,13 @@ function KioskScreen({
               {timingWarning && (
                 <div aria-live="assertive" className="rounded-xl border-4 border-[#f5b942] bg-[#fff4d6] p-5 text-center text-[#6b4500]">
                   <span aria-hidden="true" className="block text-5xl">⚠️</span>
-                  <p className="mt-2 text-xl font-black">HORÁRIO DIFERENTE</p>
+                    <p className="mt-2 text-xl font-black">{timingWarning.timingLabel.toUpperCase()}</p>
                   <p className="mt-3 text-base font-bold">
                     Previsto: {timingWarning.expectedTime} • Agora: {timingWarning.currentTime}
                   </p>
                   <p className="mt-2 text-sm">
                     {formatDurationShort(Math.abs(timingWarning.differenceMinutes))}{" "}
-                    {timingWarning.differenceMinutes < 0 ? "antes" : "depois"} do horário.
+                    {timingWarning.differenceMinutes < 0 ? "antes" : "depois"} do horário previsto.
                   </p>
                   <p className="mt-3 text-sm font-bold">Toque novamente para registrar mesmo assim.</p>
                 </div>
@@ -4737,7 +4781,7 @@ function KioskScreen({
               )}
               <button
                 className="min-h-16 rounded-xl bg-[#38c793] px-5 text-lg font-black text-[#082c22] shadow-lg transition hover:-translate-y-0.5 hover:bg-[#45d8a2] disabled:cursor-not-allowed disabled:bg-[#52616f] disabled:text-white/50 disabled:hover:translate-y-0"
-                disabled={!recognizedEmployee || journeyFinished || Boolean(confirmation) || Boolean(blockingMessage)}
+                disabled={!recognizedEmployee || sequenceLoading || journeyFinished || Boolean(confirmation) || Boolean(blockingMessage)}
                 onClick={() => void confirmPunch()}
                 type="button"
               >

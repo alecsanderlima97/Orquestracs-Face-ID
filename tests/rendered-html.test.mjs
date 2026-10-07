@@ -52,11 +52,19 @@ test("mantem batidas originais no fluxo protegido do servidor", async () => {
   assert.match(rules, /allow create, update, delete: if false/);
   assert.match(rules, /match \/arpRecords\/\{recordId\}/);
   assert.match(repService, /listOwnRepReceipts/);
+  assert.match(repService, /scheduledPunch/);
   assert.match(functions, /export const listOwnRepReceipts/);
+  assert.match(functions, /classifyPunchStatus/);
+  assert.match(functions, /scheduledPunch/);
   assert.match(page, /Consultar comprovantes das últimas 48 horas/);
   assert.match(page, /Momento e clima/);
   assert.match(page, /border-2 border-\[#d0443e\]/);
   assert.match(page, /getDailyPendingPunch/);
+  assert.match(page, /listEmployeePunches\("main", employeeId\)/);
+  assert.match(page, /inferNextPunchFromHistory/);
+  assert.match(page, /Entrada atrasada/);
+  assert.match(page, /Entrada antecipada/);
+  assert.match(page, /Saída antecipada/);
 });
 
 test("mantem navegacao responsiva para celular e tablet", async () => {
