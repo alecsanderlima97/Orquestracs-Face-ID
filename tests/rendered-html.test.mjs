@@ -79,3 +79,22 @@ test("mantem navegacao responsiva para celular e tablet", async () => {
   assert.match(layout, /width:\s*"device-width"/);
   assert.match(css, /prefers-reduced-motion/);
 });
+
+test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", async () => {
+  const [page, camera, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/FaceCamera.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /kioskMode/);
+  assert.match(page, /profileSources=\{faceProfileSources\}/);
+  assert.match(page, /kiosk-clock-header/);
+  assert.match(page, /onExit=\{\(\) => setActive\("Painel"\)\}/);
+  assert.match(page, /!kioskMode/);
+  assert.match(camera, /profileSources\?: FaceProfileSource\[\]/);
+  assert.match(camera, /loadRemoteProfiles/);
+  assert.match(camera, /fetchImage\(source\.photoUrl\)/);
+  assert.match(css, /\.kiosk-app-shell/);
+  assert.match(css, /\.kiosk-clock-card/);
+});

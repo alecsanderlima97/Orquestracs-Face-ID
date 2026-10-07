@@ -22,6 +22,10 @@ export type RecognizedFace = {
   };
 };
 
+export type FaceProfileSource = RecognizedFace & {
+  photoUrl: string;
+};
+
 type StoredFaceProfile = RecognizedFace & {
   descriptors: number[][];
   updatedAt: string;
@@ -34,6 +38,7 @@ type FaceCameraProps = {
   onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void;
   onRecognized?: (employee: RecognizedFace, photoBlob?: Blob) => void;
   onStatus?: (message: string) => void;
+  profileSources?: FaceProfileSource[];
 };
 
 function getProfiles() {
@@ -51,6 +56,7 @@ export function FaceCamera({
   onProfileUpdated,
   onRecognized,
   onStatus,
+  profileSources = [],
 }: FaceCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -58,6 +64,11 @@ export function FaceCamera({
   const [cameraState, setCameraState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState("Ative a câmera para começar.");
+  const remoteProfilesRef = useRef<StoredFaceProfile[] | null>(null);
+
+  useEffect(() => {
+    remoteProfilesRef.current = null;
+  }, [profileSources]);
 
   useEffect(() => {
     onCameraState?.(cameraState);
@@ -104,7 +115,7 @@ export function FaceCamera({
     updateMessage("Carregando câmera e reconhecimento...");
 
     try {
-      const [, stream] = await Promise.all([
+      const [faceApi, stream] = await Promise.all([
         loadFaceApi(),
         navigator.mediaDevices.getUserMedia({
           audio: false,
@@ -125,7 +136,17 @@ export function FaceCamera({
       }
 
       setCameraState("ready");
-      updateMessage("Câmera ativa. Mantenha apenas um rosto centralizado.");
+      if (profileSources.length) {
+        updateMessage("Câmera ativa. Sincronizando rostos cadastrados...");
+        const syncedProfiles = await loadRemoteProfiles(faceApi);
+        updateMessage(
+          syncedProfiles.length
+            ? `${syncedProfiles.length} rosto(s) sincronizado(s). Mantenha apenas um rosto centralizado.`
+            : "Nenhum rosto facial válido foi encontrado no cadastro da empresa.",
+        );
+      } else {
+        updateMessage("Câmera ativa. Cadastre os rostos dos colaboradores antes de reconhecer.");
+      }
     } catch (error) {
       console.error(error);
       setCameraState("error");
@@ -169,6 +190,42 @@ export function FaceCamera({
     return new Promise<Blob | undefined>((resolve) => {
       canvas.toBlob((blob) => resolve(blob || undefined), "image/webp", 0.82);
     });
+  }
+
+  async function loadRemoteProfiles(faceApi: FaceApiModule) {
+    if (remoteProfilesRef.current) return remoteProfilesRef.current;
+
+    if (!profileSources.length) {
+      remoteProfilesRef.current = [];
+      return [];
+    }
+
+    const syncedProfiles: StoredFaceProfile[] = [];
+    for (const source of profileSources) {
+      try {
+        const image = await faceApi.fetchImage(source.photoUrl);
+        const detection = await faceApi
+          .detectSingleFace(
+            image,
+            new faceApi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.55 }),
+          )
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (detection) {
+          syncedProfiles.push({
+            ...source,
+            descriptors: [Array.from(detection.descriptor)],
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (error) {
+        console.warn(`Não foi possível sincronizar o rosto de ${source.name}.`, error);
+      }
+    }
+
+    remoteProfilesRef.current = syncedProfiles;
+    return syncedProfiles;
   }
 
   async function registerFace() {
@@ -221,9 +278,12 @@ export function FaceCamera({
     updateMessage("Comparando o rosto...");
 
     try {
-      const profiles = getProfiles();
+      const faceApi = faceApiRef.current;
+      const profiles = faceApi
+        ? [...getProfiles(), ...(await loadRemoteProfiles(faceApi))]
+        : getProfiles();
       if (!profiles.length) {
-        updateMessage("Nenhum colaborador possui Face ID cadastrado neste aparelho.");
+        updateMessage("Nenhum rosto cadastrado foi sincronizado para este aparelho. Cadastre o Face ID dos colaboradores.");
         return;
       }
 
@@ -233,7 +293,6 @@ export function FaceCamera({
         return;
       }
 
-      const faceApi = faceApiRef.current;
       if (!faceApi) return;
 
       let bestMatch: { distance: number; profile: StoredFaceProfile } | null = null;

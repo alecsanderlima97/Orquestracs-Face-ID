@@ -13,7 +13,7 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { FaceCamera, type RecognizedFace } from "@/app/components/FaceCamera";
+import { FaceCamera, type FaceProfileSource, type RecognizedFace } from "@/app/components/FaceCamera";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
 import type {
@@ -1488,10 +1488,15 @@ export default function Home() {
     minute: "2-digit",
     second: "2-digit",
   });
+  const kioskMode = active === "Sala de ponto";
+  const companyAddress = (companyProfile?.address || {}) as Record<string, string>;
+  const kioskLocation = weatherSnapshot?.source === "current"
+    ? "Localização atual"
+    : [companyAddress.city, companyAddress.state].filter(Boolean).join(" - ") || "Local da empresa";
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[#f4f6f8] text-[#17202a]">
-      <div className="sticky top-0 z-30 border-b border-[#d9e0e7] bg-white/95 px-3 py-2 shadow-sm backdrop-blur lg:hidden">
+    <main className={`min-h-screen overflow-x-hidden text-[#17202a] ${kioskMode ? "kiosk-app-shell" : "bg-[#f4f6f8]"}`}>
+      <div className={`sticky top-0 z-30 border-b border-[#d9e0e7] bg-white/95 px-3 py-2 shadow-sm backdrop-blur lg:hidden ${kioskMode ? "hidden" : ""}`}>
         <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-3">
           <button
             aria-expanded={mobileMenuOpen}
@@ -1524,7 +1529,7 @@ export default function Home() {
         </div>
       </div>
 
-      {mobileMenuOpen && (
+      {mobileMenuOpen && !kioskMode && (
         <div className="mobile-navigation-shell lg:hidden">
           <button
             aria-label="Fechar menu"
@@ -1579,8 +1584,8 @@ export default function Home() {
         </div>
       )}
 
-      <div className="mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:grid-cols-[292px_minmax(0,1fr)] lg:gap-6 lg:px-6">
-        <aside className="hidden rounded-lg border border-[#d9e0e7] bg-[#101923] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:block lg:h-[calc(100vh-2rem)]">
+      <div className={kioskMode ? "kiosk-content-shell" : "mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:grid-cols-[292px_minmax(0,1fr)] lg:gap-6 lg:px-6"}>
+        <aside className={kioskMode ? "hidden" : "hidden rounded-lg border border-[#d9e0e7] bg-[#101923] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:block lg:h-[calc(100vh-2rem)]"}>
           <div className="flex h-full flex-col">
             <div className="border-b border-white/10 pb-5">
               <div className="flex items-center gap-3">
@@ -1642,8 +1647,8 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className="grid min-w-0 gap-4 sm:gap-5">
-          <header className="rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5">
+        <section className={kioskMode ? "kiosk-content-section" : "grid min-w-0 gap-4 sm:gap-5"}>
+          <header className={kioskMode ? "hidden" : "rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5"}>
             <div className="relative">
               <div className="min-w-0 lg:max-w-[280px]">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
@@ -1694,7 +1699,7 @@ export default function Home() {
             </div>
           </header>
 
-          {lastPunchReceipt && (
+          {lastPunchReceipt && !kioskMode && (
             <PunchReceiptCard
               onClose={() => setLastPunchReceipt(null)}
               receipt={lastPunchReceipt}
@@ -1719,10 +1724,17 @@ export default function Home() {
           {active === "Escalas" && <ShiftsScreen canEdit={canManage} onAction={demoAction} />}
           {active === "Sala de ponto" && (
             <KioskScreen
+              dateLabel={headerDate}
+              locationLabel={kioskLocation}
               onAction={demoAction}
+              onExit={() => setActive("Painel")}
               onRegister={registerPunch}
               pin={pin}
               setPin={setPin}
+              timeLabel={headerTime}
+              weatherDetail={headerWeather.detail}
+              weatherIcon={headerWeather.icon}
+              weatherLabel={headerWeather.label}
             />
           )}
           {active === "Ponto externo" && (
@@ -1746,7 +1758,7 @@ export default function Home() {
         </section>
       </div>
 
-      <button
+      {!kioskMode && <button
         aria-label="Abrir Assistente Face ID"
         className="assistant-launcher"
         onClick={() => setAssistantOpen(true)}
@@ -1754,9 +1766,9 @@ export default function Home() {
       >
         <span className="assistant-launcher-short">?</span>
         <span className="assistant-launcher-label">Assistente Face ID</span>
-      </button>
+      </button>}
 
-      {assistantOpen && (
+      {assistantOpen && !kioskMode && (
         <AssistantPanel
           active={active}
           config={saasConfig}
@@ -4237,15 +4249,29 @@ function ExternalPunchScreen({
 }
 
 function KioskScreen({
+  dateLabel,
+  locationLabel,
   onAction,
+  onExit,
   onRegister,
   pin,
   setPin,
+  timeLabel,
+  weatherDetail,
+  weatherIcon,
+  weatherLabel,
 }: {
+  dateLabel: string;
+  locationLabel: string;
   onAction: (action: string) => void;
+  onExit: () => void;
   onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob, context?: PunchContext) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
+  timeLabel: string;
+  weatherDetail: string;
+  weatherIcon: string;
+  weatherLabel: string;
 }) {
   const [recognizedEmployee, setRecognizedEmployee] = useState<RecognizedFace | null>(null);
   const [selectedPunch, setSelectedPunch] = useState("Entrada 1");
@@ -4261,8 +4287,51 @@ function KioskScreen({
     time: string;
     type: string;
   } | null>(null);
+  const [faceProfileSources, setFaceProfileSources] = useState<FaceProfileSource[]>([]);
   const confirmPanelRef = useRef<HTMLDivElement>(null);
   const resetTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadFaceProfileSources() {
+      try {
+        const saved = await listEmployees("main");
+        const registered = saved
+          .map((employee) => toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id))
+          .filter((employee) => employee.faceIdStatus === "registered" && employee.profilePhotoPath);
+
+        const sources = (await Promise.all(
+          registered.map(async (employee) => {
+            try {
+              const photoUrl = await getStorageFileUrl(employee.profilePhotoPath || "");
+              return {
+                employeeId: employee.employeeId,
+                name: employee.name,
+                photoUrl,
+                punchMode: employee.punchMode || "automatic",
+                schedule: employee.schedule,
+              };
+            } catch {
+              return null;
+            }
+          }),
+        ))
+          .filter(Boolean)
+          .map((source) => source as FaceProfileSource);
+
+        if (mounted) setFaceProfileSources(sources);
+      } catch (error) {
+        console.error("Não foi possível carregar os rostos cadastrados para a sala de ponto.", error);
+        if (mounted) setFaceProfileSources([]);
+      }
+    }
+
+    void loadFaceProfileSources();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -4395,7 +4464,29 @@ function KioskScreen({
   const manualSelection = recognizedEmployee?.punchMode === "manual";
 
   return (
-    <section className="kiosk-screen rounded-lg border border-[#d9e0e7] bg-[#101923] p-4 text-white shadow-sm md:p-5">
+    <section className="kiosk-screen min-h-[100dvh] rounded-lg border border-white/10 bg-[#101923] p-4 text-white shadow-sm md:p-6">
+      <header className="kiosk-clock-header">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7ee2c4]">Orquestracs Face ID</p>
+          <h1 className="mt-1 text-xl font-semibold text-white md:text-2xl">Sala de ponto</h1>
+          <p className="mt-1 text-sm text-white/60">Reconhecimento facial e confirmação da jornada</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="kiosk-clock-card">
+            <span aria-hidden="true" className="text-3xl leading-none">{weatherIcon}</span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#2d6c5d]">Momento e clima</p>
+              <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                <span className="text-sm font-bold text-[#143f37]">{weatherLabel}</span>
+                <span className="font-mono text-2xl font-bold tracking-normal text-[#101923]">{timeLabel}</span>
+              </div>
+              <p className="mt-0.5 text-xs capitalize text-[#54716a]">{dateLabel} · {weatherDetail}</p>
+              <p className="mt-0.5 text-xs font-semibold text-[#2d6c5d]">{locationLabel}</p>
+            </div>
+          </div>
+          <button className="kiosk-exit-button" onClick={onExit} type="button">Sair</button>
+        </div>
+      </header>
       <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 md:p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -4422,7 +4513,12 @@ function KioskScreen({
           </div>
 
           <div className="mt-4">
-            <FaceCamera onCameraState={setCameraState} onRecognized={identifyFace} onStatus={onAction} />
+            <FaceCamera
+              onCameraState={setCameraState}
+              onRecognized={identifyFace}
+              onStatus={onAction}
+              profileSources={faceProfileSources}
+            />
             <p className="mt-3 text-center text-sm text-white/55">
               {recognizedEmployee
                 ? `${recognizedEmployee.name} reconhecido - pronto para confirmar a batida`
@@ -4606,9 +4702,6 @@ function KioskScreen({
             )}
           </div>
         </aside>
-      </div>
-      <div className="mt-4">
-        <OwnReceiptLookupCard />
       </div>
     </section>
   );
