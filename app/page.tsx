@@ -5770,7 +5770,7 @@ function EmployeesTable({
           )}
         </div>
       )}
-      <div className="table-scroll">
+      <div className="table-scroll hidden lg:block">
         <table className="w-full min-w-[1040px] border-collapse text-left text-sm">
           <thead className="bg-[#f8fafb] text-xs uppercase text-[#667085]">
             <tr>
@@ -5840,6 +5840,61 @@ function EmployeesTable({
           </tbody>
         </table>
       </div>
+      <div className="grid gap-3 p-4 lg:hidden">
+        {employeesList.length === 0 ? (
+          <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4 text-center text-sm text-[#667085]">
+            Nenhum colaborador cadastrado ainda.
+          </div>
+        ) : (
+          employeesList.map((employee) => (
+            <article className="min-w-0 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={`mobile-employee-${employee.employeeId || employee.name}`}>
+              <div className="flex min-w-0 items-start gap-3">
+                {employee.employeeId && photoUrls[employee.employeeId] ? (
+                  <img
+                    alt={`Foto de ${employee.name}`}
+                    className="h-11 w-11 shrink-0 rounded-md border border-[#d9e0e7] object-cover"
+                    src={photoUrls[employee.employeeId]}
+                  />
+                ) : (
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-md border border-[#d9e0e7] bg-white text-sm font-bold text-[#18594c]">
+                    {employee.name.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="break-words text-sm font-semibold text-[#101923]">{employee.name}</p>
+                  <p className="mt-1 break-words text-xs text-[#667085]">{employee.role} · {employee.shift}</p>
+                  <span className="mt-2 inline-flex max-w-full rounded-full border border-[#d8e1ff] bg-[#f2f5ff] px-2.5 py-1 text-[11px] font-semibold leading-4 text-[#3446a3]">
+                    {employee.faceIdStatus === "registered"
+                      ? "Face ID cadastrado"
+                      : employee.pinConfigured
+                        ? "PIN pronto - Face ID pendente"
+                        : employee.status}
+                  </span>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                {[
+                  ["CPF", employee.cpf],
+                  ["Admissão", employee.admissionDate || "-"],
+                  ["CBO", employee.cbo || "-"],
+                  ["Banco", employee.bank],
+                ].map(([label, value]) => (
+                  <div className="min-w-0 rounded-md border border-[#e3e8ee] bg-white px-2.5 py-2" key={label}>
+                    <p className="text-[10px] font-semibold uppercase text-[#667085]">{label}</p>
+                    <p className="mt-1 break-words font-semibold text-[#26323f]">{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {canEdit && (
+                  <button className="mini-button flex-1" onClick={() => (onEdit ? onEdit(employee) : onAction(`Editar ${employee.name}`))} type="button">Editar</button>
+                )}
+                <button className="mini-button flex-1" onClick={() => (onView ? onView(employee) : onAction(`Ver ${employee.name}`))} type="button">Ver</button>
+              </div>
+            </article>
+          ))
+        )}
+      </div>
     </>
   );
 
@@ -5855,8 +5910,10 @@ function EmployeesTable({
 }
 
 function ReportPreview() {
+  const journeyLabels = ["Data", "Dia", "Entrada", "Saída intervalo", "Retorno", "Saída final", "Trabalhadas", "Banco/Falta", "Ocorrência"];
+
   return (
-    <section className="rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+    <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
       <div className="grid gap-3 border-b border-[#e3e8ee] p-5 lg:grid-cols-[1fr_auto] lg:items-end">
         <div>
           <p className="text-sm font-medium text-[#667085]">Relatorio de jornada detalhada</p>
@@ -5896,7 +5953,7 @@ function ReportPreview() {
         ))}
       </div>
 
-      <div className="table-scroll px-5 pb-5">
+      <div className="table-scroll hidden px-5 pb-5 lg:block">
         <table className="w-full min-w-[840px] border-collapse text-left text-sm">
           <thead className="bg-[#101923] text-xs uppercase text-white">
             <tr>
@@ -5925,6 +5982,33 @@ function ReportPreview() {
             )}
           </tbody>
         </table>
+      </div>
+      <div className="grid gap-3 px-5 pb-5 lg:hidden">
+        {journeyRows.length === 0 ? (
+          <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4 text-center text-sm text-[#667085]">
+            Nenhuma jornada registrada para o período.
+          </div>
+        ) : (
+          journeyRows.map((row) => (
+            <article className="min-w-0 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={`mobile-report-${row[0]}-${row[1]}`}>
+              <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[#e3e8ee] pb-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-[#667085]">{journeyLabels[0]}</p>
+                  <p className="mt-1 text-sm font-semibold text-[#101923]">{row[0]}</p>
+                </div>
+                <span className="rounded-md border border-[#d9e0e7] bg-white px-2 py-1 text-xs font-semibold text-[#667085]">{row[1]}</span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                {row.slice(2).map((cell, index) => (
+                  <div className="min-w-0 rounded-md border border-[#e3e8ee] bg-white px-2.5 py-2" key={`${journeyLabels[index + 2]}-${cell}`}>
+                    <p className="text-[10px] font-semibold uppercase text-[#667085]">{journeyLabels[index + 2]}</p>
+                    <p className={`mt-1 break-words ${index >= 4 ? "font-semibold text-[#26323f]" : "text-[#667085]"}`}>{cell}</p>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ))
+        )}
       </div>
     </section>
   );
