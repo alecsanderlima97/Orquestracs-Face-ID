@@ -1928,9 +1928,6 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
     return getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays) === "pending";
   }).length;
   const okCount = employeesList.length - pendingCount;
-  const daypart = getDaypart(now);
-  const currentPeriod = daypart.label;
-  const overallStatus = pendingCount ? `${pendingCount} pendência(s) para conferir` : "Operação sem pendências";
 
   function renderPunchCell(row: DailyEmployeeRow, type: PunchType, expected: string) {
     const confirmed = row.punches.some(
@@ -1960,17 +1957,6 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">Acompanhamento diário</p>
             <h2 className="mt-1 text-xl font-semibold text-[#101923]">Visão geral da operação</h2>
             <p className="mt-1 text-sm leading-6 text-[#667085]">Acompanhe as marcações do dia e identifique pendências antes do fechamento.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 lg:max-w-[430px] lg:justify-end">
-            <span aria-hidden="true" className="rounded-md border border-[#b9ddd3] bg-[#f1faf7] px-2.5 py-2 text-2xl leading-none">{daypart.icon}</span>
-            <div className="rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-3 py-2">
-              <span className="block text-xs font-semibold uppercase text-[#667085]">Período atual</span>
-              <strong className="text-sm text-[#101923]">{currentPeriod}</strong>
-            </div>
-            <div className={`rounded-md border px-3 py-2 ${pendingCount ? "border-[#f2b8b5] bg-[#fff0ef]" : "border-[#b9ddd3] bg-[#f1faf7]"}`}>
-              <span className="block text-xs font-semibold uppercase text-[#667085]">Status</span>
-              <strong className={pendingCount ? "text-sm text-[#a33a3a]" : "text-sm text-[#18594c]"}>{overallStatus}</strong>
-            </div>
           </div>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
