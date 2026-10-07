@@ -2920,6 +2920,10 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
   });
   const [showFaceCamera, setShowFaceCamera] = useState(false);
   const [replaceFaceProfile, setReplaceFaceProfile] = useState(false);
+  const [faceCompletion, setFaceCompletion] = useState<{
+    employee: LocalEmployee;
+    nextPending: LocalEmployee | null;
+  } | null>(null);
   const [employeeJourney, setEmployeeJourney] = useState({
     start: "07:00",
     lunchOut: "11:30",
@@ -3041,6 +3045,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setSelectedEmployee(null);
     setShowFaceCamera(false);
     setReplaceFaceProfile(false);
+    setFaceCompletion(null);
     setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
     onAction("Novo colaborador: formulario limpo para cadastro.");
     document.getElementById("employee-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -3053,6 +3058,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setEditingEmployeeId(null);
     setShowFaceCamera(false);
     setReplaceFaceProfile(false);
+    setFaceCompletion(null);
     setEmployeeSection("form", false);
     onAction("Edicao cancelada. Nenhuma alteracao foi salva.");
   }
@@ -3071,6 +3077,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setSelectedEmployee(target);
     setEditingEmployeeId(null);
     setReplaceFaceProfile(options?.replace === true);
+    setFaceCompletion(null);
     setShowFaceCamera(true);
     setOpenEmployeeSections({ detail: false, face: true, form: false, list: true });
     onAction(options?.replace ? `Refazendo o Face ID de ${target.name}. As capturas antigas serão mantidas no histórico.` : `Cadastro de Face ID iniciado para ${target.name}.`);
@@ -3086,6 +3093,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setSelectedEmployeePunches([]);
     setShowFaceCamera(false);
     setReplaceFaceProfile(false);
+    setFaceCompletion(null);
     setOpenEmployeeSections({ detail: true, face: false, form: false, list: true });
     onAction(`Visualizando cadastro de ${selected.name}.`);
     void loadEmployeePhoto(selected);
@@ -3105,6 +3113,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setEditingEmployeeId(employeeDocumentId(selected));
     setShowFaceCamera(false);
     setReplaceFaceProfile(false);
+    setFaceCompletion(null);
     setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
     setEmployeeForm({
       admissionDate: selected.admissionDate || "",
@@ -3440,6 +3449,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           : current,
       );
       setReplaceFaceProfile(false);
+      setFaceCompletion(null);
       onAction(`Face ID de ${employee.name} limpo. O histórico antigo foi preservado.`);
     } catch (error) {
       console.error(error);
@@ -3466,6 +3476,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
       setSelectedEmployeePunches([]);
       setShowFaceCamera(false);
       setReplaceFaceProfile(false);
+      setFaceCompletion(null);
       setOpenEmployeeSections({ detail: false, face: false, form: false, list: true });
       onAction(`${employee.name} foi desativado. Histórico preservado.`);
     } catch (error) {
@@ -3495,7 +3506,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
 
     window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
     setLocalEmployees(updated);
-    setSelectedEmployee(completed && nextPending ? nextPending : current);
+    setSelectedEmployee(current);
     if (current) {
       void upsertEmployee("main", employeeDocumentId(current), {
         faceCaptureCount: captureCount,
@@ -3524,10 +3535,12 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
 
     if (completed) {
       setReplaceFaceProfile(false);
+      setShowFaceCamera(false);
+      if (current) {
+        setFaceCompletion({ employee: current, nextPending: nextPending || null });
+      }
       onAction(
-        nextPending
-          ? `${selectedEmployee.name}: Face ID concluido. Proximo: ${nextPending.name}.`
-          : `${selectedEmployee.name}: Face ID concluido. Todos os pendentes foram finalizados.`,
+        `${selectedEmployee.name}: Face ID concluído. Confira o nome antes de cadastrar outro colaborador.`,
       );
       return;
     }
@@ -3783,7 +3796,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             </div>
             <p className="mt-2 text-xs font-semibold text-[#667085]">{faceProgress}% concluido</p>
             <ActionRow>
-              <button className="primary-button" onClick={() => startFaceRegistration()} type="button">Iniciar proximo pendente</button>
+              <button className="primary-button" disabled={Boolean(faceCompletion)} onClick={() => startFaceRegistration()} type="button">Iniciar proximo pendente</button>
               {selectedEmployee && (
                 <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee, { replace: selectedEmployee.faceIdStatus === "registered" })} type="button">
                   {selectedEmployee.faceIdStatus === "registered" ? "Refazer Face ID" : "Capturar selecionado"}
@@ -3812,6 +3825,32 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             </div>
           </div>
         </div>
+        {faceCompletion && (
+          <div className="mt-5 rounded-lg border border-[#b7d7ce] bg-[#f1faf7] p-4 text-[#24594d]">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#2d6c5d]">Captura concluída</p>
+            <p className="mt-1 text-lg font-semibold text-[#143f37]">Face ID associado a {faceCompletion.employee.name}</p>
+            <p className="mt-2 text-sm leading-6">
+              A câmera foi encerrada para evitar associação acidental. Confira o nome e escolha manualmente o próximo colaborador.
+            </p>
+            <ActionRow>
+              {faceCompletion.nextPending && (
+                <button
+                  className="primary-button"
+                  onClick={() => {
+                    const nextEmployee = faceCompletion.nextPending;
+                    if (!nextEmployee) return;
+                    setFaceCompletion(null);
+                    startFaceRegistration(nextEmployee);
+                  }}
+                  type="button"
+                >
+                  Cadastrar próximo colaborador
+                </button>
+              )}
+              <button className="secondary-button" onClick={() => setFaceCompletion(null)} type="button">Fechar aviso</button>
+            </ActionRow>
+          </div>
+        )}
         {showFaceCamera && selectedEmployee && (
           <div className="mt-5 grid gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white lg:grid-cols-[minmax(0,1fr)_280px]">
             <FaceCamera
@@ -3830,7 +3869,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             <div>
               <p className="text-sm font-semibold text-[#b7d7ce]">Face ID de {selectedEmployee!.name}</p>
               <p className="mt-2 text-xs leading-5 text-white/65">
-                Faca pelo menos {REQUIRED_FACE_CAPTURES} capturas com boa luz. O sistema avanca para o proximo pendente quando concluir.
+                Faça {REQUIRED_FACE_CAPTURES} capturas com boa luz. Ao concluir, a câmera será encerrada e você confirmará o próximo nome manualmente.
               </p>
               <p className="mt-3 text-xs font-semibold text-white">
                 Status: {selectedEmployee!.faceIdStatus === "registered" ? "Face ID cadastrado" : "Aguardando captura"}

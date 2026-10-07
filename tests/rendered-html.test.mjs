@@ -105,6 +105,10 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(page, /Desativar colaborador/);
   assert.match(page, /faceIdStatus: "not_registered"/);
   assert.match(page, /active: false/);
+  assert.match(page, /A câmera foi encerrada para evitar associação acidental/);
+  assert.match(page, /Cadastrar próximo colaborador/);
+  assert.match(page, /setSelectedEmployee\(current\)/);
+  assert.match(page, /setShowFaceCamera\(false\)/);
   assert.match(page, /replaceProfile=\{replaceFaceProfile\}/);
   assert.doesNotMatch(page, /updateEmployeeProfilePhoto\(current, photoPath/);
   assert.match(camera, /replacementStartedRef/);
