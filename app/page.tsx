@@ -116,6 +116,14 @@ type ImportedEmployee = {
   role?: string;
 };
 
+type HoleriteImportDraft = {
+  fileName: string;
+  fields: ImportedEmployee;
+  missing: string[];
+  pages?: number;
+  warnings: string[];
+};
+
 const LOCAL_EMPLOYEES_KEY = "orquestracs-face-id-local-employees-v2";
 const REQUIRED_FACE_CAPTURES = 3;
 
@@ -2730,6 +2738,9 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
   const [selectedEmployeePunches, setSelectedEmployeePunches] = useState<Punch[]>([]);
   const [selectedEmployeePunchesLoading, setSelectedEmployeePunchesLoading] = useState(false);
   const [employeePhotoUrls, setEmployeePhotoUrls] = useState<Record<string, string>>({});
+  const [holeriteImportDraft, setHoleriteImportDraft] = useState<HoleriteImportDraft | null>(null);
+  const [holeriteImportLoading, setHoleriteImportLoading] = useState(false);
+  const [employeeSource, setEmployeeSource] = useState<"manual" | "holerite">("manual");
   const [openEmployeeSections, setOpenEmployeeSections] = useState<Record<EmployeeSection, boolean>>({
     detail: false,
     face: false,
@@ -2852,6 +2863,8 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
   function startNewEmployee() {
     if (!canEdit) return;
     setEmployeeForm(emptyEmployeeForm);
+    setHoleriteImportDraft(null);
+    setEmployeeSource("manual");
     setEditingEmployeeId(null);
     setSelectedEmployee(null);
     setShowFaceCamera(false);
@@ -2862,6 +2875,8 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
 
   function cancelEmployeeEdit() {
     setEmployeeForm(emptyEmployeeForm);
+    setHoleriteImportDraft(null);
+    setEmployeeSource("manual");
     setEditingEmployeeId(null);
     setShowFaceCamera(false);
     setEmployeeSection("form", false);
@@ -2909,6 +2924,8 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     if (!canEdit) return;
     const selected = toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name);
     setSelectedEmployee(selected);
+    setHoleriteImportDraft(null);
+    setEmployeeSource("manual");
     setEditingEmployeeId(employeeDocumentId(selected));
     setShowFaceCamera(false);
     setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
@@ -2984,7 +3001,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           const { pin: importedPin, ...employeeWithoutPin } = employee;
           await upsertEmployee("main", documentId, {
             ...employeeWithoutPin,
-            importSource: "holerite",
+            importSource: "json-import",
             importedAt: new Date().toISOString(),
           });
           if (importedPin) await saveEmployeePin("main", documentId, importedPin);
@@ -2999,13 +3016,102 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
         window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
         setLocalEmployees(updated);
         setSelectedEmployee(sanitizedEmployees[0]);
-        onAction(`${mappedEmployees.length} colaboradores salvos no Firebase para revisao.`);
+        onAction(`${mappedEmployees.length} colaboradores importados do arquivo JSON.`);
       } catch {
         onAction("Nao foi possivel importar os colaboradores. Verifique login e permissoes.");
       }
     };
 
     reader.readAsText(file);
+  }
+
+  function prepareHoleriteDraft(
+    fields: ImportedEmployee,
+    fileName: string,
+    missing: string[],
+    pages?: number,
+    warnings: string[] = [],
+  ) {
+    setEmployeeForm((current) => ({
+      ...current,
+      admissionDate: fields.admissionDate || "",
+      cbo: fields.cbo || "",
+      cpf: fields.cpf || "",
+      department: fields.department || "",
+      name: fields.name || "",
+      phone: fields.phone || "",
+      pin: "",
+      registration: fields.registration || "",
+      role: fields.role || "",
+    }));
+    setEmployeeSource("holerite");
+    setEditingEmployeeId(null);
+    setSelectedEmployee(null);
+    setHoleriteImportDraft({ fileName, fields, missing, pages, warnings });
+    setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
+    onAction("Dados do holerite carregados para conferência. Nenhum colaborador foi salvo ainda.");
+    window.setTimeout(
+      () => document.getElementById("employee-form-panel")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50,
+    );
+  }
+
+  async function importEmployeeFromHolerite(file?: File) {
+    if (!canEdit || !file) return;
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (!isPdf) {
+      onAction("Envie um holerite em PDF. Imagens escaneadas precisarão de OCR em uma etapa posterior.");
+      return;
+    }
+
+    setHoleriteImportLoading(true);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        onAction("Sua sessão expirou. Entre novamente para importar o holerite.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/holerite/parse", {
+        body: formData,
+        headers: { Authorization: `Bearer ${idToken}` },
+        method: "POST",
+      });
+      const result = await response.json() as {
+        error?: string;
+        fields?: ImportedEmployee;
+        fileName?: string;
+        missing?: string[];
+        pages?: number;
+        warnings?: string[];
+      };
+
+      if (!response.ok || !result.fields) {
+        onAction(result.error || "Não foi possível extrair os dados do holerite.");
+        return;
+      }
+
+      prepareHoleriteDraft(
+        result.fields,
+        result.fileName || file.name,
+        result.missing || [],
+        result.pages,
+        result.warnings || [],
+      );
+    } catch {
+      onAction("Não foi possível ler o holerite. Verifique sua conexão e tente novamente.");
+    } finally {
+      setHoleriteImportLoading(false);
+    }
+  }
+
+  function discardHoleriteDraft() {
+    setHoleriteImportDraft(null);
+    setEmployeeSource("manual");
+    setEmployeeForm(emptyEmployeeForm);
+    onAction("Importação descartada. Nenhum dado do holerite foi salvo.");
   }
 
   async function saveEmployee() {
@@ -3064,7 +3170,8 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     await upsertEmployee("main", documentId, {
       ...employeeWithoutPin,
       ...(editingEmployeeId ? {} : { createdAt: new Date().toISOString() }),
-      source: "manual",
+      source: employeeSource === "holerite" ? "holerite-import" : "manual",
+      ...(employeeSource === "holerite" ? { importFileName: holeriteImportDraft?.fileName || "holerite.pdf" } : {}),
     });
     if (employeeForm.pin) await saveEmployeePin("main", documentId, employeeForm.pin);
 
@@ -3073,6 +3180,8 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setSelectedEmployee(employee);
     setEditingEmployeeId(documentId);
     setShowFaceCamera(false);
+    setHoleriteImportDraft(null);
+    setEmployeeSource("manual");
     onAction(`${employee.name} ${editingEmployeeId ? "atualizado" : "cadastrado"} com sucesso.`);
   }
 
@@ -3317,7 +3426,20 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           )}
           <button className="secondary-button" disabled={!canEdit} onClick={() => startFaceRegistration(selectedEmployee || undefined)} type="button">Cadastrar Face ID do selecionado</button>
           <label className={`secondary-button ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
-            Importar holerite JSON
+            {holeriteImportLoading ? "Lendo holerite..." : "Importar holerite PDF"}
+            <input
+              accept="application/pdf,.pdf"
+              className="hidden"
+              disabled={!canEdit || holeriteImportLoading}
+              onChange={(event) => {
+                void importEmployeeFromHolerite(event.target.files?.[0]);
+                event.currentTarget.value = "";
+              }}
+              type="file"
+            />
+          </label>
+          <label className={`secondary-button ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
+            Importar lista JSON
             <input
               accept="application/json"
               className="hidden"
@@ -3327,6 +3449,46 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             />
           </label>
         </ActionRow>
+        {holeriteImportDraft && (
+          <div className="mt-4 rounded-md border border-[#e5cf91] bg-[#fffaf0] p-4">
+            <div className="flex flex-col gap-1 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-[#604b16]">Conferência do holerite</p>
+                <p className="mt-1 text-xs leading-5 text-[#806c35]">
+                  {holeriteImportDraft.fileName}{holeriteImportDraft.pages ? ` · ${holeriteImportDraft.pages} página(s)` : ""}. Os dados abaixo foram apenas pré-preenchidos.
+                </p>
+              </div>
+              <span className="rounded-full border border-[#e5cf91] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#806c35]">
+                Ainda não salvo
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2 text-xs text-[#5f5b4c] md:grid-cols-3">
+              <span>Nome: {holeriteImportDraft.fields.name || "não localizado"}</span>
+              <span>CPF: {holeriteImportDraft.fields.cpf || "não localizado"}</span>
+              <span>Matrícula: {holeriteImportDraft.fields.registration || "não localizada"}</span>
+              <span>Cargo: {holeriteImportDraft.fields.role || "não localizado"}</span>
+              <span>Admissão: {holeriteImportDraft.fields.admissionDate || "não localizada"}</span>
+              <span>CBO: {holeriteImportDraft.fields.cbo || "não localizado"}</span>
+            </div>
+            {holeriteImportDraft.missing.length > 0 && (
+              <p className="mt-3 text-xs leading-5 text-[#7b5c12]">
+                Não localizado no arquivo: {holeriteImportDraft.missing.join(", ")}. Complete os campos manualmente antes de salvar.
+              </p>
+            )}
+            {holeriteImportDraft.warnings.map((warning) => (
+              <p className="mt-3 text-xs leading-5 text-[#7b5c12]" key={warning}>
+                Atenção: {warning}
+              </p>
+            ))}
+            <p className="mt-3 text-xs leading-5 text-[#604b16]">
+              O holerite não define PIN, foto ou escala. Informe o PIN no formulário, confira a jornada e depois confirme o cadastro.
+            </p>
+            <ActionRow>
+              <SaveButton disabled={!canEdit} onClick={saveEmployee}>Confirmar e salvar colaborador</SaveButton>
+              <button className="secondary-button" disabled={!canEdit} onClick={discardHoleriteDraft} type="button">Descartar importação</button>
+            </ActionRow>
+          </div>
+        )}
         {false && showFaceCamera && selectedEmployee && (
           <div className="mt-5 grid gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white lg:grid-cols-[minmax(0,1fr)_280px]">
             <FaceCamera
