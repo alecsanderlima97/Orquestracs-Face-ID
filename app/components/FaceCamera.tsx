@@ -30,6 +30,7 @@ type StoredFaceProfile = RecognizedFace & {
 type FaceCameraProps = {
   compact?: boolean;
   employee?: RecognizedFace;
+  onCameraState?: (state: "idle" | "loading" | "ready" | "error") => void;
   onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void;
   onRecognized?: (employee: RecognizedFace, photoBlob?: Blob) => void;
   onStatus?: (message: string) => void;
@@ -46,6 +47,7 @@ function getProfiles() {
 export function FaceCamera({
   compact = false,
   employee,
+  onCameraState,
   onProfileUpdated,
   onRecognized,
   onStatus,
@@ -56,6 +58,10 @@ export function FaceCamera({
   const [cameraState, setCameraState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState("Ative a câmera para começar.");
+
+  useEffect(() => {
+    onCameraState?.(cameraState);
+  }, [cameraState, onCameraState]);
 
   useEffect(() => {
     return () => {
@@ -88,6 +94,12 @@ export function FaceCamera({
       return;
     }
 
+    if (!window.isSecureContext) {
+      setCameraState("error");
+      updateMessage("A câmera exige HTTPS. Abra o domínio seguro do sistema ou use localhost para testar.");
+      return;
+    }
+
     setCameraState("loading");
     updateMessage("Carregando câmera e reconhecimento...");
 
@@ -117,7 +129,15 @@ export function FaceCamera({
     } catch (error) {
       console.error(error);
       setCameraState("error");
-      updateMessage("Não foi possível abrir a câmera. Verifique a permissão e use HTTPS.");
+      const errorName = error instanceof DOMException ? error.name : "";
+      const errorMessage = {
+        NotAllowedError: "A permissão da câmera foi negada. Libere a câmera para este site e tente novamente.",
+        NotFoundError: "Nenhuma câmera foi encontrada neste dispositivo. Use um tablet ou celular com câmera.",
+        NotReadableError: "A câmera está sendo usada por outro aplicativo. Feche-o e tente novamente.",
+        OverconstrainedError: "A câmera deste dispositivo não atende ao formato solicitado. Tente outra câmera.",
+        SecurityError: "O navegador bloqueou a câmera por segurança. Use o endereço HTTPS do sistema.",
+      }[errorName as "NotAllowedError" | "NotFoundError" | "NotReadableError" | "OverconstrainedError" | "SecurityError"];
+      updateMessage(errorMessage || "Não foi possível preparar a câmera. Confira o dispositivo, a permissão e o endereço HTTPS.");
     }
   }
 

@@ -3475,6 +3475,7 @@ function KioskScreen({
   const [journeyFinished, setJourneyFinished] = useState(false);
   const [timingWarning, setTimingWarning] = useState<PunchException | null>(null);
   const [recognizedPhoto, setRecognizedPhoto] = useState<Blob | undefined>();
+  const [cameraState, setCameraState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [blockingMessage, setBlockingMessage] = useState("");
   const [kioskDetailsOpen, setKioskDetailsOpen] = useState(false);
   const [pinFallbackOpen, setPinFallbackOpen] = useState(false);
@@ -3630,13 +3631,21 @@ function KioskScreen({
                 Funcionarios chegam, ficam em frente a camera e confirmam a presenca.
               </p>
             </div>
-            <span className="w-fit rounded-full bg-[#dcebe6] px-3 py-1 text-xs font-bold text-[#143f37]">
-              Camera ativa
+            <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${
+              cameraState === "ready"
+                ? "bg-[#dcebe6] text-[#143f37]"
+                : cameraState === "loading"
+                  ? "bg-[#fff4d6] text-[#6b4500]"
+                  : cameraState === "error"
+                    ? "bg-[#ffe5e5] text-[#7a2020]"
+                    : "bg-white/10 text-white/75"
+            }`}>
+              {cameraState === "ready" ? "Câmera ativa" : cameraState === "loading" ? "Preparando câmera" : cameraState === "error" ? "Câmera indisponível" : "Câmera desativada"}
             </span>
           </div>
 
           <div className="mt-4">
-            <FaceCamera onRecognized={identifyFace} onStatus={onAction} />
+            <FaceCamera onCameraState={setCameraState} onRecognized={identifyFace} onStatus={onAction} />
             <p className="mt-3 text-center text-sm text-white/55">
               {recognizedEmployee
                 ? `${recognizedEmployee.name} reconhecido - pronto para confirmar a batida`
