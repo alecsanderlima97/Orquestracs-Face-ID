@@ -1576,19 +1576,7 @@ export default function Home() {
 
           {active === "Painel" && (
             <>
-              <Metrics />
-              <div className={`grid gap-5 ${canManage ? "xl:grid-cols-[minmax(0,1fr)_370px]" : "xl:grid-cols-1"}`}>
-                {canManage && (
-                  <PunchCard
-                    onRegister={registerPunch}
-                    pin={pin}
-                    setPin={setPin}
-                  />
-                )}
-                <ComplianceCard />
-              </div>
-              <EmployeesTable canEdit={canManage} onAction={demoAction} />
-              <ReportPreview />
+              <DailyOperationsPanel scheduledDays={getCompanyWorkPolicy(companyProfile).scheduledDays} />
             </>
           )}
 
@@ -1709,6 +1697,269 @@ function Metrics() {
         </div>
       ))}
     </div>
+  );
+}
+
+type DailyStatusKey = "break" | "done" | "off" | "pending" | "waiting" | "working";
+
+type DailyEmployeeRow = {
+  employee: LocalEmployee;
+  punches: Punch[];
+  statusKey: DailyStatusKey;
+  statusLabel: string;
+  latestPunch: Punch | null;
+};
+
+function getTimeMinutes(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0;
+  return hours * 60 + minutes;
+}
+
+function isScheduledWorkday(date: Date, scheduledDays: number) {
+  const day = date.getDay();
+  if (scheduledDays >= 7) return true;
+  if (scheduledDays === 6) return day !== 0;
+  return day >= 1 && day <= 5;
+}
+
+function isSameCalendarDay(date: Date, reference: Date) {
+  return date.getFullYear() === reference.getFullYear()
+    && date.getMonth() === reference.getMonth()
+    && date.getDate() === reference.getDate();
+}
+
+function getDailyEmployeeStatus(
+  employee: LocalEmployee,
+  punches: Punch[],
+  now: Date,
+  scheduledDays: number,
+): DailyStatusKey {
+  if (!isScheduledWorkday(now, scheduledDays)) return "off";
+
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const schedule = employee.schedule;
+  const todayPunches = punches.filter((punch) => isSameCalendarDay(punchDate(punch), now));
+  const hasPunch = (type: PunchType) => todayPunches.some((punch) => punch.type === type);
+  const start = getTimeMinutes(schedule.start);
+  const lunchOut = getTimeMinutes(schedule.breakStart);
+  const lunchBack = getTimeMinutes(schedule.breakEnd);
+  const end = getTimeMinutes(schedule.end);
+
+  if (currentMinutes < start) return "waiting";
+  if (!hasPunch("entry")) return "pending";
+  if (currentMinutes < lunchOut) return "working";
+  if (!hasPunch("lunch_out")) return "pending";
+  if (currentMinutes < lunchBack) return "break";
+  if (!hasPunch("lunch_back")) return "pending";
+  if (currentMinutes < end) return "working";
+  if (!hasPunch("exit")) return "pending";
+  return "done";
+}
+
+function dailyStatusLabel(statusKey: DailyStatusKey) {
+  const labels: Record<DailyStatusKey, string> = {
+    break: "Intervalo",
+    done: "Jornada concluída",
+    off: "Fora da escala",
+    pending: "Batida pendente",
+    waiting: "Aguardando entrada",
+    working: "Em jornada",
+  };
+  return labels[statusKey];
+}
+
+function dailyStatusClass(statusKey: DailyStatusKey) {
+  const classes: Record<DailyStatusKey, string> = {
+    break: "border-[#efd9a8] bg-[#fff8e9] text-[#8a5a00]",
+    done: "border-[#b9ddd3] bg-[#f1faf7] text-[#18594c]",
+    off: "border-[#d9e0e7] bg-[#f8fafb] text-[#667085]",
+    pending: "border-[#f2b8b5] bg-[#fff0ef] text-[#a33a3a]",
+    waiting: "border-[#d9e0e7] bg-[#fbfcfd] text-[#667085]",
+    working: "border-[#b9ddd3] bg-[#f1faf7] text-[#18594c]",
+  };
+  return classes[statusKey];
+}
+
+function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
+  const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
+  const [punches, setPunches] = useState<Punch[]>([]);
+  const [now, setNow] = useState(new Date());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<DailyStatusKey | "all">("all");
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  useEffect(() => {
+    const clock = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(clock);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadDailyData() {
+      setLoading(true);
+      setError("");
+      try {
+        const saved = await listEmployees("main");
+        const mapped = saved.map((employee) =>
+          toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
+        );
+        const recentPunches = await listEmployeePunchesByIds("main", mapped.map((employee) => employee.employeeId));
+        if (!mounted) return;
+        setEmployeesList(mapped);
+        setPunches(recentPunches);
+      } catch (loadError) {
+        console.error(loadError);
+        if (!mounted) return;
+        setEmployeesList([]);
+        setPunches([]);
+        setError("Não foi possível carregar os dados reais do dia. Tente atualizar novamente.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    void loadDailyData();
+    const refresh = window.setInterval(() => void loadDailyData(), 30000);
+    return () => {
+      mounted = false;
+      window.clearInterval(refresh);
+    };
+  }, [refreshToken]);
+
+  const rows = useMemo<DailyEmployeeRow[]>(() => {
+    const currentRows = employeesList.map((employee) => {
+      const employeePunches = punches
+        .filter((punch) => punch.employeeId === employee.employeeId)
+        .sort((first, second) => punchDate(second).getTime() - punchDate(first).getTime());
+      const statusKey = getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays);
+      return {
+        employee,
+        latestPunch: employeePunches[0] || null,
+        punches: employeePunches,
+        statusKey,
+        statusLabel: dailyStatusLabel(statusKey),
+      };
+    });
+
+    const query = search.trim().toLocaleLowerCase("pt-BR");
+    return currentRows
+      .filter((row) => !query || [row.employee.name, row.employee.role, row.employee.shift].some((value) => value.toLocaleLowerCase("pt-BR").includes(query)))
+      .filter((row) => statusFilter === "all" || row.statusKey === statusFilter)
+      .sort((first, second) => Number(second.statusKey === "pending") - Number(first.statusKey === "pending"));
+  }, [employeesList, now, punches, scheduledDays, search, statusFilter]);
+
+  const todayPunches = punches.filter((punch) => isSameCalendarDay(punchDate(punch), now));
+  const pendingCount = employeesList.filter((employee) => {
+    const employeePunches = punches.filter((punch) => punch.employeeId === employee.employeeId);
+    return getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays) === "pending";
+  }).length;
+  const okCount = employeesList.length - pendingCount;
+  const currentPeriod = now.getHours() < 12 ? "Manhã" : now.getHours() < 18 ? "Tarde" : "Após a jornada";
+  const overallStatus = pendingCount ? `${pendingCount} pendência(s) para conferir` : "Operação sem pendências";
+
+  return (
+    <>
+      <section className="rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">Acompanhamento diário</p>
+            <h2 className="mt-1 text-xl font-semibold text-[#101923]">Visão geral da operação</h2>
+            <p className="mt-1 text-sm leading-6 text-[#667085]">Acompanhe as marcações do dia e identifique pendências antes do fechamento.</p>
+          </div>
+          <div className="grid gap-2 text-left sm:grid-cols-3 lg:min-w-[430px] lg:text-right">
+            <div>
+              <span className="block text-xs font-semibold uppercase text-[#667085]">Data</span>
+              <strong className="text-sm text-[#101923]">{now.toLocaleDateString("pt-BR")}</strong>
+            </div>
+            <div>
+              <span className="block text-xs font-semibold uppercase text-[#667085]">Hora local</span>
+              <strong className="font-mono text-lg tracking-normal text-[#101923]">{now.toLocaleTimeString("pt-BR")}</strong>
+            </div>
+            <div>
+              <span className="block text-xs font-semibold uppercase text-[#667085]">Período / status</span>
+              <strong className={pendingCount ? "text-sm text-[#a33a3a]" : "text-sm text-[#18594c]"}>{currentPeriod} · {overallStatus}</strong>
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            ["Colaboradores", String(employeesList.length), "cadastros ativos"],
+            ["Batidas hoje", String(todayPunches.length), "registros recebidos"],
+            ["Sem pendência", String(okCount), "acompanhamento normal"],
+            ["Batida pendente", String(pendingCount), "conferir justificativa"],
+          ].map(([label, value, detail], index) => (
+            <div className={`rounded-md border p-4 ${index === 3 && pendingCount ? "border-[#f2b8b5] bg-[#fff0ef]" : "border-[#e3e8ee] bg-[#fbfcfd]"}`} key={label}>
+              <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
+              <strong className={`mt-2 block text-2xl font-semibold ${index === 3 && pendingCount ? "text-[#a33a3a]" : "text-[#101923]"}`}>{loading ? "-" : value}</strong>
+              <span className="mt-1 block text-xs text-[#7c8895]">{detail}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-[#e3e8ee] p-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-sm font-medium text-[#667085]">Controle em tempo real</p>
+            <h2 className="mt-1 text-xl font-semibold text-[#101923]">Funcionários e status das batidas</h2>
+          </div>
+          <button className="secondary-button w-fit" disabled={loading} onClick={() => setRefreshToken((token) => token + 1)} type="button">
+            {loading ? "Atualizando..." : "Atualizar agora"}
+          </button>
+        </div>
+        <div className="grid gap-3 border-b border-[#e3e8ee] bg-[#fbfcfd] p-4 md:grid-cols-[minmax(0,1fr)_220px]">
+          <Field label="Filtrar colaborador, cargo ou escala">
+            <input className="input" onChange={(event) => setSearch(event.target.value)} placeholder="Digite para filtrar" value={search} />
+          </Field>
+          <Field label="Filtrar status">
+            <select className="input" onChange={(event) => setStatusFilter(event.target.value as DailyStatusKey | "all")} value={statusFilter}>
+              <option value="all">Todos</option>
+              <option value="pending">Batida pendente</option>
+              <option value="working">Em jornada</option>
+              <option value="break">Intervalo</option>
+              <option value="done">Jornada concluída</option>
+              <option value="waiting">Aguardando entrada</option>
+              <option value="off">Fora da escala</option>
+            </select>
+          </Field>
+        </div>
+        {error && <p className="m-4 rounded-md border border-[#f2b8b5] bg-[#fff0ef] p-3 text-sm font-semibold text-[#a33a3a]">{error}</p>}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[920px] border-collapse text-left text-sm">
+            <thead className="bg-[#f8fafb] text-xs uppercase text-[#667085]">
+              <tr>
+                {["Funcionário", "Escala", "Entrada", "Intervalo", "Retorno", "Saída", "Última batida", "Status"].map((head) => (
+                  <th className="px-4 py-3 font-semibold" key={head}>{head}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && rows.length === 0 ? (
+                <tr><td className="px-4 py-10 text-center text-[#667085]" colSpan={8}>{employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}</td></tr>
+              ) : rows.map((row) => (
+                <tr className={`border-t ${row.statusKey === "pending" ? "border-[#f2b8b5] bg-[#fff8f7]" : "border-[#e3e8ee]"}`} key={row.employee.employeeId}>
+                  <td className="px-4 py-4 font-semibold text-[#101923]">{row.employee.name}</td>
+                  <td className="px-4 py-4 text-[#667085]">{row.employee.shift}</td>
+                  <td className="px-4 py-4 text-[#667085]">{row.punches.some((punch) => punch.type === "entry" && isSameCalendarDay(punchDate(punch), now)) ? "OK" : row.employee.schedule.start}</td>
+                  <td className="px-4 py-4 text-[#667085]">{row.punches.some((punch) => punch.type === "lunch_out" && isSameCalendarDay(punchDate(punch), now)) ? "OK" : row.employee.schedule.breakStart}</td>
+                  <td className="px-4 py-4 text-[#667085]">{row.punches.some((punch) => punch.type === "lunch_back" && isSameCalendarDay(punchDate(punch), now)) ? "OK" : row.employee.schedule.breakEnd}</td>
+                  <td className="px-4 py-4 text-[#667085]">{row.punches.some((punch) => punch.type === "exit" && isSameCalendarDay(punchDate(punch), now)) ? "OK" : row.employee.schedule.end}</td>
+                  <td className="px-4 py-4 text-[#667085]">{row.latestPunch ? formatPunchDateTime(row.latestPunch) : "Sem batida hoje"}</td>
+                  <td className="px-4 py-4"><span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${dailyStatusClass(row.statusKey)}`}>{row.statusLabel}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="border-t border-[#e3e8ee] px-5 py-4 text-sm leading-6 text-[#667085]">
+          <strong className="text-[#a33a3a]">Batida pendente</strong> é um alerta operacional. Ao final do período, sem justificativa ou atestado aprovado, o responsável poderá classificar a ocorrência como falta conforme a política da empresa.
+        </div>
+      </section>
+    </>
   );
 }
 
