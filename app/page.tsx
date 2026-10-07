@@ -25,7 +25,7 @@ import type {
   PunchStatus,
   PunchType,
 } from "@/lib/models";
-import { createFaceIdRecord, uploadFacePhoto } from "@/lib/services/face-id";
+import { createFaceIdRecord, listFaceIdRecords, uploadFacePhoto } from "@/lib/services/face-id";
 import { saveEmployeePin, verifyEmployeePin } from "@/lib/services/employee-pins";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
@@ -4299,12 +4299,32 @@ function KioskScreen({
         const saved = await listEmployees("main");
         const registered = saved
           .map((employee) => toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id))
-          .filter((employee) => employee.faceIdStatus === "registered" && employee.profilePhotoPath);
+          .filter((employee) => employee.faceIdStatus === "registered");
 
         const sources = (await Promise.all(
           registered.map(async (employee) => {
             try {
-              const photoUrl = await getStorageFileUrl(employee.profilePhotoPath || "");
+              const photoPaths = [employee.profilePhotoPath || ""];
+              if (!employee.profilePhotoPath) {
+                try {
+                  const faceRecords = await listFaceIdRecords("main", employee.employeeId);
+                  photoPaths.push(...faceRecords.map((record) => record.photoPath));
+                } catch (error) {
+                  console.warn(`Não foi possível consultar o histórico facial de ${employee.name}.`, error);
+                }
+              }
+
+              let photoUrl = "";
+              for (const photoPath of [...new Set(photoPaths.filter(Boolean))]) {
+                try {
+                  photoUrl = await getStorageFileUrl(photoPath);
+                  break;
+                } catch {
+                  // Tenta a próxima captura histórica quando a foto resumida não existe mais.
+                }
+              }
+              if (!photoUrl) return null;
+
               return {
                 employeeId: employee.employeeId,
                 name: employee.name,

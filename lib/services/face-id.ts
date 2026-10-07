@@ -1,4 +1,4 @@
-import { addDoc, collection } from "firebase/firestore";
+import { addDoc, collection, getDocs, orderBy, query } from "firebase/firestore";
 import { ref, uploadBytes } from "firebase/storage";
 import { db, storage } from "@/lib/firebase/client";
 import { facePhotoPath } from "@/lib/firebase/paths";
@@ -26,4 +26,9 @@ export async function uploadFacePhoto({
 
 export async function createFaceIdRecord(record: Omit<FaceIdRecord, "id">) {
   return addDoc(faceIdRef(record.companyId, record.employeeId), record);
+}
+
+export async function listFaceIdRecords(companyId: string, employeeId: string) {
+  const snapshot = await getDocs(query(faceIdRef(companyId, employeeId), orderBy("createdAt", "desc")));
+  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as FaceIdRecord);
 }
