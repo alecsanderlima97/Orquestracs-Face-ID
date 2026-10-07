@@ -3439,8 +3439,6 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           employeeId: current.employeeId,
           photoId: captureId,
         }).then((photoPath) => {
-          updateEmployeeProfilePhoto(current, photoPath, URL.createObjectURL(photoBlob));
-          void upsertEmployee("main", employeeDocumentId(current), { profilePhotoPath: photoPath });
           void createFaceIdRecord({
             capturedBy: "web-kiosk",
             companyId: "main",
@@ -3789,15 +3787,19 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
               <p className="mt-1 text-sm text-[#667085]">
                 {selectedEmployee.profilePhotoPath ? "Foto vinculada ao cadastro" : "Adicione uma foto manual ou cadastre o Face ID"}
               </p>
-              <label className="secondary-button mt-3 inline-flex cursor-pointer items-center">
-                Alterar foto
-                <input
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(event) => void changeEmployeePhoto(event.target.files?.[0])}
-                  type="file"
-                />
-              </label>
+               <label className={`secondary-button mt-3 inline-flex items-center ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
+                 Editar foto principal
+                 <input
+                   accept="image/*"
+                   className="hidden"
+                   disabled={!canEdit}
+                   onChange={(event) => void changeEmployeePhoto(event.target.files?.[0])}
+                   type="file"
+                 />
+               </label>
+               <p className="mt-2 max-w-md text-xs leading-5 text-[#667085]">
+                 Esta foto aparece no perfil e nas listas. As capturas usadas pelo Face ID ficam registradas separadamente.
+               </p>
             </div>
           </div>
           <div id="employee-detail-panel" className="grid gap-3 md:grid-cols-4">
@@ -3849,11 +3851,12 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
           <ActionRow>
             <button className="secondary-button" onClick={() => editEmployee(selectedEmployee)} type="button">Editar cadastro</button>
             <button className="secondary-button" onClick={() => startFaceRegistration(selectedEmployee)} type="button">Cadastrar Face ID</button>
-            <label className="secondary-button cursor-pointer">
-              Alterar foto
+            <label className={`secondary-button ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
+              Editar foto principal
               <input
                 accept="image/*"
                 className="hidden"
+                disabled={!canEdit}
                 onChange={(event) => void changeEmployeePhoto(event.target.files?.[0])}
                 type="file"
               />
