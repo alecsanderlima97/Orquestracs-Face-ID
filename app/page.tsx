@@ -4300,12 +4300,43 @@ function AdminScreen({
   const pendingInvites = invites.filter((invite) => invite.status === "Ativo").length;
   const remainingCredits = effectiveConfig.aiCredits.balance;
   const usedCredits = effectiveConfig.aiCredits.used;
+  const [readinessCheck, setReadinessCheck] = useState<{
+    missingFields: string[];
+    officialReady: boolean;
+    signatureStatus: string;
+  } | null>(null);
+  const [checkingReadiness, setCheckingReadiness] = useState(false);
   const repP = company?.repP && typeof company.repP === "object"
     ? company.repP as Record<string, unknown>
     : {};
   const inpiRegistration = String(repP.inpiRegistration || company?.inpiRegistration || "").trim();
   const technicalStatementAttached = repP.technicalStatementAttached === true;
   const certificateConfigured = repP.certificateConfigured === true;
+
+  async function checkRepReadiness() {
+    const today = new Date().toISOString().slice(0, 10);
+    const monthStart = `${today.slice(0, 8)}01`;
+    setCheckingReadiness(true);
+    try {
+      const result = await generateRepExports("main", monthStart, today);
+      setReadinessCheck({
+        missingFields: result.missingFields,
+        officialReady: result.officialReady,
+        signatureStatus: result.signatureStatus,
+      });
+      onAction(result.officialReady ? "REP-P validado para o periodo atual." : "Verificacao REP-P concluida com pendencias.");
+    } catch (error) {
+      console.error(error);
+      setReadinessCheck({
+        missingFields: ["Nao foi possivel concluir a verificacao. Confira autenticacao, empresa e periodo."],
+        officialReady: false,
+        signatureStatus: "verification_error",
+      });
+      onAction("Nao foi possivel verificar a prontidao REP-P.");
+    } finally {
+      setCheckingReadiness(false);
+    }
+  }
 
   const adminMetrics = [
     ["Clientes", "1", effectiveConfig.status.toLowerCase()],
@@ -4443,6 +4474,24 @@ function AdminScreen({
         <div className="mt-4 rounded-md border border-[#efd9a8] bg-[#fff8e9] p-4 text-sm leading-6 text-[#6f4c0a]">
           O sistema está em pré-validação. O modo oficial depende do registro no INPI, certificado e assinaturas ICP-Brasil, documentação técnica e validação jurídica aplicável.
         </div>
+        <ActionRow>
+          <button className="secondary-button" disabled={checkingReadiness} onClick={() => void checkRepReadiness()} type="button">
+            {checkingReadiness ? "Verificando..." : "Verificar prontidão agora"}
+          </button>
+        </ActionRow>
+        {readinessCheck && (
+          <div className={`mt-4 rounded-md border p-4 ${readinessCheck.officialReady ? "border-[#b9ddd3] bg-[#f1faf7] text-[#18594c]" : "border-[#efd9a8] bg-[#fff8e9] text-[#6f4c0a]"}`}>
+            <p className="text-sm font-semibold">
+              {readinessCheck.officialReady ? "Verificação concluída sem pendências." : "Ainda não está pronto para uso oficial."}
+            </p>
+            <p className="mt-1 text-xs leading-5">Status da assinatura: {readinessCheck.signatureStatus}.</p>
+            {readinessCheck.missingFields.length > 0 && (
+              <ul className="mt-3 grid gap-1 text-xs leading-5">
+                {readinessCheck.missingFields.map((field) => <li key={field}>• {field}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
       </Panel>
 
       <TwoColumn>
