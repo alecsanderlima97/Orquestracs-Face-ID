@@ -200,6 +200,20 @@ type MainCompanyProfile = Record<string, unknown> & {
   workPolicy?: WorkPolicy;
 };
 
+type WeatherSnapshot = {
+  available: boolean;
+  city?: string;
+  isDay?: boolean;
+  kind?: "clear" | "cloudy" | "rain" | "storm";
+  source?: "company" | "current";
+  temperature?: number | null;
+};
+
+type WeatherCoordinates = {
+  latitude: number;
+  longitude: number;
+};
+
 type WorkPolicy = {
   absenceMode: "day" | "period";
   afternoonAbsenceWeight: number;
@@ -726,6 +740,9 @@ export default function Home() {
   const [appAccess, setAppAccess] = useState<TenantAccess | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState("");
   const [companyProfile, setCompanyProfile] = useState<MainCompanyProfile | null>(null);
+  const [weatherSnapshot, setWeatherSnapshot] = useState<WeatherSnapshot | null>(null);
+  const [weatherCoordinates, setWeatherCoordinates] = useState<WeatherCoordinates | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [saasConfig, setSaasConfig] = useState<TenantSaasConfig | null>(null);
   const [tenantInvites, setTenantInvites] = useState<TenantInvite[]>([]);
@@ -805,6 +822,66 @@ export default function Home() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    const address = (companyProfile?.address || {}) as Record<string, unknown>;
+    const city = String(address.city || "").trim();
+    const state = String(address.state || "").trim();
+    if (!city && !weatherCoordinates) {
+      return;
+    }
+
+    const controller = new AbortController();
+    let mounted = true;
+
+    async function loadWeather() {
+      setWeatherLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (city) params.set("city", city);
+        if (state) params.set("state", state);
+        if (weatherCoordinates) {
+          params.set("latitude", String(weatherCoordinates.latitude));
+          params.set("longitude", String(weatherCoordinates.longitude));
+        }
+        const response = await fetch(`/api/weather?${params.toString()}`, { signal: controller.signal });
+        const data = (await response.json()) as WeatherSnapshot;
+        if (mounted) setWeatherSnapshot(data.available ? data : null);
+      } catch (error) {
+        if ((error as { name?: string }).name !== "AbortError") console.error(error);
+        if (mounted) setWeatherSnapshot(null);
+      } finally {
+        if (mounted) setWeatherLoading(false);
+      }
+    }
+
+    void loadWeather();
+    const refresh = window.setInterval(() => void loadWeather(), 15 * 60 * 1000);
+    return () => {
+      mounted = false;
+      controller.abort();
+      window.clearInterval(refresh);
+    };
+  }, [companyProfile, weatherCoordinates]);
+
+  useEffect(() => {
+    if (!companyProfile || typeof window === "undefined" || !navigator.geolocation) return;
+    if (window.sessionStorage.getItem("orquestracs-weather-location-requested") === "1") return;
+
+    window.sessionStorage.setItem("orquestracs-weather-location-requested", "1");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setWeatherCoordinates({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+      },
+      (error) => {
+        if (error.code !== error.PERMISSION_DENIED) console.warn("Current location unavailable", error.message);
+      },
+      { enableHighAccuracy: false, maximumAge: 15 * 60 * 1000, timeout: 8000 },
+    );
+  }, [companyProfile]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -1377,6 +1454,7 @@ export default function Home() {
   const companyCnpj = companyProfile?.cnpj || "CNPJ nao cadastrado";
   const headerMoment = new Date();
   const headerDaypart = getDaypart(headerMoment);
+  const headerWeather = getWeatherVisual(headerDaypart, weatherSnapshot, weatherLoading);
   const headerDate = headerMoment.toLocaleDateString("pt-BR", {
     day: "2-digit",
     month: "long",
@@ -1415,7 +1493,7 @@ export default function Home() {
             </div>
           </div>
           <div className="shrink-0 text-right">
-            <p className="text-[10px] font-semibold uppercase text-[#667085]">{headerDaypart.icon} {headerDaypart.label}</p>
+            <p className="text-[10px] font-semibold uppercase text-[#667085]">{headerWeather.icon} {headerWeather.label}</p>
             <p className="whitespace-nowrap text-xs font-bold text-[#101923]">
               {currentDateTime.split(", ").at(-1) || currentDateTime}
             </p>
@@ -1543,7 +1621,7 @@ export default function Home() {
 
         <section className="grid min-w-0 gap-4 sm:gap-5">
           <header className="rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex flex-col gap-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(320px,390px)_auto] lg:items-center">
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
                   Orquestracs Face ID
@@ -1556,33 +1634,33 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="hidden flex-wrap items-center gap-2 lg:flex lg:justify-end">
-                <div className="min-w-[320px] rounded-lg border border-[#b9ddd3] bg-[#f1faf7] px-3 py-2.5">
+              <div className="hidden lg:flex lg:justify-center">
+                <div className={`w-full max-w-[390px] rounded-lg border px-3 py-2.5 ${headerWeather.shellClass}`}>
                   <div className="flex items-center gap-3">
-                    <span aria-hidden="true" className="text-3xl leading-none">{headerDaypart.icon}</span>
+                    <span aria-hidden="true" className="min-w-[3.5rem] text-center text-3xl leading-none">{headerWeather.icon}</span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#2d6c5d]">Momento do dia</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#2d6c5d]">Momento e clima</p>
                         <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-[#2d6c5d]">
                           <span className="h-1.5 w-1.5 rounded-full bg-[#2d6c5d]" /> ao vivo
                         </span>
                       </div>
                       <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                        <p className="text-sm font-bold text-[#143f37]">{headerDaypart.label}</p>
+                        <p className="text-sm font-bold text-[#143f37]">{headerWeather.label}</p>
                         <p className="font-mono text-xl font-bold tracking-normal text-[#101923]">{headerTime}</p>
                       </div>
-                      <p className="mt-0.5 text-xs capitalize text-[#54716a]">{headerDate} · {headerDaypart.detail}</p>
+                      <p className="mt-0.5 text-xs capitalize text-[#54716a]">{headerDate} · {headerWeather.detail}</p>
                     </div>
                   </div>
                 </div>
-                <button
-                  className="secondary-button"
-                  onClick={handleLogout}
-                  type="button"
-                >
-                  Sair
-                </button>
               </div>
+              <button
+                className="secondary-button hidden lg:block"
+                onClick={handleLogout}
+                type="button"
+              >
+                Sair
+              </button>
             </div>
 
             <div className="mt-3 flex items-center gap-2 text-xs font-medium text-[#667085]">
@@ -1771,6 +1849,61 @@ function getDaypart(date: Date): Daypart {
   if (minutes < 18 * 60) return { detail: "Jornada da tarde em andamento.", icon: "☀️", label: "Tarde" };
   if (minutes < 20 * 60) return { detail: "Conferência do encerramento da jornada.", icon: "🌇", label: "Entardecer" };
   return { detail: "A jornada do dia foi encerrada.", icon: "🌙", label: "Noite" };
+}
+
+type WeatherVisual = {
+  detail: string;
+  icon: string;
+  label: string;
+  shellClass: string;
+};
+
+function getWeatherVisual(daypart: Daypart, weather: WeatherSnapshot | null, loading: boolean): WeatherVisual {
+  if (loading) {
+    return {
+      detail: `${daypart.detail} Consultando o tempo local...`,
+      icon: daypart.icon,
+      label: daypart.label,
+      shellClass: "border-[#b9ddd3] bg-[#f1faf7]",
+    };
+  }
+
+  if (!weather?.available || !weather.kind) {
+    return {
+      detail: `${daypart.detail} Clima local indisponível no momento.`,
+      icon: daypart.icon,
+      label: daypart.label,
+      shellClass: "border-[#b9ddd3] bg-[#f1faf7]",
+    };
+  }
+
+  const temperature = typeof weather.temperature === "number" ? ` · ${Math.round(weather.temperature)}°C` : "";
+  const location = weather.source === "current" ? "Localização atual" : weather.city;
+  const night = weather.isDay === false;
+  if (weather.kind === "rain" || weather.kind === "storm") {
+    return {
+      detail: `${weather.kind === "storm" ? "Chuva forte" : "Chuva"}${temperature}${location ? ` · ${location}` : ""}.`,
+      icon: night ? "🌙🌧️" : "🌧️",
+      label: night ? "Noite com chuva" : "Chuva",
+      shellClass: "border-[#b8cbea] bg-[#eef4ff]",
+    };
+  }
+
+  if (weather.kind === "cloudy") {
+    return {
+      detail: `Céu nublado${temperature}${location ? ` · ${location}` : ""}.`,
+      icon: night ? "🌙☁️" : "🌥️",
+      label: night ? "Noite nublada" : "Nublado",
+      shellClass: "border-[#c7d1dc] bg-[#f3f6f9]",
+    };
+  }
+
+  return {
+    detail: `Céu aberto${temperature}${location ? ` · ${location}` : ""}.`,
+    icon: night ? "🌙" : "☀️",
+    label: night ? "Noite limpa" : daypart.label,
+    shellClass: night ? "border-[#b8cbea] bg-[#eef4ff]" : "border-[#e8d59b] bg-[#fffaf0]",
+  };
 }
 
 function getDailyPendingPunch(
