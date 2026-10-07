@@ -22,7 +22,13 @@ import { saveEmployeePin, verifyEmployeePin } from "@/lib/services/employee-pins
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
 import { createPunchAdjustment, listEmployeePunchesByIds } from "@/lib/services/punches";
-import { generateRepExports, registerRepPunch, type RepPunchReceipt } from "@/lib/services/rep-p";
+import {
+  generateRepExports,
+  listOwnRepReceipts,
+  listRecentRepReceipts,
+  registerRepPunch,
+  type RepPunchReceipt,
+} from "@/lib/services/rep-p";
 import { getStorageFileUrl } from "@/lib/services/storage-files";
 import {
   acceptTenantInvite,
@@ -713,8 +719,10 @@ function getLastEmployeePunch(employeeId: string) {
 export default function Home() {
   const [active, setActive] = useState<Section>("Painel");
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [accessLoading, setAccessLoading] = useState(true);
+  const [accessError, setAccessError] = useState("");
   const [appAccess, setAppAccess] = useState<TenantAccess | null>(null);
   const [currentDateTime, setCurrentDateTime] = useState("");
   const [companyProfile, setCompanyProfile] = useState<MainCompanyProfile | null>(null);
@@ -742,8 +750,14 @@ export default function Home() {
 
   async function refreshAccess(currentUser: User) {
     setAccessLoading(true);
+    setAccessError("");
     try {
-      const access = await getUserTenantAccess(currentUser);
+      const access = await Promise.race([
+        getUserTenantAccess(currentUser),
+        new Promise<never>((_, reject) => {
+          window.setTimeout(() => reject(new Error("access-timeout")), 10000);
+        }),
+      ]);
       setAppAccess(access);
       if (access?.role === "developer") {
         const [invites, config] = await Promise.all([
@@ -753,6 +767,10 @@ export default function Home() {
         setTenantInvites(invites);
         setSaasConfig(config);
       }
+    } catch (error) {
+      console.error(error);
+      setAppAccess(null);
+      setAccessError("Nao foi possivel carregar as permissoes agora. Verifique sua conexao e tente novamente.");
     } finally {
       setAccessLoading(false);
     }
@@ -786,6 +804,19 @@ export default function Home() {
         setAccessLoading(false);
       }
     });
+  }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setAuthLoading((loading) => {
+        if (loading) {
+          setLoginMessage("A inicializacao demorou. Atualize a pagina para tentar novamente.");
+        }
+        return false;
+      });
+    }, 8000);
+
+    return () => window.clearTimeout(timeout);
   }, []);
 
   useEffect(() => {
@@ -889,6 +920,7 @@ export default function Home() {
 
   function go(section: Section) {
     setActive(section);
+    setMobileMenuOpen(false);
     setNotice(`Tela "${section}" aberta.`);
   }
 
@@ -1274,6 +1306,21 @@ export default function Home() {
     );
   }
 
+  if (accessError) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#f4f6f8] px-4 text-[#17202a]">
+        <section className="w-full max-w-md rounded-lg border border-[#efd9a8] bg-white p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8a5a00]">Orquestracs Face ID</p>
+          <h1 className="mt-2 text-2xl font-semibold text-[#101923]">Acesso temporariamente indisponivel</h1>
+          <p className="mt-3 text-sm leading-6 text-[#667085]">{accessError}</p>
+          <button className="primary-button mt-5 w-full" onClick={() => window.location.reload()} type="button">
+            Tentar novamente
+          </button>
+        </section>
+      </main>
+    );
+  }
+
   if (!appAccess && !isPlatformOwnerEmail(user.email)) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#f4f6f8] px-4 text-[#17202a]">
@@ -1330,9 +1377,97 @@ export default function Home() {
   const companyCnpj = companyProfile?.cnpj || "CNPJ nao cadastrado";
 
   return (
-    <main className="min-h-screen bg-[#f4f6f8] text-[#17202a]">
-      <div className="mx-auto grid max-w-[1480px] gap-6 px-4 py-4 lg:grid-cols-[292px_1fr] lg:px-6">
-        <aside className="rounded-lg border border-[#d9e0e7] bg-[#101923] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)]">
+    <main className="min-h-screen overflow-x-hidden bg-[#f4f6f8] text-[#17202a]">
+      <div className="sticky top-0 z-30 border-b border-[#d9e0e7] bg-white/95 px-3 py-2 shadow-sm backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-3">
+          <button
+            aria-expanded={mobileMenuOpen}
+            aria-label="Abrir menu principal"
+            className="mobile-menu-button"
+            onClick={() => setMobileMenuOpen(true)}
+            type="button"
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <img
+              alt="Orquestracs Face ID"
+              className="h-9 w-9 shrink-0 rounded-md bg-[#dcebe6] object-contain p-1"
+              src="/orquestracs-face-id-logo.svg"
+            />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-[#101923]">Orquestracs Face ID</p>
+              <p className="truncate text-xs text-[#667085]">{title}</p>
+            </div>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-[10px] font-semibold uppercase text-[#667085]">Agora</p>
+            <p className="whitespace-nowrap text-xs font-bold text-[#101923]">
+              {currentDateTime.split(", ").at(-1) || currentDateTime}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {mobileMenuOpen && (
+        <div className="mobile-navigation-shell lg:hidden">
+          <button
+            aria-label="Fechar menu"
+            className="mobile-navigation-backdrop"
+            onClick={() => setMobileMenuOpen(false)}
+            type="button"
+          />
+          <aside aria-label="Menu principal" className="mobile-navigation-panel">
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3">
+                <img
+                  alt="Orquestracs Face ID"
+                  className="h-10 w-10 rounded-md bg-[#dcebe6] object-contain p-1"
+                  src="/orquestracs-face-id-logo.svg"
+                />
+                <div>
+                  <p className="text-sm font-bold text-white">Orquestracs</p>
+                  <p className="text-xs font-semibold uppercase text-[#7ee2c4]">Face ID</p>
+                </div>
+              </div>
+              <button
+                aria-label="Fechar menu"
+                className="mobile-menu-close"
+                onClick={() => setMobileMenuOpen(false)}
+                type="button"
+              >
+                ×
+              </button>
+            </div>
+            <div className="mt-4 rounded-md border border-white/10 bg-white/[0.04] p-3">
+              <p className="text-xs uppercase text-white/45">Empresa</p>
+              <p className="mt-1 truncate text-sm font-semibold text-white">{String(companyName)}</p>
+              <p className="mt-1 truncate text-xs text-white/55">{String(companyCnpj)}</p>
+            </div>
+            <nav className="mt-4 grid gap-1 overflow-y-auto pb-5 text-sm">
+              {visibleNavItems.map((item) => (
+                <button
+                  className={`min-h-11 rounded-md px-3 py-2.5 text-left font-medium transition ${
+                    active === item
+                      ? "bg-[#dcebe6] text-[#143f37]"
+                      : "text-white/75 hover:bg-white/[0.06] hover:text-white"
+                  }`}
+                  key={item}
+                  onClick={() => go(item)}
+                  type="button"
+                >
+                  {item}
+                </button>
+              ))}
+            </nav>
+          </aside>
+        </div>
+      )}
+
+      <div className="mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:grid-cols-[292px_minmax(0,1fr)] lg:gap-6 lg:px-6">
+        <aside className="hidden rounded-lg border border-[#d9e0e7] bg-[#101923] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:block lg:h-[calc(100vh-2rem)]">
           <div className="flex h-full flex-col">
             <div className="border-b border-white/10 pb-5">
               <div className="flex items-center gap-3">
@@ -1394,14 +1529,14 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className="grid gap-5">
-          <header className="rounded-lg border border-[#d9e0e7] bg-white px-5 py-4 shadow-sm">
+        <section className="grid min-w-0 gap-4 sm:gap-5">
+          <header className="rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
                   Orquestracs Face ID
                 </p>
-                <h1 className="mt-1 text-2xl font-semibold text-[#101923]">
+                <h1 className="mt-1 text-xl font-semibold text-[#101923] sm:text-2xl">
                   {title}
                 </h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-[#667085]">
@@ -1409,7 +1544,7 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <div className="hidden flex-wrap items-center gap-2 lg:flex lg:justify-end">
                 <div className="rounded-md border border-[#d9e0e7] bg-[#fbfcfd] px-3 py-2 text-right">
                   <p className="text-xs font-semibold uppercase text-[#667085]">Data e hora</p>
                   <p className="text-sm font-bold text-[#101923]">{currentDateTime}</p>
@@ -1491,17 +1626,19 @@ export default function Home() {
           {active === "Relatorios" && <ReportsScreen onAction={demoAction} />}
           {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
           {active === "Admin" && (
-            <AdminScreen config={saasConfig} invites={tenantInvites} onAction={demoAction} />
+            <AdminScreen company={companyProfile} config={saasConfig} invites={tenantInvites} onAction={demoAction} />
           )}
         </section>
       </div>
 
       <button
+        aria-label="Abrir Assistente Face ID"
         className="assistant-launcher"
         onClick={() => setAssistantOpen(true)}
         type="button"
       >
-        Assistente Face ID
+        <span className="assistant-launcher-short">?</span>
+        <span className="assistant-launcher-label">Assistente Face ID</span>
       </button>
 
       {assistantOpen && (
@@ -1583,12 +1720,29 @@ function PunchReceiptCard({
   receipt: RepPunchReceipt;
 }) {
   const missingLegalData = !receipt.inpiRegistration || receipt.employeeCpf.length !== 11 || receipt.companyCnpj.length !== 14;
+  const [recentReceipts, setRecentReceipts] = useState<RepPunchReceipt[] | null>(null);
+  const [loadingRecent, setLoadingRecent] = useState(false);
+  const [recentError, setRecentError] = useState("");
 
   function printReceipt() {
     const printWindow = window.open("", "_blank", "width=760,height=900");
     if (!printWindow) return;
     printWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Comprovante NSR ${receipt.nsr}</title><style>body{font-family:Arial,sans-serif;color:#17202a;padding:40px;line-height:1.5}main{max-width:680px;margin:auto;border:1px solid #cfd8e3;padding:28px}h1{font-size:20px;margin:0 0 24px}dl{display:grid;grid-template-columns:180px 1fr;gap:10px;margin:0}dt{color:#667085}dd{margin:0;font-weight:700;overflow-wrap:anywhere}.warning{margin-top:24px;padding:12px;border:1px solid #e3b04b;background:#fff8e9}.signature{margin-top:24px;font-size:12px;color:#667085}@media print{body{padding:0}main{border:0}}</style></head><body><main><h1>${escapeHtml(receipt.title)}</h1><dl><dt>NSR</dt><dd>${receipt.nsr}</dd><dt>Data e horario</dt><dd>${escapeHtml(new Date(receipt.occurredAt).toLocaleString("pt-BR"))}</dd><dt>Empregador</dt><dd>${escapeHtml(receipt.companyName || "Nao informado")}</dd><dt>CNPJ</dt><dd>${escapeHtml(maskCnpj(receipt.companyCnpj) || "Nao informado")}</dd><dt>Trabalhador</dt><dd>${escapeHtml(receipt.employeeName)}</dd><dt>CPF</dt><dd>${escapeHtml(maskCpf(receipt.employeeCpf) || "Nao informado")}</dd><dt>Registro INPI</dt><dd>${escapeHtml(receipt.inpiRegistration || "Pendente")}</dd><dt>Hash SHA-256</dt><dd>${escapeHtml(receipt.hash)}</dd></dl>${missingLegalData ? '<p class="warning"><strong>Documento de piloto.</strong> Ainda nao possui todos os dados necessarios para uso como comprovante REP-P oficial.</p>' : ""}<p class="signature">Assinatura digital PAdES: pendente de configuracao do certificado ICP-Brasil.</p></main><script>window.print()</script></body></html>`);
     printWindow.document.close();
+  }
+
+  async function loadRecentReceipts() {
+    setLoadingRecent(true);
+    setRecentError("");
+    try {
+      const result = await listRecentRepReceipts("main", receipt.employeeId);
+      setRecentReceipts(result.receipts);
+    } catch (error) {
+      console.error(error);
+      setRecentError("Nao foi possivel consultar a janela de 48 horas neste acesso.");
+    } finally {
+      setLoadingRecent(false);
+    }
   }
 
   return (
@@ -1609,9 +1763,113 @@ function PunchReceiptCard({
         </div>
         <div className="flex gap-2">
           <button className="primary-button" onClick={printReceipt} type="button">Imprimir</button>
+          <button className="secondary-button" disabled={loadingRecent} onClick={() => void loadRecentReceipts()} type="button">
+            {loadingRecent ? "Consultando..." : "Ultimas 48h"}
+          </button>
           <button className="secondary-button" onClick={onClose} type="button">Fechar</button>
         </div>
       </div>
+      <div className="mt-4 rounded-md border border-[#d9e0e7] bg-white p-4">
+        <p className="text-sm font-semibold text-[#26323f]">Extração de comprovantes</p>
+        <p className="mt-1 text-xs leading-5 text-[#667085]">
+          Consulta autenticada dos comprovantes desse colaborador registrados nas últimas 48 horas.
+        </p>
+        {recentError && <p className="mt-2 text-sm font-semibold text-[#a33a3a]">{recentError}</p>}
+        {recentReceipts && (
+          <div className="mt-3 grid gap-2">
+            {recentReceipts.length ? recentReceipts.map((item) => (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] px-3 py-2 text-sm" key={item.nsr}>
+                <span className="font-semibold text-[#101923]">NSR {item.nsr}</span>
+                <span className="text-[#667085]">{new Date(item.occurredAt).toLocaleString("pt-BR")}</span>
+                <span className="text-[#667085]">{item.type || "marcação"}</span>
+              </div>
+            )) : (
+              <p className="text-sm text-[#667085]">Nenhum comprovante encontrado nas últimas 48 horas.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function OwnReceiptLookupCard() {
+  const [receiptPin, setReceiptPin] = useState("");
+  const [result, setResult] = useState<{
+    employeeName: string;
+    receipts: RepPunchReceipt[];
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function consultReceipts() {
+    if (receiptPin.length < 4) {
+      setError("Informe o PIN de 4 a 6 numeros.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const response = await listOwnRepReceipts("main", receiptPin);
+      setResult({ employeeName: response.employeeName, receipts: response.receipts });
+    } catch (requestError) {
+      console.error(requestError);
+      setResult(null);
+      setError("Nao foi possivel consultar. Confira o PIN ou procure o responsavel.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const typeLabels: Record<string, string> = {
+    entry: "Entrada",
+    exit: "Saida",
+    lunch_back: "Retorno do intervalo",
+    lunch_out: "Saida para intervalo",
+  };
+
+  return (
+    <section className="rounded-lg border border-[#cfe3dc] bg-[#f1faf7] p-4 text-[#24594d] shadow-sm md:p-5">
+      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#18594c]">Acesso do trabalhador</p>
+      <h2 className="mt-1 text-lg font-semibold text-[#101923]">Consultar comprovantes das últimas 48 horas</h2>
+      <p className="mt-1 max-w-2xl text-sm leading-6 text-[#51606f]">
+        Informe seu PIN para consultar somente as suas próprias marcações recentes.
+      </p>
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+        <Field label="PIN do colaborador">
+          <input
+            className="input min-w-0 sm:w-52"
+            inputMode="numeric"
+            maxLength={6}
+            onChange={(event) => setReceiptPin(event.target.value.replace(/\D/g, ""))}
+            placeholder="0000"
+            value={receiptPin}
+          />
+        </Field>
+        <button className="primary-button min-h-11" disabled={loading} onClick={() => void consultReceipts()} type="button">
+          {loading ? "Consultando..." : "Consultar minhas batidas"}
+        </button>
+      </div>
+      {error && <p className="mt-3 text-sm font-semibold text-[#a33a3a]" role="alert">{error}</p>}
+      {result && (
+        <div className="mt-4 rounded-md border border-[#d9e0e7] bg-white p-4">
+          <p className="text-sm font-semibold text-[#26323f]">{result.employeeName}</p>
+          <p className="mt-1 text-xs text-[#667085]">Comprovantes encontrados no período de 48 horas.</p>
+          <div className="mt-3 grid gap-2">
+            {result.receipts.length ? result.receipts.map((receipt) => (
+              <div className="grid gap-1 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] px-3 py-3 text-sm sm:grid-cols-[auto_1fr_auto] sm:items-center sm:gap-3" key={receipt.nsr}>
+                <strong className="text-[#101923]">NSR {receipt.nsr}</strong>
+                <span className="text-[#667085]">{new Date(receipt.occurredAt).toLocaleString("pt-BR")}</span>
+                <span className="font-medium text-[#18594c]">{typeLabels[receipt.type || ""] || "Marcação"}</span>
+                <span className="break-all text-xs text-[#7c8895] sm:col-span-3">Hash: {receipt.hash}</span>
+              </div>
+            )) : (
+              <p className="text-sm text-[#667085]">Nenhuma batida encontrada nas últimas 48 horas.</p>
+            )}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -3360,7 +3618,7 @@ function KioskScreen({
 
   return (
     <section className="kiosk-screen rounded-lg border border-[#d9e0e7] bg-[#101923] p-4 text-white shadow-sm md:p-5">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 md:p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -3562,6 +3820,9 @@ function KioskScreen({
             )}
           </div>
         </aside>
+      </div>
+      <div className="mt-4">
+        <OwnReceiptLookupCard />
       </div>
     </section>
   );
@@ -4016,10 +4277,12 @@ function AuditScreen({ onAction }: { onAction: (action: string) => void }) {
 }
 
 function AdminScreen({
+  company,
   config,
   invites,
   onAction,
 }: {
+  company: MainCompanyProfile | null;
   config: TenantSaasConfig | null;
   invites: TenantInvite[];
   onAction: (action: string) => void;
@@ -4037,6 +4300,12 @@ function AdminScreen({
   const pendingInvites = invites.filter((invite) => invite.status === "Ativo").length;
   const remainingCredits = effectiveConfig.aiCredits.balance;
   const usedCredits = effectiveConfig.aiCredits.used;
+  const repP = company?.repP && typeof company.repP === "object"
+    ? company.repP as Record<string, unknown>
+    : {};
+  const inpiRegistration = String(repP.inpiRegistration || company?.inpiRegistration || "").trim();
+  const technicalStatementAttached = repP.technicalStatementAttached === true;
+  const certificateConfigured = repP.certificateConfigured === true;
 
   const adminMetrics = [
     ["Clientes", "1", effectiveConfig.status.toLowerCase()],
@@ -4149,6 +4418,31 @@ function AdminScreen({
             Bloquear cliente
           </button>
         </ActionRow>
+      </Panel>
+
+      <Panel title="Preparação REP-P" subtitle="Acompanhamento técnico e das providências externas">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {[
+            ["Registro do programa no INPI", inpiRegistration ? "Informado" : "Pendente", inpiRegistration ? "success" : "pending"],
+            ["Certificado ICP-Brasil", certificateConfigured ? "Configurado" : "Pendente", certificateConfigured ? "success" : "pending"],
+            ["Atestado técnico e termo", technicalStatementAttached ? "Anexado" : "Pendente", technicalStatementAttached ? "success" : "pending"],
+            ["AFD, AEJ e recibos", "Prévia técnica", "review"],
+          ].map(([label, value, status]) => (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4" key={label}>
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-semibold text-[#26323f]">{label}</p>
+                <span className={`h-2.5 w-2.5 rounded-full ${status === "success" ? "bg-[#2d6c5d]" : status === "review" ? "bg-[#d5962c]" : "bg-[#b7791f]"}`} />
+              </div>
+              <p className="mt-2 text-sm font-semibold text-[#101923]">{value}</p>
+              <p className="mt-1 text-xs leading-5 text-[#667085]">
+                {status === "success" ? "Informação registrada no cadastro do cliente." : status === "review" ? "Geração disponível para conferência; assinatura ainda não configurada." : "Ação externa ou configuração administrativa necessária."}
+              </p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 rounded-md border border-[#efd9a8] bg-[#fff8e9] p-4 text-sm leading-6 text-[#6f4c0a]">
+          O sistema está em pré-validação. O modo oficial depende do registro no INPI, certificado e assinaturas ICP-Brasil, documentação técnica e validação jurídica aplicável.
+        </div>
       </Panel>
 
       <TwoColumn>
@@ -4670,8 +4964,8 @@ function ReportPreview() {
         <table className="w-full min-w-[840px] border-collapse text-left text-sm">
           <thead className="bg-[#101923] text-xs uppercase text-white">
             <tr>
-              {["Data", "Dia", "Entrada", "Saida", "Retorno", "Saida", "Trabalhadas", "Banco/Falta", "Ocorrencia"].map((head) => (
-                <th className="px-3 py-3 font-semibold" key={head}>{head}</th>
+              {["Data", "Dia", "Entrada", "Saida", "Retorno", "Saida", "Trabalhadas", "Banco/Falta", "Ocorrencia"].map((head, index) => (
+                <th className="px-3 py-3 font-semibold" key={`${head}-${index}`}>{head}</th>
               ))}
             </tr>
           </thead>

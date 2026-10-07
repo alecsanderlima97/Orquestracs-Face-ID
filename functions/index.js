@@ -42,6 +42,18 @@ async function requireManager(request, companyId) {
   }
 }
 
+async function requireTenantMember(request, companyId) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Entre no sistema para continuar.");
+
+  const email = normalizedText(request.auth.token.email).toLowerCase();
+  if (email === "orquestracs@gmail.com") return;
+
+  const membership = await db.doc(`tenants/${companyId}/users/${request.auth.uid}`).get();
+  if (!membership.exists || !["owner", "admin", "reader"].includes(membership.data()?.role)) {
+    throw new HttpsError("permission-denied", "Seu usuario nao pertence a esta empresa.");
+  }
+}
+
 function digits(value) {
   return normalizedText(value).replace(/\D/g, "");
 }
@@ -348,6 +360,7 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       companyCnpj,
       companyName: normalizedText(company.legalName || company.tradeName),
       employeeCpf,
+      employeeId,
       employeeName: normalizedText(employee.name),
       hash: result.hash,
       inpiRegistration,
@@ -355,6 +368,120 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       occurredAt,
       title: "Comprovante de Registro de Ponto do Trabalhador",
     },
+  };
+});
+
+export const listRecentRepReceipts = onCall(callableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const employeeId = normalizedText(request.data?.employeeId);
+  if (!companyId || !employeeId) {
+    throw new HttpsError("invalid-argument", "Empresa e colaborador sao obrigatorios.");
+  }
+
+  await requireManager(request, companyId);
+  const [companySnapshot, employeeSnapshot] = await Promise.all([
+    db.doc(`companies/${companyId}`).get(),
+    findEmployee(companyId, employeeId),
+  ]);
+  if (!companySnapshot.exists) throw new HttpsError("failed-precondition", "Empresa nao cadastrada.");
+  if (!employeeSnapshot) throw new HttpsError("not-found", "Colaborador nao encontrado.");
+
+  const start = Timestamp.fromDate(new Date(Date.now() - (48 * 60 * 60 * 1000)));
+  const recentSnapshot = await db
+    .collection(`companies/${companyId}/arpRecords`)
+    .where("occurredAt", ">=", start)
+    .get();
+  const company = companySnapshot.data();
+  const employee = employeeSnapshot.data();
+  const resolvedEmployeeId = normalizedText(employee.employeeId) || employeeSnapshot.id;
+  const inpiRegistration = digits(company.repP?.inpiRegistration || company.inpiRegistration);
+  const receipts = recentSnapshot.docs
+    .map((document) => ({ id: document.id, ...document.data() }))
+    .filter((record) => record.recordType === "punch" && normalizedText(record.employeeId) === resolvedEmployeeId)
+    .sort((left, right) => Number(right.nsr || 0) - Number(left.nsr || 0))
+    .slice(0, 100)
+    .map((record) => ({
+      companyCnpj: digits(company.cnpj),
+      companyName: normalizedText(company.legalName || company.tradeName),
+      employeeCpf: digits(employee.cpf),
+      employeeId: resolvedEmployeeId,
+      employeeName: normalizedText(employee.name),
+      hash: normalizedText(record.hash),
+      inpiRegistration,
+      nsr: Number(record.nsr || 0),
+      occurredAt: dateFromUnknown(record.occurredAt)?.toISOString() || "",
+      source: normalizedText(record.source),
+      title: "Comprovante de Registro de Ponto do Trabalhador",
+      type: normalizedText(record.type),
+    }));
+
+  return {
+    generatedAt: new Date().toISOString(),
+    receipts,
+    windowHours: 48,
+  };
+});
+
+export const listOwnRepReceipts = onCall(callableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const pin = validatePin(request.data?.pin);
+  if (!companyId) throw new HttpsError("invalid-argument", "Empresa obrigatoria.");
+
+  await requireTenantMember(request, companyId);
+  const matches = await db
+    .collection(`companies/${companyId}/employees`)
+    .where("pinHash", "==", pinDigest(companyId, pin))
+    .limit(2)
+    .get();
+  if (matches.empty) throw new HttpsError("not-found", "PIN nao encontrado.");
+  if (matches.size > 1) throw new HttpsError("failed-precondition", "PIN duplicado. Procure o responsavel.");
+
+  const employeeSnapshot = matches.docs[0];
+  const employee = employeeSnapshot.data();
+  const employeeId = normalizedText(employee.employeeId) || employeeSnapshot.id;
+  const start = Timestamp.fromDate(new Date(Date.now() - (48 * 60 * 60 * 1000)));
+  const recentSnapshot = await db
+    .collection(`companies/${companyId}/arpRecords`)
+    .where("occurredAt", ">=", start)
+    .get();
+  const companySnapshot = await db.doc(`companies/${companyId}`).get();
+  if (!companySnapshot.exists) throw new HttpsError("failed-precondition", "Empresa nao cadastrada.");
+
+  const company = companySnapshot.data();
+  const inpiRegistration = digits(company.repP?.inpiRegistration || company.inpiRegistration);
+  const receipts = recentSnapshot.docs
+    .map((document) => ({ id: document.id, ...document.data() }))
+    .filter((record) => record.recordType === "punch" && normalizedText(record.employeeId) === employeeId)
+    .sort((left, right) => Number(right.nsr || 0) - Number(left.nsr || 0))
+    .slice(0, 100)
+    .map((record) => ({
+      companyCnpj: digits(company.cnpj),
+      companyName: normalizedText(company.legalName || company.tradeName),
+      employeeCpf: digits(employee.cpf),
+      employeeId,
+      employeeName: normalizedText(employee.name),
+      hash: normalizedText(record.hash),
+      inpiRegistration,
+      nsr: Number(record.nsr || 0),
+      occurredAt: dateFromUnknown(record.occurredAt)?.toISOString() || "",
+      source: normalizedText(record.source),
+      title: "Comprovante de Registro de Ponto do Trabalhador",
+      type: normalizedText(record.type),
+    }));
+
+  await db.collection(`companies/${companyId}/receiptAccessLogs`).add({
+    accessedAt: Timestamp.now(),
+    employeeId,
+    requestedBy: request.auth.uid,
+    windowHours: 48,
+  });
+
+  return {
+    employeeId,
+    employeeName: normalizedText(employee.name),
+    generatedAt: new Date().toISOString(),
+    receipts,
+    windowHours: 48,
   };
 });
 

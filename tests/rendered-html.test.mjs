@@ -37,9 +37,11 @@ test("renderiza a aplicacao Orquestracs Face ID", async () => {
 });
 
 test("mantem batidas originais no fluxo protegido do servidor", async () => {
-  const [page, punchService, rules] = await Promise.all([
+  const [page, punchService, repService, functions, rules] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/services/punches.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/services/rep-p.ts", import.meta.url), "utf8"),
+    readFile(new URL("../functions/index.js", import.meta.url), "utf8"),
     readFile(new URL("../firestore.rules", import.meta.url), "utf8"),
   ]);
 
@@ -49,4 +51,22 @@ test("mantem batidas originais no fluxo protegido do servidor", async () => {
   assert.match(rules, /match \/punches\/\{punchId\}/);
   assert.match(rules, /allow create, update, delete: if false/);
   assert.match(rules, /match \/arpRecords\/\{recordId\}/);
+  assert.match(repService, /listOwnRepReceipts/);
+  assert.match(functions, /export const listOwnRepReceipts/);
+  assert.match(page, /Consultar comprovantes das últimas 48 horas/);
+});
+
+test("mantem navegacao responsiva para celular e tablet", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /mobileMenuOpen/);
+  assert.match(page, /mobile-navigation-panel/);
+  assert.match(page, /hidden[^"\n]*lg:block/);
+  assert.match(page, /md:grid-cols-\[minmax\(0,1fr\)_300px\]/);
+  assert.match(css, /@media \(max-width: 639px\)/);
+  assert.match(css, /touch-action:\s*manipulation/);
+  assert.match(css, /prefers-reduced-motion/);
 });

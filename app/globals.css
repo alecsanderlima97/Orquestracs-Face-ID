@@ -22,6 +22,7 @@ html {
 
 body {
   margin: 0;
+  min-width: 320px;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
@@ -34,6 +35,80 @@ input {
 
 button {
   cursor: pointer;
+  touch-action: manipulation;
+}
+
+.mobile-menu-button,
+.mobile-menu-close {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-content: center;
+  border: 1px solid #d9e0e7;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #17202a;
+}
+
+.mobile-menu-button {
+  gap: 4px;
+}
+
+.mobile-menu-button span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 99px;
+  background: #17202a;
+}
+
+.mobile-navigation-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+
+.mobile-navigation-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgb(16 25 35 / 50%);
+}
+
+.mobile-navigation-panel {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: flex;
+  width: min(86vw, 340px);
+  flex-direction: column;
+  overflow: hidden;
+  background: #101923;
+  padding: 16px;
+  color: #ffffff;
+  box-shadow: 18px 0 48px rgb(16 25 35 / 28%);
+  animation: mobile-menu-enter 180ms ease-out;
+}
+
+.mobile-menu-close {
+  border-color: rgb(255 255 255 / 14%);
+  background: rgb(255 255 255 / 6%);
+  color: #ffffff;
+  font-size: 28px;
+  line-height: 1;
+}
+
+@keyframes mobile-menu-enter {
+  from {
+    transform: translateX(-24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 a {
@@ -327,6 +402,10 @@ a {
   box-shadow: 0 16px 34px rgb(16 25 35 / 18%);
 }
 
+.assistant-launcher-short {
+  display: none;
+}
+
 .assistant-launcher:hover {
   background: #12463c;
   box-shadow: 0 18px 38px rgb(16 25 35 / 22%);
@@ -356,4 +435,53 @@ a {
   border-radius: 10px;
   background: #ffffff;
   box-shadow: 0 24px 60px rgb(16 25 35 / 24%);
+}
+
+@media (max-width: 639px) {
+  .primary-button,
+  .secondary-button {
+    min-height: 44px;
+  }
+
+  .assistant-launcher {
+    right: 14px;
+    bottom: 14px;
+    display: grid;
+    width: 48px;
+    height: 48px;
+    place-items: center;
+    padding: 0;
+  }
+
+  .assistant-launcher-short {
+    display: inline;
+    font-size: 18px;
+  }
+
+  .assistant-launcher-label {
+    display: none;
+  }
+
+  .assistant-panel {
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: calc(100vw - 16px);
+  }
+
+  .kiosk-screen {
+    margin-inline: -4px;
+    padding: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
