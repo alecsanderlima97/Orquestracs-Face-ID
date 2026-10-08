@@ -55,6 +55,7 @@ test("mantem batidas originais no fluxo protegido do servidor", async () => {
   assert.match(repService, /scheduledPunch/);
   assert.match(functions, /export const listOwnRepReceipts/);
   assert.match(functions, /classifyPunchStatus/);
+  assert.match(functions, /bank_hours/);
   assert.match(functions, /scheduledPunch/);
   assert.match(page, /Consultar comprovantes das últimas 48 horas/);
   assert.match(page, /Momento e clima/);
@@ -65,6 +66,7 @@ test("mantem batidas originais no fluxo protegido do servidor", async () => {
   assert.match(page, /Entrada atrasada/);
   assert.match(page, /Entrada antecipada/);
   assert.match(page, /Saída antecipada/);
+  assert.match(page, /Banco de horas/);
 });
 
 test("mantem navegacao responsiva para celular e tablet", async () => {

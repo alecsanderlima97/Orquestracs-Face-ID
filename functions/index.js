@@ -172,7 +172,9 @@ function classifyPunchStatus({ employee, occurredAt, origin, scheduledPunch }) {
   const currentMinutes = occurredAt.getHours() * 60 + occurredAt.getMinutes();
   const toleranceMinutes = Number(employee.schedule?.toleranceMinutes || 10);
 
-  if (expectedMinutes === null || Math.abs(currentMinutes - expectedMinutes) <= toleranceMinutes) return "on_time";
+  if (expectedMinutes === null) return "on_time";
+  if (scheduledPunch === "Saída 2" && currentMinutes > expectedMinutes) return "bank_hours";
+  if (Math.abs(currentMinutes - expectedMinutes) <= toleranceMinutes) return "on_time";
   return currentMinutes < expectedMinutes ? "early" : "late";
 }
 

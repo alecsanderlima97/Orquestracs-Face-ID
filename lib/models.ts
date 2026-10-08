@@ -6,6 +6,7 @@ export type PunchStatus =
   | "on_time"
   | "late"
   | "early"
+  | "bank_hours"
   | "outside_shift"
   | "possible_forgotten"
   | "external_work";

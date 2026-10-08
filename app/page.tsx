@@ -762,14 +762,18 @@ function getPunchTiming(employee: RecognizedFace, punchType: string) {
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const differenceMinutes = currentMinutes - minutesFromTime(expectedTime);
   const isExitPunch = ["Saída almoço", "Saída 1", "Fim do dia", "Saída 2"].includes(punchType);
-  const timingLabel = Math.abs(differenceMinutes) <= schedule.toleranceMinutes
+  const isFinalExit = punchType === "Saída 2" || punchType === "Fim do dia";
+  const hasBankHours = isFinalExit && differenceMinutes > 0;
+  const timingLabel = hasBankHours
+    ? "Banco de horas"
+    : Math.abs(differenceMinutes) <= schedule.toleranceMinutes
     ? "No horário"
     : differenceMinutes < 0
       ? isExitPunch
-        ? punchType === "Saída 2" || punchType === "Fim do dia" ? "Saída antecipada" : "Intervalo antecipado"
+        ? "Saída antecipada"
         : "Entrada antecipada"
       : isExitPunch
-        ? punchType === "Saída 2" || punchType === "Fim do dia" ? "Saída após o horário" : "Intervalo iniciado após o horário"
+        ? "Intervalo iniciado após o horário"
         : "Entrada atrasada";
 
   return {
@@ -777,7 +781,7 @@ function getPunchTiming(employee: RecognizedFace, punchType: string) {
     differenceMinutes,
     expectedTime,
     timingLabel,
-    outsideTolerance: Math.abs(differenceMinutes) > schedule.toleranceMinutes,
+    outsideTolerance: hasBankHours || Math.abs(differenceMinutes) > schedule.toleranceMinutes,
   };
 }
 
@@ -6497,6 +6501,7 @@ function formatPunchStatus(status: PunchStatus) {
     early: "Adiantado",
     external_work: "Trabalho externo",
     late: "Atraso",
+    bank_hours: "Banco de horas",
     on_time: "No horario",
     outside_shift: "Fora da jornada",
     possible_forgotten: "Possivel esquecimento",
