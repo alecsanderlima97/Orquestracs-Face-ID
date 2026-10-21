@@ -38,6 +38,18 @@ export async function saveMainCompany(data: Record<string, unknown>) {
   );
 }
 
+export async function saveTenantCompany(companyId: string, data: Record<string, unknown>) {
+  return setDoc(
+    doc(db, `companies/${companyId}`),
+    {
+      ...data,
+      id: companyId,
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true },
+  );
+}
+
 export async function getMainCompany() {
   const snapshot = await getDoc(doc(db, "companies", MAIN_COMPANY_ID));
   return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as Record<string, unknown>) : null;

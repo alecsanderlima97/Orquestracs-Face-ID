@@ -69,6 +69,31 @@ test("mantem batidas originais no fluxo protegido do servidor", async () => {
   assert.match(page, /Banco de horas/);
 });
 
+test("mantem a Central Admin protegida e operacional", async () => {
+  const [page, central, rules, functions] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/AdminCentral.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../firestore.rules", import.meta.url), "utf8"),
+    readFile(new URL("../functions/index.js", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /centralAdminMode/);
+  assert.match(page, /AdminCentral/);
+  assert.match(central, /Admin Orquestra\.cs/);
+  assert.match(central, /Detalhes operacionais/);
+  assert.match(central, /Salvar alterações/);
+  assert.match(central, /Adicionar créditos/);
+  assert.match(central, /draggable/);
+  assert.match(central, /Clientes inativos/);
+  assert.match(page, /Comprar créditos no Portal/);
+  assert.match(page, /NEXT_PUBLIC_ORQUESTRA_PORTAL_PAYMENTS_URL/);
+  assert.match(rules, /isPlatformOwner\(\)/);
+  assert.match(rules, /"aiCredits"/);
+  assert.match(functions, /export const adjustAiCredits/);
+  assert.match(functions, /export const consumeAiCredit/);
+  assert.match(functions, /aiCreditAdjustments/);
+});
+
 test("mantem navegacao responsiva para celular e tablet", async () => {
   const [page, css, layout] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

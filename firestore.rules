@@ -107,8 +107,29 @@ service cloud.firestore {
     match /tenants/{tenantId} {
       allow read: if canReadTenant(tenantId);
       allow create: if isPlatformOwner();
-      allow update: if isTenantOwner(tenantId);
+      allow update: if isPlatformOwner()
+        || (
+          isTenantOwner(tenantId)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            "aiCredits",
+            "billing",
+            "employeeLimit",
+            "plan",
+            "status",
+            "tenantId"
+          ])
+        );
       allow delete: if false;
+
+      match /aiCreditAdjustments/{adjustmentId} {
+        allow read: if isPlatformOwner();
+        allow write: if false;
+      }
+
+      match /aiCreditUsage/{usageId} {
+        allow read: if isPlatformOwner() || canReadTenant(tenantId);
+        allow write: if false;
+      }
 
       match /users/{userId} {
         allow read: if canReadTenant(tenantId);

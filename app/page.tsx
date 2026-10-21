@@ -14,6 +14,7 @@ import {
   type User,
 } from "firebase/auth";
 import { clearLocalFaceProfile, FaceCamera, type FaceProfileSource, type RecognizedFace } from "@/app/components/FaceCamera";
+import AdminCentral from "@/app/components/AdminCentral";
 import { auth } from "@/lib/firebase/client";
 import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
 import type {
@@ -43,9 +44,10 @@ import {
   type RepPunchReceipt,
 } from "@/lib/services/rep-p";
 import { getStorageFileUrl } from "@/lib/services/storage-files";
+import { syncPortalSnapshot } from "@/lib/services/portal-sync";
+import { applyCreditResult, consumeAiCredit } from "@/lib/services/ai-credits";
 import {
   acceptTenantInvite,
-  consumeAiCredit,
   createTenantInvite,
   getTenantSaasConfig,
   getUserTenantAccess,
@@ -204,7 +206,6 @@ const journeyRows: string[][] = [];
 
 const navItems: Section[] = [
   "Painel",
-  "Admin",
   "Empresa",
   "Colaboradores",
   "Sala de ponto",
@@ -213,6 +214,7 @@ const navItems: Section[] = [
   "Fechamento mensal",
   "Relatorios",
   "LGPD e auditoria",
+  "Admin",
 ];
 
 type MainCompanyProfile = Record<string, unknown> & {
@@ -1150,7 +1152,9 @@ export default function Home() {
       const config = {
         aiCredits: {
           balance: Number(onlyDigits(fields["Creditos disponiveis"] || fields["Creditos mensais"] || "150")) || 150,
+          bonus: 0,
           included: Number(onlyDigits(fields["Creditos mensais"] || "150")) || 150,
+          renewalMonth: new Date().toISOString().slice(0, 7),
           status: fields["Status IA"] === "Bloqueado" ? "Bloqueado" as const : "Ativo" as const,
           used: Number(onlyDigits(fields["Creditos usados"] || "0")) || 0,
         },
@@ -1533,6 +1537,7 @@ export default function Home() {
     second: "2-digit",
   });
   const kioskMode = active === "Sala de ponto";
+  const centralAdminMode = active === "Admin" && isDeveloperUser;
   const companyAddress = (companyProfile?.address || {}) as Record<string, string>;
   const kioskLocation = weatherSnapshot?.source === "current"
     ? "Localização atual"
@@ -1691,8 +1696,8 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className={kioskMode ? "kiosk-content-section" : "grid min-w-0 gap-4 sm:gap-5"}>
-          <header className={kioskMode ? "hidden" : "rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5"}>
+        <section className={kioskMode ? "kiosk-content-section" : centralAdminMode ? "min-w-0" : "grid min-w-0 gap-4 sm:gap-5"}>
+          <header className={kioskMode || centralAdminMode ? "hidden" : "rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5"}>
             <div className="relative">
               <div className="min-w-0 lg:max-w-[280px]">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
@@ -1743,7 +1748,7 @@ export default function Home() {
             </div>
           </header>
 
-          {lastPunchReceipt && !kioskMode && (
+          {lastPunchReceipt && !kioskMode && !centralAdminMode && (
             <PunchReceiptCard
               onClose={() => setLastPunchReceipt(null)}
               receipt={lastPunchReceipt}
@@ -1820,7 +1825,7 @@ export default function Home() {
           onConsumeCredit={async () => {
             const tenantId = appAccess?.tenantId || "main";
             const updated = await consumeAiCredit(tenantId, 1);
-            setSaasConfig(updated);
+            setSaasConfig((current) => current ? applyCreditResult(current, updated) : current);
           }}
           onNavigate={go}
         />
@@ -5445,7 +5450,33 @@ function AuditScreen({ onAction }: { onAction: (action: string) => void }) {
   );
 }
 
-function AdminScreen({
+function AdminScreen(props: {
+  company: MainCompanyProfile | null;
+  config: TenantSaasConfig | null;
+  invites: TenantInvite[];
+  onAction: (action: string) => void;
+}) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  return (
+    <>
+      <AdminCentral {...props} />
+      <details className="mt-4 rounded-lg border border-[#cbd8cf] bg-[#edf3ec] p-3">
+        <summary className="cursor-pointer px-2 py-2 text-sm font-semibold text-[#315352]">
+          Controles técnicos, REP-P e permissões avançadas
+        </summary>
+        {advancedOpen ? <AdminComplianceScreen {...props} /> : null}
+        {!advancedOpen ? (
+          <button className="secondary-button mt-2" onClick={() => setAdvancedOpen(true)} type="button">
+            Abrir controles avançados
+          </button>
+        ) : null}
+      </details>
+    </>
+  );
+}
+
+function AdminComplianceScreen({
   company,
   config,
   invites,
@@ -5457,7 +5488,7 @@ function AdminScreen({
   onAction: (action: string) => void;
 }) {
   const effectiveConfig: TenantSaasConfig = config || {
-    aiCredits: { balance: 150, included: 150, status: "Ativo", used: 0 },
+    aiCredits: { balance: 150, bonus: 0, included: 150, renewalMonth: new Date().toISOString().slice(0, 7), status: "Ativo", used: 0 },
     billing: { amount: "R$ 0,00", dueDate: "", graceDays: 5, status: "Teste" },
     employeeLimit: 25,
     name: "Cliente Face ID",
@@ -5475,6 +5506,8 @@ function AdminScreen({
     signatureStatus: string;
   } | null>(null);
   const [checkingReadiness, setCheckingReadiness] = useState(false);
+  const [syncingPortal, setSyncingPortal] = useState(false);
+  const [portalSyncMessage, setPortalSyncMessage] = useState("");
   const repP = company?.repP && typeof company.repP === "object"
     ? company.repP as Record<string, unknown>
     : {};
@@ -5504,6 +5537,20 @@ function AdminScreen({
       onAction("Nao foi possivel verificar a prontidao REP-P.");
     } finally {
       setCheckingReadiness(false);
+    }
+  }
+
+  async function handlePortalSync() {
+    setSyncingPortal(true);
+    setPortalSyncMessage("");
+    try {
+      const result = await syncPortalSnapshot();
+      setPortalSyncMessage(`Central sincronizada: ${result.clients} cliente(s) e ${result.users} usuario(s).`);
+    } catch (error) {
+      console.error(error);
+      setPortalSyncMessage("Nao foi possivel sincronizar a Central agora.");
+    } finally {
+      setSyncingPortal(false);
     }
   }
 
@@ -5611,6 +5658,9 @@ function AdminScreen({
 
         <ActionRow>
           <SaveButton onClick={() => onAction("Salvar configuracao Admin SaaS")}>Salvar Admin</SaveButton>
+          <button className="secondary-button" disabled={syncingPortal} onClick={() => void handlePortalSync()} type="button">
+            {syncingPortal ? "Sincronizando..." : "Sincronizar Central"}
+          </button>
           <button className="secondary-button" onClick={() => onAction("Auditoria global")} type="button">
             Logs globais
           </button>
@@ -5618,6 +5668,7 @@ function AdminScreen({
             Bloquear cliente
           </button>
         </ActionRow>
+        {portalSyncMessage ? <p className="mt-3 text-sm font-semibold text-[#2d6c5d]">{portalSyncMessage}</p> : null}
       </Panel>
 
       <Panel title="Preparação REP-P" subtitle="Acompanhamento técnico e das providências externas">
@@ -5937,6 +5988,22 @@ function AssistantPanel({
     }
   }
 
+  function openPortalPurchase(packageId: string, credits: number) {
+    try {
+      const paymentsUrl = process.env.NEXT_PUBLIC_ORQUESTRA_PORTAL_PAYMENTS_URL || "https://portal.orquestracs.com/pagamentos";
+      const url = new URL(paymentsUrl);
+      url.searchParams.set("sourceSystem", "orquestracs_face_id");
+      url.searchParams.set("product", "ai_credits");
+      url.searchParams.set("packageId", packageId);
+      url.searchParams.set("credits", String(credits));
+      url.searchParams.set("externalCustomerId", config?.tenantId || "main");
+      url.searchParams.set("returnUrl", window.location.href);
+      window.open(url.toString(), "_blank", "noopener,noreferrer");
+    } catch {
+      setAssistantMessage("O endereço do Portal ainda não está configurado.");
+    }
+  }
+
   return (
     <div className="assistant-shell">
       <div className="assistant-backdrop" onClick={onClose} />
@@ -5953,6 +6020,18 @@ function AssistantPanel({
           </div>
           <button className="mini-button" onClick={onClose} type="button">Fechar</button>
         </div>
+
+        <section className="border-b border-[#e3e8ee] bg-[#fbfcfd] p-5">
+          <p className="text-sm font-semibold text-[#26323f]">Comprar créditos no Portal</p>
+          <p className="mt-1 text-xs leading-5 text-[#667085]">A cobrança e o valor são calculados pelo Portal Orquestra.cs.</p>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {[["ai-100", 100], ["ai-300", 300], ["ai-1000", 1000]].map(([packageId, credits]) => (
+              <button className="mini-button" key={packageId} onClick={() => openPortalPurchase(String(packageId), Number(credits))} type="button">
+                {credits} · Comprar
+              </button>
+            ))}
+          </div>
+        </section>
 
         <div className="grid gap-5 p-5">
           <section>

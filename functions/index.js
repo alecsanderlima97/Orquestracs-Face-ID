@@ -8,10 +8,51 @@ initializeApp();
 
 const db = getFirestore();
 const pinPepper = defineSecret("PIN_PEPPER");
+const portalConnectorUrl = defineSecret("ORQUESTRA_PORTAL_CONNECTOR_URL");
+const portalConnectorSecret = defineSecret("ORQUESTRA_CONNECTOR_SHARED_SECRET");
 const callableOptions = { region: "us-east1", secrets: [pinPepper] };
+const adminCallableOptions = { region: "us-east1" };
+const portalCallableOptions = {
+  region: "us-east1",
+  secrets: [portalConnectorUrl, portalConnectorSecret],
+};
 
 function normalizedText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function dateToIso(value) {
+  if (!value) return null;
+  if (typeof value?.toDate === "function") return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") {
+    const brDate = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    const parsed = brDate
+      ? new Date(`${brDate[3]}-${brDate[2]}-${brDate[1]}T12:00:00.000Z`)
+      : new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  return null;
+}
+
+function moneyValue(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, value);
+  const raw = normalizedText(value).replace(/[^\d,.-]/g, "");
+  if (!raw) return null;
+  const normalized = raw.lastIndexOf(",") > raw.lastIndexOf(".")
+    ? raw.replace(/\./g, "").replace(",", ".")
+    : raw.replace(/,/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+}
+
+function subscriptionStatus(value) {
+  const status = normalizedText(value).toLowerCase();
+  if (!status) return null;
+  if (status === "ativo") return "ativo";
+  if (status === "bloqueado" || status === "pausado") return "bloqueado";
+  if (status === "cancelado") return "cancelado";
+  return "trial";
 }
 
 function validatePin(value) {
@@ -52,6 +93,22 @@ async function requireTenantMember(request, companyId) {
   if (!membership.exists || !["owner", "admin", "reader"].includes(membership.data()?.role)) {
     throw new HttpsError("permission-denied", "Seu usuario nao pertence a esta empresa.");
   }
+}
+
+async function requirePlatformOwner(request) {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Entre no sistema para continuar.");
+  const email = normalizedText(request.auth.token.email).toLowerCase();
+  if (email !== "orquestracs@gmail.com") {
+    throw new HttpsError("permission-denied", "Apenas o administrador da plataforma pode executar esta acao.");
+  }
+}
+
+function creditAmount(value, { maximum, label }) {
+  const amount = Number(value);
+  if (!Number.isInteger(amount) || amount < 1 || amount > maximum) {
+    throw new HttpsError("invalid-argument", `${label} deve ser um numero inteiro entre 1 e ${maximum}.`);
+  }
+  return amount;
 }
 
 function digits(value) {
@@ -613,5 +670,224 @@ export const generateRepExports = onCall(callableOptions, async (request) => {
     ])),
     officialReady: false,
     signatureStatus: "missing_icp_brasil",
+  };
+});
+
+export const consumeAiCredit = onCall(adminCallableOptions, async (request) => {
+  const tenantId = normalizedText(request.data?.tenantId);
+  const amount = creditAmount(request.data?.amount ?? 1, { label: "A quantidade", maximum: 100 });
+  if (!tenantId) throw new HttpsError("invalid-argument", "Empresa obrigatoria.");
+
+  await requireTenantMember(request, tenantId);
+  const tenantRef = db.doc(`tenants/${tenantId}`);
+  const usageRef = tenantRef.collection("aiCreditUsage").doc();
+  const result = await db.runTransaction(async (transaction) => {
+    const tenantSnapshot = await transaction.get(tenantRef);
+    const aiCredits = tenantSnapshot.data()?.aiCredits || {};
+    const balance = Number(aiCredits.balance || 0);
+    const included = Number(aiCredits.included || 0);
+    const bonus = Number(aiCredits.bonus || 0);
+    const used = Number(aiCredits.used || 0);
+    if (aiCredits.status === "Bloqueado" || balance < amount) {
+      throw new HttpsError("resource-exhausted", "Creditos IA esgotados ou bloqueados.");
+    }
+
+    const nextBalance = balance - amount;
+    const nextUsed = used + amount;
+    transaction.set(tenantRef, {
+      aiCredits: {
+        ...aiCredits,
+        balance: nextBalance,
+        bonus,
+        included,
+        used: nextUsed,
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.create(usageRef, {
+      amount,
+      createdAt: Timestamp.now(),
+      createdBy: request.auth.uid,
+      email: normalizedText(request.auth.token.email).toLowerCase(),
+      type: "assistant_question",
+    });
+    return { balance: nextBalance, bonus, included, used: nextUsed };
+  });
+
+  return { tenantId, ...result };
+});
+
+export const adjustAiCredits = onCall(adminCallableOptions, async (request) => {
+  await requirePlatformOwner(request);
+  const tenantId = normalizedText(request.data?.tenantId);
+  const credits = creditAmount(request.data?.credits, { label: "Os creditos", maximum: 100000 });
+  const reason = normalizedText(request.data?.reason);
+  if (!tenantId) throw new HttpsError("invalid-argument", "Empresa obrigatoria.");
+  if (reason.length < 5 || reason.length > 300) {
+    throw new HttpsError("invalid-argument", "O motivo deve conter entre 5 e 300 caracteres.");
+  }
+
+  const tenantRef = db.doc(`tenants/${tenantId}`);
+  const adjustmentRef = tenantRef.collection("aiCreditAdjustments").doc();
+  const createdAt = Timestamp.now();
+  const adjustmentBy = normalizedText(request.auth.token.email).toLowerCase();
+  const result = await db.runTransaction(async (transaction) => {
+    const tenantSnapshot = await transaction.get(tenantRef);
+    const aiCredits = tenantSnapshot.data()?.aiCredits || {};
+    const balanceBefore = Number(aiCredits.balance || 0);
+    const bonusBefore = Number(aiCredits.bonus || 0);
+    const balanceAfter = balanceBefore + credits;
+    const bonusAfter = bonusBefore + credits;
+    transaction.set(tenantRef, {
+      aiCredits: {
+        ...aiCredits,
+        balance: balanceAfter,
+        bonus: bonusAfter,
+        included: Number(aiCredits.included || 0),
+        lastAdjustmentAt: createdAt.toDate().toISOString(),
+        lastAdjustmentBy: adjustmentBy,
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.create(adjustmentRef, {
+      balanceAfter,
+      balanceBefore,
+      bonusAfter,
+      bonusBefore,
+      createdAt,
+      createdBy: adjustmentBy,
+      credits,
+      reason,
+      type: "manual_bonus",
+    });
+    return {
+      balance: balanceAfter,
+      bonus: bonusAfter,
+      included: Number(aiCredits.included || 0),
+      used: Number(aiCredits.used || 0),
+    };
+  });
+
+  return { tenantId, adjustmentId: adjustmentRef.id, ...result };
+});
+
+export const syncPortalSnapshot = onCall(portalCallableOptions, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Entre no sistema para continuar.");
+
+  const email = normalizedText(request.auth.token.email).toLowerCase();
+  if (!["orquestracs@gmail.com", "limaalecsander@gmail.com"].includes(email)) {
+    throw new HttpsError("permission-denied", "Apenas a equipe Orquestra.cs pode sincronizar a Central.");
+  }
+
+  const endpoint = normalizedText(portalConnectorUrl.value());
+  const secret = normalizedText(portalConnectorSecret.value());
+  if (!endpoint || !secret) {
+    throw new HttpsError("failed-precondition", "Conector do Portal ainda nao configurado.");
+  }
+
+  const tenantsSnapshot = await db.collection("tenants").limit(100).get();
+  const mainCompanySnapshot = await db.doc("companies/main").get();
+  const tenantDocuments = tenantsSnapshot.empty && mainCompanySnapshot.exists
+    ? [{ id: "main", data: () => ({}) }]
+    : tenantsSnapshot.docs;
+  const generatedAt = new Date().toISOString();
+  const tenants = await Promise.all(tenantDocuments.map(async (tenantDocument) => {
+    const tenant = tenantDocument.data() || {};
+    const companyDocument = await db.doc(`companies/${tenantDocument.id}`).get();
+    const company = companyDocument.data() || {};
+    const usersSnapshot = await db.collection(`tenants/${tenantDocument.id}/users`).limit(500).get();
+    const users = usersSnapshot.docs.map((userDocument) => {
+      const user = userDocument.data() || {};
+      const lastSeenAt = dateToIso(user.lastSeenAt || user.lastActivityAt || user.updatedAt);
+      const lastSeenMs = lastSeenAt ? Date.parse(lastSeenAt) : 0;
+      return {
+        externalUserId: userDocument.id,
+        name: normalizedText(user.name) || normalizedText(user.email) || "Usuario",
+        email: normalizedText(user.email).toLowerCase(),
+        role: normalizedText(user.role) || "reader",
+        active: user.active !== false,
+        lastActivityAt: dateToIso(user.lastActivityAt || user.updatedAt),
+        lastSeenAt,
+        lastLoginAt: dateToIso(user.lastLoginAt || user.lastAccessAt),
+        deviceType: normalizedText(user.deviceType || user.device?.type) || null,
+        operatingSystem: normalizedText(user.operatingSystem || user.device?.operatingSystem) || null,
+        browser: normalizedText(user.browser || user.device?.browser) || null,
+        online: Boolean(lastSeenMs && Date.now() - lastSeenMs <= 2 * 60 * 1000),
+      };
+    });
+    const billing = tenant.billing && typeof tenant.billing === "object" ? tenant.billing : {};
+    const address = company.address && typeof company.address === "object" ? company.address : {};
+    const dueDate = dateToIso(billing.dueDate);
+    const billingDay = dueDate ? new Date(dueDate).getUTCDate() : null;
+    const companyName = normalizedText(tenant.name)
+      || normalizedText(company.tradeName)
+      || normalizedText(company.legalName)
+      || `Empresa ${tenantDocument.id}`;
+    const contract = {};
+    const plan = normalizedText(tenant.plan);
+    const monthlyFee = moneyValue(billing.amount);
+    const currentStatus = subscriptionStatus(tenant.status);
+    const sourceUpdatedAt = dateToIso(tenant.updatedAt) || generatedAt;
+    if (plan) contract.plan = plan;
+    if (monthlyFee !== null) contract.monthlyFee = monthlyFee;
+    if (billingDay !== null) contract.billingDay = billingDay;
+    if (dueDate) contract.nextDueDate = dueDate;
+    if (normalizedText(billing.status)) contract.billingStatus = normalizedText(billing.status).toLowerCase();
+    if (currentStatus) contract.subscriptionStatus = currentStatus;
+    if (Number.isInteger(tenant.dataVersion)) contract.dataVersion = tenant.dataVersion;
+    if (sourceUpdatedAt) contract.sourceUpdatedAt = sourceUpdatedAt;
+
+    return {
+      externalTenantId: tenantDocument.id,
+      companyName,
+      customer: {
+        companyName,
+        legalName: normalizedText(company.legalName) || null,
+        tradeName: normalizedText(company.tradeName) || companyName,
+        responsibleName: normalizedText(company.contactName) || null,
+        contactEmail: normalizedText(company.contactEmail).toLowerCase() || null,
+        contactPhone: normalizedText(company.contactPhone) || null,
+        document: digits(company.cnpj || company.cpf) || null,
+        documentType: digits(company.cnpj).length === 14 ? "CNPJ" : digits(company.cpf).length === 11 ? "CPF" : null,
+        street: normalizedText(address.street) || null,
+        number: normalizedText(address.number) || null,
+        complement: normalizedText(address.complement) || null,
+        neighborhood: normalizedText(address.district || address.neighborhood) || null,
+        city: normalizedText(address.city) || null,
+        state: normalizedText(address.state) || null,
+        cep: digits(address.zipCode || address.cep) || null,
+      },
+      contract,
+      lastActivityAt: users.map((user) => user.lastActivityAt).filter(Boolean).sort().at(-1) || null,
+      onlineUserCount: users.filter((user) => user.online).length,
+      presenceTracking: users.some((user) => Boolean(user.lastSeenAt)),
+      users,
+    };
+  }));
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-orquestra-connector-secret": secret,
+    },
+    body: JSON.stringify({
+      sourceSystem: "orquestracs_face_id",
+      snapshotId: crypto.randomUUID(),
+      generatedAt,
+      tenants,
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    console.error("Portal snapshot rejected", response.status, result);
+    throw new HttpsError("unavailable", "O Portal nao confirmou a sincronizacao.");
+  }
+
+  return {
+    ok: true,
+    clients: tenants.length,
+    users: tenants.reduce((total, tenant) => total + tenant.users.length, 0),
+    result,
   };
 });
