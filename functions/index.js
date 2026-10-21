@@ -826,13 +826,26 @@ export const syncPortalSnapshot = onCall(portalCallableOptions, async (request) 
     const contract = {};
     const plan = normalizedText(tenant.plan);
     const monthlyFee = moneyValue(billing.amount);
+    const startDate = dateToIso(company.registrationDate || company.createdAt || tenant.createdAt);
+    const renewalDate = dateToIso(billing.renewalDate || billing.nextBillingDate);
+    const paidThroughDate = dateToIso(billing.paidThroughDate || billing.paidUntil || billing.nextBillingDate);
+    const paymentMethod = normalizedText(company.paymentMethod || billing.paymentMethod);
+    const billingStatus = normalizedText(billing.status || tenant.billingStatus);
+    const graceDays = Number(billing.graceDays);
+    const notes = normalizedText(company.internalNotes || tenant.notes);
     const currentStatus = subscriptionStatus(tenant.status);
     const sourceUpdatedAt = dateToIso(tenant.updatedAt) || generatedAt;
     if (plan) contract.plan = plan;
     if (monthlyFee !== null) contract.monthlyFee = monthlyFee;
     if (billingDay !== null) contract.billingDay = billingDay;
+    if (Number.isInteger(graceDays) && graceDays >= 0 && graceDays <= 90) contract.graceDays = graceDays;
+    if (startDate) contract.startDate = startDate;
+    if (renewalDate) contract.renewalDate = renewalDate;
     if (dueDate) contract.nextDueDate = dueDate;
-    if (normalizedText(billing.status)) contract.billingStatus = normalizedText(billing.status).toLowerCase();
+    if (paymentMethod) contract.paymentMethod = paymentMethod;
+    if (billingStatus) contract.billingStatus = billingStatus.toLowerCase();
+    if (paidThroughDate) contract.paidThroughDate = paidThroughDate;
+    if (notes) contract.notes = notes;
     if (currentStatus) contract.subscriptionStatus = currentStatus;
     if (Number.isInteger(tenant.dataVersion)) contract.dataVersion = tenant.dataVersion;
     if (sourceUpdatedAt) contract.sourceUpdatedAt = sourceUpdatedAt;
@@ -856,6 +869,8 @@ export const syncPortalSnapshot = onCall(portalCallableOptions, async (request) 
         city: normalizedText(address.city) || null,
         state: normalizedText(address.state) || null,
         cep: digits(address.zipCode || address.cep) || null,
+        googleBusinessUrl: normalizedText(company.mapsUrl || company.googleMapsUrl) || null,
+        notes: normalizedText(company.internalNotes || tenant.notes) || null,
       },
       contract,
       lastActivityAt: users.map((user) => user.lastActivityAt).filter(Boolean).sort().at(-1) || null,
