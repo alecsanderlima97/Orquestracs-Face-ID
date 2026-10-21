@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 
 initializeApp();
@@ -873,14 +874,7 @@ export const receivePortalCommand = onRequest(portalCommandOptions, async (reque
   }
 });
 
-export const syncPortalSnapshot = onCall(portalCallableOptions, async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Entre no sistema para continuar.");
-
-  const email = normalizedText(request.auth.token.email).toLowerCase();
-  if (!["orquestracs@gmail.com", "limaalecsander@gmail.com"].includes(email)) {
-    throw new HttpsError("permission-denied", "Apenas a equipe Orquestra.cs pode sincronizar a Central.");
-  }
-
+async function sendFacePortalSnapshot() {
   const endpoint = normalizedText(portalConnectorUrl.value());
   const secret = normalizedText(portalConnectorSecret.value());
   if (!endpoint || !secret) {
@@ -1007,4 +1001,23 @@ export const syncPortalSnapshot = onCall(portalCallableOptions, async (request) 
     users: tenants.reduce((total, tenant) => total + tenant.users.length, 0),
     result,
   };
+}
+
+export const syncPortalSnapshot = onCall(portalCallableOptions, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Entre no sistema para continuar.");
+  const email = normalizedText(request.auth.token.email).toLowerCase();
+  if (!["orquestracs@gmail.com", "limaalecsander@gmail.com"].includes(email)) {
+    throw new HttpsError("permission-denied", "Apenas a equipe Orquestra.cs pode sincronizar a Central.");
+  }
+  return sendFacePortalSnapshot();
+});
+
+export const syncPortalSnapshotScheduled = onSchedule({
+  region: "us-east1",
+  schedule: "every 15 minutes",
+  timeZone: "America/Sao_Paulo",
+  timeoutSeconds: 120,
+  secrets: [portalConnectorUrl, portalConnectorSecret],
+}, async () => {
+  await sendFacePortalSnapshot();
 });
