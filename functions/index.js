@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
-import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 
 initializeApp();
@@ -16,9 +16,28 @@ const portalCallableOptions = {
   region: "us-east1",
   secrets: [portalConnectorUrl, portalConnectorSecret],
 };
+const portalCommandOptions = {
+  region: "us-east1",
+  secrets: [portalConnectorSecret],
+};
 
 function normalizedText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function commandRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function commandDate(value) {
+  const normalized = normalizedText(value);
+  return normalized && /^\d{4}-\d{2}-\d{2}(?:T|$)/.test(normalized) ? normalized.slice(0, 10) : null;
+}
+
+function commandSecretMatches(received, expected) {
+  const receivedBuffer = Buffer.from(received);
+  const expectedBuffer = Buffer.from(expected);
+  return receivedBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(receivedBuffer, expectedBuffer);
 }
 
 function dateToIso(value) {
@@ -769,6 +788,89 @@ export const adjustAiCredits = onCall(adminCallableOptions, async (request) => {
   });
 
   return { tenantId, adjustmentId: adjustmentRef.id, ...result };
+});
+
+export const receivePortalCommand = onRequest(portalCommandOptions, async (request, response) => {
+  if (request.method !== "POST") {
+    response.status(405).json({ error: "Método não permitido." });
+    return;
+  }
+  const expectedSecret = normalizedText(portalConnectorSecret.value());
+  const authorization = request.get("authorization") || "";
+  const receivedSecret = normalizedText(request.get("x-orquestra-connector-secret") || authorization.replace(/^Bearer\s+/i, ""));
+  if (!expectedSecret || !commandSecretMatches(receivedSecret, expectedSecret)) {
+    response.status(401).json({ error: "Conector não autorizado." });
+    return;
+  }
+
+  const body = commandRecord(request.body);
+  const commandId = normalizedText(body.commandId);
+  const sourceSystem = normalizedText(body.sourceSystem);
+  const targetSystem = normalizedText(body.targetSystem);
+  const commandType = normalizedText(body.commandType);
+  const externalTenantId = normalizedText(body.externalTenantId);
+  const contract = commandRecord(body.contract);
+  if (!commandId || !externalTenantId || sourceSystem !== "orquestra_portal" || targetSystem !== "orquestracs_face_id" || commandType !== "tenant.updated") {
+    response.status(400).json({ error: "Comando contratual inválido." });
+    return;
+  }
+
+  const tenantId = externalTenantId.replace(/^orquestracs_face_id_/, "");
+  const tenantRef = db.doc(`tenants/${tenantId}`);
+  const companyRef = db.doc(`companies/${tenantId}`);
+  const commandRef = db.doc(`connectorCommands/${commandId}`);
+  const plan = normalizedText(contract.plan);
+  const amount = contract.monthlyFee === null || contract.monthlyFee === undefined || contract.monthlyFee === "" ? null : moneyValue(contract.monthlyFee);
+  const billingDay = contract.billingDay === null || contract.billingDay === undefined || contract.billingDay === "" ? null : Number(contract.billingDay);
+  const graceDays = contract.graceDays === null || contract.graceDays === undefined || contract.graceDays === "" ? null : Number(contract.graceDays);
+  const startDate = commandDate(contract.startDate);
+  const renewalDate = commandDate(contract.renewalDate || contract.nextDueDate);
+  const paymentMethod = normalizedText(contract.paymentMethod);
+  const billingStatus = normalizedText(contract.billingStatus);
+  const subscriptionStatus = normalizedText(contract.subscriptionStatus).toLowerCase();
+  const notes = normalizedText(contract.notes);
+  if (amount !== null && !Number.isFinite(amount)) { response.status(400).json({ error: "Mensalidade inválida." }); return; }
+  if (billingDay !== null && (!Number.isInteger(billingDay) || billingDay < 1 || billingDay > 31)) { response.status(400).json({ error: "Dia de vencimento inválido." }); return; }
+  if (graceDays !== null && (!Number.isInteger(graceDays) || graceDays < 0 || graceDays > 90)) { response.status(400).json({ error: "Tolerância inválida." }); return; }
+  if ((contract.startDate !== undefined && !startDate) || (contract.renewalDate !== undefined && !renewalDate) || (contract.nextDueDate !== undefined && !renewalDate)) { response.status(400).json({ error: "Data contratual inválida." }); return; }
+
+  let duplicate = false;
+  try {
+    await db.runTransaction(async (transaction) => {
+      const [commandSnapshot, tenantSnapshot, companySnapshot] = await Promise.all([transaction.get(commandRef), transaction.get(tenantRef), transaction.get(companyRef)]);
+      if (commandSnapshot.exists) { duplicate = true; return; }
+      if (!tenantSnapshot.exists) throw new Error("tenant_not_found");
+      const currentBilling = commandRecord(tenantSnapshot.data()?.billing);
+      const billing = { ...currentBilling };
+      if (amount !== null) billing.amount = amount;
+      if (billingDay !== null) billing.billingDay = billingDay;
+      if (graceDays !== null) billing.graceDays = graceDays;
+      if (renewalDate) billing.renewalDate = renewalDate;
+      if (paymentMethod) billing.paymentMethod = paymentMethod;
+      if (billingStatus) billing.status = billingStatus;
+      const tenantUpdates = { billing, updatedAt: FieldValue.serverTimestamp() };
+      if (plan) tenantUpdates.plan = plan;
+      if (startDate) tenantUpdates.startDate = startDate;
+      if (subscriptionStatus) tenantUpdates.status = subscriptionStatus;
+      if (notes) tenantUpdates.notes = notes;
+      transaction.set(tenantRef, tenantUpdates, { merge: true });
+      if (companySnapshot.exists && (paymentMethod || notes || startDate)) {
+        const companyUpdates = {};
+        if (paymentMethod) companyUpdates.paymentMethod = paymentMethod;
+        if (notes) companyUpdates.internalNotes = notes;
+        if (startDate) companyUpdates.registrationDate = startDate;
+        transaction.set(companyRef, companyUpdates, { merge: true });
+      }
+      const now = new Date().toISOString();
+      transaction.create(commandRef, { commandId, commandType, sourceSystem, targetSystem, externalTenantId, status: "applied", createdAt: now, appliedAt: now });
+      transaction.set(db.doc(`tenants/${tenantId}/auditLogs/${commandId}`), { action: "tenant.contract_updated_from_portal", actorRole: "system", actorUserId: "orquestra_portal", createdAt: now, targetId: tenantId, targetType: "tenant" });
+    });
+    response.json({ ok: true, duplicate, tenantId });
+  } catch (error) {
+    if (error instanceof Error && error.message === "tenant_not_found") { response.status(404).json({ error: "Empresa de origem não encontrada." }); return; }
+    console.error("Face ID portal command failed", error);
+    response.status(500).json({ error: "Não foi possível aplicar o comando no sistema de origem." });
+  }
 });
 
 export const syncPortalSnapshot = onCall(portalCallableOptions, async (request) => {
