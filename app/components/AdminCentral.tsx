@@ -67,6 +67,7 @@ type AdminClientRow = TenantAdminClient & {
 };
 
 const COLUMN_ORDER_KEY = "orquestracs-face-id-central-admin-columns-v1";
+const ORQUESTRA_PORTAL_ADMIN_URL = process.env.NEXT_PUBLIC_ORQUESTRA_PORTAL_ADMIN_URL || "https://portal.orquestracs.com/#admin-orquestra";
 const DEFAULT_COLUMN_ORDER: AdminColumnKey[] = [
   "client",
   "plan",
@@ -640,7 +641,7 @@ export default function AdminCentral({ company, config, invites, onAction }: Cen
     <div className="central-admin-page">
       <header className="central-admin-page-header">
         <div><p className="central-admin-eyebrow">Orquestra.cs · Face ID</p><h1>Admin Orquestra.cs</h1><p>Central exclusiva para clientes, planos, créditos e status de assinatura.</p></div>
-        <div className="central-admin-header-actions"><span>Atualizado em {new Date().toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span><button className="central-admin-header-button cyan" disabled={syncing} onClick={() => void handlePortalSync()} type="button">{syncing ? "Sincronizando..." : "⇧ Sincronizar Portal"}</button><button className="central-admin-header-button success" onClick={() => void loadClients(true)} type="button">✓ {refreshing ? "Atualizando" : "Atualizado"}</button></div>
+        <div className="central-admin-header-actions"><span>Atualizado em {new Date().toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span><button className="central-admin-header-button cyan" disabled={syncing} onClick={() => void handlePortalSync()} type="button">{syncing ? "Sincronizando..." : "⇧ Sincronizar Portal"}</button><button className="central-admin-header-button success" onClick={() => void loadClients(true)} type="button">✓ {refreshing ? "Atualizando" : "Atualizado"}</button><a aria-label="Abrir Central Admin do Portal" className="central-admin-header-button portal" href={ORQUESTRA_PORTAL_ADMIN_URL} rel="noreferrer" target="_blank">↗ Central Admin Portal</a></div>
       </header>
 
       <section className="central-admin-notice"><div><strong>Admin Orquestra.cs</strong><p>Controle comercial dos clientes, convites, planos e status de assinatura.</p><span>Clientes sem configuração usam tolerância de 5 dias úteis</span></div><div className="central-admin-summary"><strong>{activeClients.length}</strong><span>clientes ativos</span><strong>{totalCredits}</strong><span>créditos disponíveis</span></div></section>

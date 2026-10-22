@@ -564,6 +564,7 @@ a {
 
 .central-admin-header-button.cyan { border-color: #62d5e4; background: #effdff; color: #007c98; }
 .central-admin-header-button.success { background: #f7fbf7; color: #527160; }
+.central-admin-header-button.portal { display: inline-flex; align-items: center; justify-content: center; border-color: #183f52; background: #183f52; color: #fff; text-decoration: none; }
 
 .central-admin-notice {
   display: flex;
