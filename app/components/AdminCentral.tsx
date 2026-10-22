@@ -378,7 +378,10 @@ export default function AdminCentral({ company, config, invites, onAction }: Cen
       onAction("Cadastro do cliente atualizado na Central Admin.");
     } catch (error) {
       console.error(error);
-      showMessage("Não foi possível salvar o cadastro. Verifique a permissão do administrador.");
+      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+      showMessage(code === "permission-denied"
+        ? "Não foi possível salvar: sua conta não tem permissão de administrador."
+        : "Não foi possível salvar o cadastro. Verifique os dados e tente novamente.");
     } finally {
       setBusy("");
     }

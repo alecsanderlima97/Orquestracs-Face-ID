@@ -1,6 +1,7 @@
 import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
+import { removeUndefined } from "@/lib/firebase/clean-data";
 
 export type TenantRole = "owner" | "admin" | "reader" | "developer";
 
@@ -245,11 +246,11 @@ export async function saveTenantSaasConfig(
 ) {
   await setDoc(
     doc(db, `tenants/${tenantId}`),
-    {
+    removeUndefined({
       ...config,
       tenantId,
       updatedAt: serverTimestamp(),
-    },
+    }),
     { merge: true },
   );
 }

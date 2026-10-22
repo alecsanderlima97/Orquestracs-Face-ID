@@ -3,6 +3,7 @@ import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db } from "@/lib/firebase/client";
 import { storage } from "@/lib/firebase/client";
 import { companyLogoPath } from "@/lib/firebase/paths";
+import { removeUndefined } from "@/lib/firebase/clean-data";
 import type { Company } from "@/lib/models";
 
 const companiesRef = collection(db, "companies");
@@ -41,11 +42,11 @@ export async function saveMainCompany(data: Record<string, unknown>) {
 export async function saveTenantCompany(companyId: string, data: Record<string, unknown>) {
   return setDoc(
     doc(db, `companies/${companyId}`),
-    {
+    removeUndefined({
       ...data,
       id: companyId,
       updatedAt: new Date().toISOString(),
-    },
+    }),
     { merge: true },
   );
 }
