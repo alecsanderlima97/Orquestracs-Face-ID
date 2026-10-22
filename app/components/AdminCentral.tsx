@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createTenantInvite, listPlatformTenantClients, saveTenantSaasConfig, type TenantAdminClient, type TenantAdminUser, type TenantInvite, type TenantSaasConfig } from "@/lib/services/tenant-access";
+import { createTenantInvite, listPlatformTenantClients, saveTenantSaasConfig, subscribePlatformTenantClients, type TenantAdminClient, type TenantAdminUser, type TenantInvite, type TenantSaasConfig } from "@/lib/services/tenant-access";
 import { saveTenantCompany } from "@/lib/services/companies";
 import { adjustAiCredits } from "@/lib/services/ai-credits";
-import { syncPortalSnapshot } from "@/lib/services/portal-sync";
+import { subscribePortalSyncStatus, syncPortalSnapshot, type PortalSyncStatus } from "@/lib/services/portal-sync";
 
 type CentralCompany = Record<string, unknown>;
 
@@ -269,6 +269,7 @@ export default function AdminCentral({ company, config, invites, onAction }: Cen
   const [draggedColumn, setDraggedColumn] = useState<AdminColumnKey | null>(null);
   const [busy, setBusy] = useState("");
   const [message, setMessage] = useState("");
+  const [portalSyncStatus, setPortalSyncStatus] = useState<PortalSyncStatus>({ lastClients: 0, lastUsers: 0, status: "idle" });
 
   const fallbackClient = useMemo(() => buildFallbackClient(company, config), [company, config]);
 
@@ -309,11 +310,29 @@ export default function AdminCentral({ company, config, invites, onAction }: Cen
   }
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadClients(), 0);
-    return () => window.clearTimeout(timer);
+    const unsubscribe = subscribePlatformTenantClients(
+      (remoteClients) => {
+        const withFallback = fallbackClient && !remoteClients.some((client) => client.tenantId === fallbackClient.tenantId)
+          ? [...remoteClients, fallbackClient]
+          : remoteClients;
+        setClients(withFallback.map(toAdminClientRow));
+        setLoading(false);
+        setRefreshing(false);
+      },
+      (error) => {
+        console.error(error);
+        setClients(fallbackClient ? [toAdminClientRow(fallbackClient)] : []);
+        setLoading(false);
+        setRefreshing(false);
+        setMessage("Não foi possível acompanhar os clientes em tempo real. Os dados carregados continuam disponíveis.");
+      },
+    );
+    return unsubscribe;
     // The selected tenant changes only when the authenticated session changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fallbackClient?.tenantId]);
+
+  useEffect(() => subscribePortalSyncStatus(setPortalSyncStatus, (error) => console.error(error)), []);
 
   function showMessage(nextMessage: string) {
     setMessage(nextMessage);
@@ -525,7 +544,9 @@ export default function AdminCentral({ company, config, invites, onAction }: Cen
     setSyncing(true);
     try {
       const result = await syncPortalSnapshot();
-      showMessage(`Portal sincronizado: ${result.clients} cliente(s) e ${result.users} usuário(s).`);
+      showMessage(result.skipped
+        ? "Já existe uma sincronização em andamento; o status será atualizado automaticamente."
+        : `Portal sincronizado: ${result.clients} cliente(s) e ${result.users} usuário(s).`);
     } catch (error) {
       console.error(error);
       showMessage("Conector do Portal não configurado ou sem resposta.");
@@ -537,6 +558,13 @@ export default function AdminCentral({ company, config, invites, onAction }: Cen
   const activeClients = clients.filter((client) => ["Ativo", "Teste"].includes(client.config.status));
   const inactiveClients = clients.filter((client) => !["Ativo", "Teste"].includes(client.config.status));
   const totalCredits = activeClients.reduce((total, client) => total + client.config.aiCredits.balance, 0);
+  const portalStatusLabel = portalSyncStatus.status === "syncing"
+    ? "Portal sincronizando"
+    : portalSyncStatus.status === "success"
+      ? `Portal conectado · ${formatDateTime(portalSyncStatus.lastSuccessAt, "agora")}`
+      : portalSyncStatus.status === "error"
+        ? "Portal com erro"
+        : "Conector pronto";
 
   function updateForm(setter: (next: ClientForm) => void, form: ClientForm, key: keyof ClientForm, value: string) {
     setter({ ...form, [key]: value });
@@ -592,14 +620,14 @@ export default function AdminCentral({ company, config, invites, onAction }: Cen
         <td colSpan={columnOrder.length}>
           <div className="central-admin-details">
             <section className="central-admin-detail-card">
-              <div className="central-admin-detail-heading"><div><strong>Sincronização com Portal</strong><span>Dados do vínculo deste cliente</span></div><span className="central-admin-synced">{client.lastSyncAt ? "Sincronizado" : "Aguardando"}</span></div>
+              <div className="central-admin-detail-heading"><div><strong>Sincronização com Portal</strong><span>Dados do vínculo deste cliente</span></div><span className="central-admin-synced">{portalSyncStatus.status === "success" || client.lastSyncAt ? "Sincronizado" : portalSyncStatus.status === "syncing" ? "Sincronizando" : "Aguardando"}</span></div>
               <dl className="central-admin-definition-grid">
                 <div><dt>Identificador externo</dt><dd>{client.tenantId}</dd></div>
                 <div><dt>ID interno</dt><dd>{client.tenantId}</dd></div>
                 <div><dt>Data da última atualização</dt><dd>{formatDateTime(client.lastUpdatedAt)}</dd></div>
-                <div><dt>Última sincronização</dt><dd>{formatDateTime(client.lastSyncAt)}</dd></div>
+                <div><dt>Última sincronização</dt><dd>{formatDateTime(portalSyncStatus.lastSuccessAt || client.lastSyncAt)}</dd></div>
                 <div><dt>Versão dos dados</dt><dd>{client.config.dataVersion ?? "Não informado"}</dd></div>
-                <div><dt>Erro da última sincronização</dt><dd>{client.config.lastSyncError || "Nenhum erro informado"}</dd></div>
+                <div><dt>Erro da última sincronização</dt><dd>{portalSyncStatus.lastError || client.config.lastSyncError || "Nenhum erro informado"}</dd></div>
               </dl>
             </section>
             <section className="central-admin-detail-card">
@@ -641,7 +669,7 @@ export default function AdminCentral({ company, config, invites, onAction }: Cen
     <div className="central-admin-page">
       <header className="central-admin-page-header">
         <div><p className="central-admin-eyebrow">Orquestra.cs · Face ID</p><h1>Admin Orquestra.cs</h1><p>Central exclusiva para clientes, planos, créditos e status de assinatura.</p></div>
-        <div className="central-admin-header-actions"><span>Atualizado em {new Date().toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span><button className="central-admin-header-button cyan" disabled={syncing} onClick={() => void handlePortalSync()} type="button">{syncing ? "Sincronizando..." : "⇧ Sincronizar Portal"}</button><button className="central-admin-header-button success" onClick={() => void loadClients(true)} type="button">✓ {refreshing ? "Atualizando" : "Atualizado"}</button><a aria-label="Abrir Central Admin do Portal" className="central-admin-header-button portal" href={ORQUESTRA_PORTAL_ADMIN_URL} rel="noreferrer" target="_blank">↗ Central Admin Portal</a></div>
+        <div className="central-admin-header-actions"><span className="central-admin-portal-status" data-status={portalSyncStatus.status}>{portalStatusLabel}</span><span>Atualizado em {new Date().toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}</span><button className="central-admin-header-button cyan" disabled={syncing} onClick={() => void handlePortalSync()} type="button">{syncing ? "Sincronizando..." : "⇧ Sincronizar Portal"}</button><button className="central-admin-header-button success" onClick={() => void loadClients(true)} type="button">✓ {refreshing ? "Atualizando" : "Atualizado"}</button><a aria-label="Abrir Central Admin do Portal" className="central-admin-header-button portal" href={ORQUESTRA_PORTAL_ADMIN_URL} rel="noreferrer" target="_blank">↗ Central Admin Portal</a></div>
       </header>
 
       <section className="central-admin-notice"><div><strong>Admin Orquestra.cs</strong><p>Controle comercial dos clientes, convites, planos e status de assinatura.</p><span>Clientes sem configuração usam tolerância de 5 dias úteis</span></div><div className="central-admin-summary"><strong>{activeClients.length}</strong><span>clientes ativos</span><strong>{totalCredits}</strong><span>créditos disponíveis</span></div></section>

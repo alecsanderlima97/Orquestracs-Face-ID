@@ -541,6 +541,19 @@ a {
   font-size: 11px;
 }
 
+.central-admin-portal-status { display: inline-flex; align-items: center; gap: 5px; font-weight: 800; }
+.central-admin-portal-status::before { width: 7px; height: 7px; border-radius: 50%; background: #8ca09c; content: ""; }
+.central-admin-portal-status[data-status="success"] { color: #237458; }
+.central-admin-portal-status[data-status="success"]::before { background: #2ca675; }
+.central-admin-portal-status[data-status="syncing"] { color: #8a5a00; }
+.central-admin-portal-status[data-status="syncing"]::before { background: #e4a329; animation: central-admin-pulse 1.1s ease-in-out infinite; }
+.central-admin-portal-status[data-status="error"] { color: #b84343; }
+.central-admin-portal-status[data-status="error"]::before { background: #d85353; }
+
+@keyframes central-admin-pulse {
+  50% { opacity: .35; transform: scale(.7); }
+}
+
 .central-admin-header-button,
 .central-admin-button {
   min-height: 34px;

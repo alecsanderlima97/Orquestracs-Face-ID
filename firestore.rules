@@ -171,6 +171,11 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /connectorState/{connectorId} {
+      allow read: if isPlatformOwner();
+      allow write: if false;
+    }
+
     match /invites/{code} {
       allow read: if signedIn() && (
         isPlatformOwner()

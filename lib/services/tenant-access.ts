@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, Timestamp, updateDoc, where } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { auth, db } from "@/lib/firebase/client";
 import { removeUndefined } from "@/lib/firebase/clean-data";
@@ -207,37 +207,132 @@ export async function listPlatformTenantClients(): Promise<TenantAdminClient[]> 
     const tenantData = tenantDocument.data() || {};
     const companySnapshot = await getDoc(doc(db, `companies/${tenantDocument.id}`));
     const usersSnapshot = await getDocs(collection(db, `tenants/${tenantDocument.id}/users`));
-    const users = usersSnapshot.docs.map((userDocument) => {
-      const user = userDocument.data() || {};
-      const lastActivityAt = timestampToIso(user.lastActivityAt || user.updatedAt);
-      const lastAccessAt = timestampToIso(user.lastLoginAt || user.lastAccessAt || user.lastSeenAt);
-      const lastSeenAt = timestampToIso(user.lastSeenAt || user.lastActivityAt || user.updatedAt);
-      const lastSeenMs = lastSeenAt ? Date.parse(lastSeenAt) : 0;
-
-      return {
-        id: userDocument.id,
-        name: String(user.name || user.email || "Usuario"),
-        email: String(user.email || ""),
-        role: (user.role || "reader") as TenantRole,
-        active: user.active !== false,
-        lastActivityAt,
-        lastAccessAt,
-        device: String(user.deviceType || user.device?.type || "") || undefined,
-        online: Boolean(lastSeenMs && Date.now() - lastSeenMs <= 2 * 60 * 1000),
-      } satisfies TenantAdminUser;
-    });
-
-    return {
-      tenantId: tenantDocument.id,
-      company: (companySnapshot.data() || {}) as Record<string, unknown>,
-      config: mapTenantSaasConfig(tenantData, tenantDocument.id),
+    const users = usersSnapshot.docs.map((userDocument) => mapTenantAdminUser(userDocument.id, userDocument.data() || {}));
+    return mapTenantAdminClient(
+      tenantDocument.id,
+      tenantData,
+      (companySnapshot.data() || {}) as Record<string, unknown>,
       users,
-      lastUpdatedAt: timestampToIso(tenantData.updatedAt),
-      lastSyncAt: timestampToIso(tenantData.lastSyncAt),
-    } satisfies TenantAdminClient;
+    );
   }));
 
   return clients;
+}
+
+function mapTenantAdminUser(id: string, user: Record<string, unknown>): TenantAdminUser {
+  const lastActivityAt = timestampToIso(user.lastActivityAt || user.updatedAt);
+  const lastAccessAt = timestampToIso(user.lastLoginAt || user.lastAccessAt || user.lastSeenAt);
+  const lastSeenAt = timestampToIso(user.lastSeenAt || user.lastActivityAt || user.updatedAt);
+  const lastSeenMs = lastSeenAt ? Date.parse(lastSeenAt) : 0;
+
+  return {
+    id,
+    name: String(user.name || user.email || "Usuario"),
+    email: String(user.email || ""),
+    role: (user.role || "reader") as TenantRole,
+    active: user.active !== false,
+    lastActivityAt,
+    lastAccessAt,
+    device: String(user.deviceType || (user.device && typeof user.device === "object" ? (user.device as Record<string, unknown>).type : "") || "") || undefined,
+    online: Boolean(lastSeenMs && Date.now() - lastSeenMs <= 2 * 60 * 1000),
+  } satisfies TenantAdminUser;
+}
+
+function mapTenantAdminClient(
+  tenantId: string,
+  tenantData: Record<string, unknown>,
+  company: Record<string, unknown>,
+  users: TenantAdminUser[],
+): TenantAdminClient {
+  return {
+    tenantId,
+    company,
+    config: mapTenantSaasConfig(tenantData, tenantId),
+    users,
+    lastUpdatedAt: timestampToIso(tenantData.updatedAt),
+    lastSyncAt: timestampToIso(tenantData.lastSyncAt),
+  } satisfies TenantAdminClient;
+}
+
+export function subscribePlatformTenantClients(
+  onChange: (clients: TenantAdminClient[]) => void,
+  onError: (error: Error) => void,
+) {
+  if (!isPlatformOwnerEmail(auth.currentUser?.email)) {
+    onError(new Error("platform-admin-required"));
+    return () => undefined;
+  }
+
+  const tenantData = new Map<string, Record<string, unknown>>();
+  const companyData = new Map<string, Record<string, unknown>>();
+  const userData = new Map<string, TenantAdminUser[]>();
+  const companyUnsubscribers = new Map<string, () => void>();
+  const userUnsubscribers = new Map<string, () => void>();
+
+  const emit = () => {
+    onChange([...tenantData.entries()].map(([tenantId, data]) => mapTenantAdminClient(
+      tenantId,
+      data,
+      companyData.get(tenantId) || {},
+      userData.get(tenantId) || [],
+    )));
+  };
+
+  const removeTenant = (tenantId: string) => {
+    tenantData.delete(tenantId);
+    companyData.delete(tenantId);
+    userData.delete(tenantId);
+    companyUnsubscribers.get(tenantId)?.();
+    userUnsubscribers.get(tenantId)?.();
+    companyUnsubscribers.delete(tenantId);
+    userUnsubscribers.delete(tenantId);
+  };
+
+  const watchTenantChildren = (tenantId: string) => {
+    if (!companyUnsubscribers.has(tenantId)) {
+      companyUnsubscribers.set(tenantId, onSnapshot(
+        doc(db, `companies/${tenantId}`),
+        (snapshot) => {
+          companyData.set(tenantId, (snapshot.data() || {}) as Record<string, unknown>);
+          emit();
+        },
+        onError,
+      ));
+    }
+
+    if (!userUnsubscribers.has(tenantId)) {
+      userUnsubscribers.set(tenantId, onSnapshot(
+        collection(db, `tenants/${tenantId}/users`),
+        (snapshot) => {
+          userData.set(tenantId, snapshot.docs.map((userDocument) => mapTenantAdminUser(userDocument.id, userDocument.data() || {})));
+          emit();
+        },
+        onError,
+      ));
+    }
+  };
+
+  const tenantsUnsubscribe = onSnapshot(
+    collection(db, "tenants"),
+    (snapshot) => {
+      const currentIds = new Set(snapshot.docs.map((tenantDocument) => tenantDocument.id));
+      for (const tenantId of tenantData.keys()) {
+        if (!currentIds.has(tenantId)) removeTenant(tenantId);
+      }
+      snapshot.docs.forEach((tenantDocument) => {
+        tenantData.set(tenantDocument.id, tenantDocument.data() || {});
+        watchTenantChildren(tenantDocument.id);
+      });
+      emit();
+    },
+    onError,
+  );
+
+  return () => {
+    tenantsUnsubscribe();
+    for (const unsubscribe of companyUnsubscribers.values()) unsubscribe();
+    for (const unsubscribe of userUnsubscribers.values()) unsubscribe();
+  };
 }
 
 export async function saveTenantSaasConfig(

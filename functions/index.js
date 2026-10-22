@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
+import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 
@@ -21,6 +22,11 @@ const portalCommandOptions = {
   region: "us-east1",
   secrets: [portalConnectorSecret],
 };
+const portalTriggerOptions = {
+  region: "us-east1",
+  secrets: [portalConnectorUrl, portalConnectorSecret],
+};
+const portalSyncStateRef = db.doc("connectorState/portal");
 
 function normalizedText(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -39,6 +45,20 @@ function commandSecretMatches(received, expected) {
   const receivedBuffer = Buffer.from(received);
   const expectedBuffer = Buffer.from(expected);
   return receivedBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(receivedBuffer, expectedBuffer);
+}
+
+function errorMessage(error) {
+  return normalizedText(error instanceof Error ? error.message : error) || "Falha desconhecida no conector.";
+}
+
+function timestampMillis(value) {
+  if (value && typeof value.toMillis === "function") return value.toMillis();
+  if (value instanceof Date) return value.getTime();
+  return 0;
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function dateToIso(value) {
@@ -866,6 +886,12 @@ export const receivePortalCommand = onRequest(portalCommandOptions, async (reque
       transaction.create(commandRef, { commandId, commandType, sourceSystem, targetSystem, externalTenantId, status: "applied", createdAt: now, appliedAt: now });
       transaction.set(db.doc(`tenants/${tenantId}/auditLogs/${commandId}`), { action: "tenant.contract_updated_from_portal", actorRole: "system", actorUserId: "orquestra_portal", createdAt: now, targetId: tenantId, targetType: "tenant" });
     });
+    await portalSyncStateRef.set({
+      lastInboundAt: Timestamp.now(),
+      lastInboundCommandId: commandId,
+      lastInboundStatus: duplicate ? "duplicate" : "applied",
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
     response.json({ ok: true, duplicate, tenantId });
   } catch (error) {
     if (error instanceof Error && error.message === "tenant_not_found") { response.status(404).json({ error: "Empresa de origem não encontrada." }); return; }
@@ -1003,13 +1029,67 @@ async function sendFacePortalSnapshot() {
   };
 }
 
+async function runPortalSync(reason, { delayMs = 0, force = false } = {}) {
+  if (delayMs > 0) await wait(delayMs);
+
+  const decision = await db.runTransaction(async (transaction) => {
+    const stateSnapshot = await transaction.get(portalSyncStateRef);
+    const state = stateSnapshot.data() || {};
+    const lastAttemptAt = timestampMillis(state.lastAttemptAt);
+    const now = Date.now();
+    const stillRunning = state.status === "syncing" && now - lastAttemptAt < 2 * 60 * 1000;
+    const recentlyRequested = !force && lastAttemptAt > 0 && now - lastAttemptAt < 5 * 1000;
+
+    if (stillRunning || recentlyRequested) {
+      return {
+        run: false,
+        clients: Number(state.lastClients || 0),
+        users: Number(state.lastUsers || 0),
+      };
+    }
+
+    transaction.set(portalSyncStateRef, {
+      lastAttemptAt: Timestamp.now(),
+      lastReason: reason,
+      lastError: FieldValue.delete(),
+      status: "syncing",
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return { run: true };
+  });
+
+  if (!decision.run) {
+    return { ok: true, skipped: true, clients: decision.clients, users: decision.users };
+  }
+
+  try {
+    const result = await sendFacePortalSnapshot();
+    await portalSyncStateRef.set({
+      lastClients: result.clients,
+      lastSuccessAt: Timestamp.now(),
+      lastUsers: result.users,
+      status: "success",
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return result;
+  } catch (error) {
+    await portalSyncStateRef.set({
+      lastError: errorMessage(error).slice(0, 500),
+      lastFailureAt: Timestamp.now(),
+      status: "error",
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    throw error;
+  }
+}
+
 export const syncPortalSnapshot = onCall(portalCallableOptions, async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Entre no sistema para continuar.");
   const email = normalizedText(request.auth.token.email).toLowerCase();
   if (!["orquestracs@gmail.com", "limaalecsander@gmail.com"].includes(email)) {
     throw new HttpsError("permission-denied", "Apenas a equipe Orquestra.cs pode sincronizar a Central.");
   }
-  return sendFacePortalSnapshot();
+  return runPortalSync("manual", { force: true });
 });
 
 export const syncPortalSnapshotScheduled = onSchedule({
@@ -1019,5 +1099,29 @@ export const syncPortalSnapshotScheduled = onSchedule({
   timeoutSeconds: 120,
   secrets: [portalConnectorUrl, portalConnectorSecret],
 }, async () => {
-  await sendFacePortalSnapshot();
+  await runPortalSync("scheduled");
+});
+
+export const syncPortalOnTenantWrite = onDocumentWritten({
+  ...portalTriggerOptions,
+  document: "tenants/{tenantId}",
+}, async (event) => {
+  if (!event.data) return;
+  await runPortalSync(`event:tenant:${event.params.tenantId}`, { delayMs: 1500 });
+});
+
+export const syncPortalOnCompanyWrite = onDocumentWritten({
+  ...portalTriggerOptions,
+  document: "companies/{companyId}",
+}, async (event) => {
+  if (!event.data) return;
+  await runPortalSync(`event:company:${event.params.companyId}`, { delayMs: 1500 });
+});
+
+export const syncPortalOnUserWrite = onDocumentWritten({
+  ...portalTriggerOptions,
+  document: "tenants/{tenantId}/users/{userId}",
+}, async (event) => {
+  if (!event.data) return;
+  await runPortalSync(`event:user:${event.params.tenantId}:${event.params.userId}`, { delayMs: 1500 });
 });
