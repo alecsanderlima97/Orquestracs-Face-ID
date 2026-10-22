@@ -918,7 +918,7 @@ async function sendFacePortalSnapshot() {
     const companyDocument = await db.doc(`companies/${tenantDocument.id}`).get();
     const company = companyDocument.data() || {};
     const usersSnapshot = await db.collection(`tenants/${tenantDocument.id}/users`).limit(500).get();
-    const users = usersSnapshot.docs.map((userDocument) => {
+    const users = usersSnapshot.docs.filter((userDocument) => normalizedText(userDocument.data()?.email).toLowerCase() !== "orquestracs@gmail.com").map((userDocument) => {
       const user = userDocument.data() || {};
       const lastSeenAt = dateToIso(user.lastSeenAt || user.lastActivityAt || user.updatedAt);
       const lastSeenMs = lastSeenAt ? Date.parse(lastSeenAt) : 0;
