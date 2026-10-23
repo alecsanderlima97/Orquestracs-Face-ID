@@ -1006,9 +1006,13 @@ async function sendFacePortalSnapshot() {
     method: "POST",
     headers: {
       "content-type": "application/json",
+      "x-orquestra-contract-version": "v1",
+      "x-orquestra-source-system": "orquestracs_face_id",
       "x-orquestra-connector-secret": secret,
     },
     body: JSON.stringify({
+      contractVersion: "v1",
+      dataVersion: 1,
       sourceSystem: "orquestracs_face_id",
       snapshotId: crypto.randomUUID(),
       generatedAt,
