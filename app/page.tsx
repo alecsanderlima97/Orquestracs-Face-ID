@@ -1422,50 +1422,97 @@ export default function Home() {
 
   if (!user) {
     return (
-      <main className="grid min-h-screen place-items-center bg-[#f4f6f8] px-4 text-[#17202a]">
-        <section className="w-full max-w-md rounded-lg border border-[#d9e0e7] bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#2d6c5d]">
-            Orquestracs Face ID
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold text-[#101923]">Entrar no sistema</h1>
-          <p className="mt-2 text-sm leading-6 text-[#667085]">
-            Acesso restrito para usuarios convidados da empresa.
-          </p>
+      <main className="login-screen">
+        <section className="login-visual" aria-label="Orquestracs Face ID">
+          <img alt="" className="login-visual-image" src="/login-face-id-hero.png" />
+          <div className="login-visual-content">
+            <img
+              alt="Orquestracs Face ID"
+              className="login-visual-logo"
+              src="/orquestracs-face-id-wordmark.svg"
+            />
+            <p className="login-visual-kicker">CONTROLE DE JORNADA</p>
+            <h1>Reconhecimento que acompanha a sua operação.</h1>
+            <p className="login-visual-description">
+              Registre entradas, intervalos e saídas com mais agilidade, segurança e rastreabilidade.
+            </p>
+            <div className="login-visual-methods" aria-label="Formas de identificação e controle">
+              <div className="login-visual-method">
+                <span className="login-method-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M7 3H5a2 2 0 0 0-2 2v2M17 3h2a2 2 0 0 1 2 2v2M7 21H5a2 2 0 0 1-2-2v-2M17 21h2a2 2 0 0 0 2-2v-2" />
+                    <circle cx="12" cy="11" r="4.2" />
+                    <path d="M9.8 16.5c.7.5 1.4.7 2.2.7s1.5-.2 2.2-.7" />
+                  </svg>
+                </span>
+                <span><strong>Face ID</strong><small>Rosto</small></span>
+              </div>
+              <div className="login-visual-method">
+                <span className="login-method-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M12 4.2a6.1 6.1 0 0 0-6.1 6.1M12 7.2a3.1 3.1 0 0 0-3.1 3.1M12 4.2a6.1 6.1 0 0 1 6.1 6.1c0 4.1-1.1 6.9-2.7 9.2M12 10.3c0 4.8-.8 7.4-2.6 9.6M12 7.2a3.1 3.1 0 0 1 3.1 3.1c0 2.4-.4 4.3-1.1 6.1M5.9 10.3c0 3.2.6 5.3 1.8 7M18.1 10.3c0 1-.1 1.9-.3 2.7" />
+                  </svg>
+                </span>
+                <span><strong>Digital</strong><small>Biometria</small></span>
+              </div>
+              <div className="login-visual-method">
+                <span className="login-method-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                    <path d="M20 10c0 5.5-8 11-8 11S4 15.5 4 10a8 8 0 1 1 16 0Z" />
+                    <circle cx="12" cy="10" r="2.5" />
+                  </svg>
+                </span>
+                <span><strong>Local</strong><small>Geolocalização</small></span>
+              </div>
+            </div>
+          </div>
+        </section>
 
-          <div className="mt-6 grid gap-3">
-            <Field label="E-mail">
-              <input
-                className="input"
-                onChange={(event) => setLoginEmail(event.target.value)}
-                placeholder="usuario@empresa.com"
-                type="email"
-                value={loginEmail}
-              />
-            </Field>
-            <Field label="Senha">
-              <input
-                className="input"
-                onChange={(event) => setLoginPassword(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void handleLogin();
-                }}
-                placeholder="Sua senha"
-                type="password"
-                value={loginPassword}
-              />
-            </Field>
-            <button className="primary-button" onClick={handleLogin} type="button">
-              Entrar
-            </button>
-            <button className="google-button" onClick={handleGoogleLogin} type="button">
-              <span className="google-mark">G</span>
-              Entrar com Google
-            </button>
-            {loginMessage && (
-              <p className="rounded-md border border-[#efd9a8] bg-[#fff8e9] p-3 text-sm font-semibold text-[#8a5a00]">
-                {loginMessage}
-              </p>
-            )}
+        <section className="login-form-shell">
+          <div className="login-form-card">
+            <div className="login-form-heading">
+              <p className="login-form-kicker">ACESSO SEGURO</p>
+              <h2>Entrar no sistema</h2>
+              <p>Acesso restrito para usuários convidados da empresa.</p>
+            </div>
+
+            <div className="login-form-fields">
+              <Field label="E-mail">
+                <input
+                  className="input"
+                  onChange={(event) => setLoginEmail(event.target.value)}
+                  placeholder="usuario@empresa.com"
+                  type="email"
+                  value={loginEmail}
+                />
+              </Field>
+              <Field label="Senha">
+                <input
+                  className="input"
+                  onChange={(event) => setLoginPassword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") void handleLogin();
+                  }}
+                  placeholder="Sua senha"
+                  type="password"
+                  value={loginPassword}
+                />
+              </Field>
+              <button className="primary-button" onClick={handleLogin} type="button">
+                Entrar
+              </button>
+              <button className="google-button" onClick={handleGoogleLogin} type="button">
+                <span className="google-mark">G</span>
+                Entrar com Google
+              </button>
+              {loginMessage && (
+                <p className="rounded-md border border-[#efd9a8] bg-[#fff8e9] p-3 text-sm font-semibold text-[#8a5a00]">
+                  {loginMessage}
+                </p>
+              )}
+            </div>
+
+            <p className="login-form-footer">Ambiente protegido pela Orquestracs.</p>
           </div>
         </section>
       </main>
@@ -1575,7 +1622,7 @@ export default function Home() {
 
   return (
     <TenantIdContext.Provider value={activeCompanyId}>
-      <main className={`min-h-screen overflow-x-hidden text-[#17202a] ${kioskMode ? "kiosk-app-shell" : "bg-[#f4f6f8]"}`}>
+      <main className={`app-shell min-h-screen overflow-x-hidden text-[#17202a] ${kioskMode ? "kiosk-app-shell" : "bg-[#f4f6f8]"}`}>
       <div className={`sticky top-0 z-30 border-b border-[#d9e0e7] bg-white/95 px-3 py-2 shadow-sm backdrop-blur lg:hidden ${kioskMode ? "hidden" : ""}`}>
         <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-3">
           <button
@@ -1589,23 +1636,24 @@ export default function Home() {
             <span />
             <span />
           </button>
-          <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="app-mobile-brand min-w-0 flex-1">
             <img
               alt="Orquestracs Face ID"
-              className="h-9 w-9 shrink-0 rounded-md bg-[#dcebe6] object-contain p-1"
-              src="/orquestracs-face-id-logo.svg"
+              className="app-brand-wordmark-light"
+              src="/orquestracs-face-id-wordmark-light.svg"
             />
             <div className="min-w-0">
-              <p className="truncate text-sm font-bold text-[#101923]">Orquestracs Face ID</p>
               <p className="truncate text-xs text-[#667085]">{title}</p>
             </div>
           </div>
-          <div className="shrink-0 text-right">
-            <p className="text-[10px] font-semibold uppercase text-[#667085]">{headerWeather.icon} {headerWeather.label}</p>
-            <p className="whitespace-nowrap text-xs font-bold text-[#101923]">
-              {currentDateTime.split(", ").at(-1) || currentDateTime}
-            </p>
-          </div>
+          {active !== "Painel" && (
+            <div className="shrink-0 text-right">
+              <p className="text-[10px] font-semibold uppercase text-[#667085]">{headerWeather.icon} {headerWeather.label}</p>
+              <p className="whitespace-nowrap text-xs font-bold text-[#101923]">
+                {currentDateTime.split(", ").at(-1) || currentDateTime}
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1619,16 +1667,12 @@ export default function Home() {
           />
           <aside aria-label="Menu principal" className="mobile-navigation-panel">
             <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-4">
-              <div className="flex items-center gap-3">
+              <div className="min-w-0">
                 <img
                   alt="Orquestracs Face ID"
-                  className="h-10 w-10 rounded-md bg-[#dcebe6] object-contain p-1"
-                  src="/orquestracs-face-id-logo.svg"
+                  className="app-brand-wordmark-dark app-brand-wordmark-menu"
+                  src="/orquestracs-face-id-wordmark.svg"
                 />
-                <div>
-                  <p className="text-sm font-bold text-white">Orquestracs</p>
-                  <p className="text-xs font-semibold uppercase text-[#7ee2c4]">Face ID</p>
-                </div>
               </div>
               <button
                 aria-label="Fechar menu"
@@ -1672,19 +1716,15 @@ export default function Home() {
       )}
 
       <div className={kioskMode ? "kiosk-content-shell" : "mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:grid-cols-[292px_minmax(0,1fr)] lg:gap-6 lg:px-6"}>
-        <aside className={kioskMode ? "hidden" : "hidden rounded-lg border border-[#d9e0e7] bg-[#101923] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:block lg:h-[calc(100vh-2rem)]"}>
+        <aside className={kioskMode ? "hidden" : "app-sidebar hidden rounded-lg border border-[#d9e0e7] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:block lg:h-[calc(100vh-2rem)]"}>
           <div className="flex h-full flex-col">
             <div className="border-b border-white/10 pb-5">
-              <div className="flex items-center gap-3">
+              <div className="min-w-0">
                 <img
                   alt="Orquestracs Face ID"
-                  className="h-11 w-11 rounded-md bg-[#dcebe6] object-contain p-1.5"
-                  src="/orquestracs-face-id-logo.svg"
+                  className="app-brand-wordmark-dark app-brand-wordmark-sidebar"
+                  src="/orquestracs-face-id-wordmark.svg"
                 />
-                <div className="min-w-0">
-                  <p className="text-base font-bold leading-5 text-white">Orquestracs</p>
-                  <p className="mt-0.5 text-xs font-semibold uppercase tracking-[0.12em] text-[#7ee2c4]">Face ID</p>
-                </div>
               </div>
               <div className="mt-5 rounded-md border border-white/10 bg-white/[0.04] p-3">
                 <p className="text-xs uppercase tracking-[0.12em] text-white/45">Empresa</p>
@@ -1734,10 +1774,10 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className={kioskMode ? "kiosk-content-section" : centralAdminMode ? "min-w-0" : "grid min-w-0 gap-4 sm:gap-5"}>
-          <header className={kioskMode || centralAdminMode ? "hidden" : "rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5"}>
-            <div className="relative grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,360px)] sm:items-center lg:block">
-              <div className="min-w-0 lg:max-w-[280px]">
+        <section className={kioskMode ? "kiosk-content-section" : centralAdminMode ? "app-main-content min-w-0" : "app-main-content grid min-w-0 gap-4 sm:gap-5"}>
+          <header className={kioskMode || centralAdminMode || active === "Painel" ? "hidden" : "app-header rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5"}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
                   Orquestracs Face ID
                 </p>
@@ -1749,28 +1789,8 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="mt-0 flex justify-start sm:justify-end lg:absolute lg:right-[72px] lg:top-3 lg:mt-0 lg:w-[360px]">
-                <div className={`w-full max-w-[360px] rounded-lg border px-3 py-2.5 ${headerWeather.shellClass}`}>
-                  <div className="flex items-center gap-3">
-                    <span aria-hidden="true" className="min-w-[3.5rem] text-center text-3xl leading-none">{headerWeather.icon}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#2d6c5d]">Momento e clima</p>
-                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-[#2d6c5d]">
-                          <span className="h-1.5 w-1.5 rounded-full bg-[#2d6c5d]" /> ao vivo
-                        </span>
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                        <p className="text-sm font-bold text-[#143f37]">{headerWeather.label}</p>
-                        <p className="font-mono text-xl font-bold tracking-normal text-[#101923]">{headerTime}</p>
-                      </div>
-                      <p className="mt-0.5 text-xs capitalize text-[#54716a]">{headerDate} · {headerWeather.detail}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
               <button
-                className="secondary-button absolute right-0 top-0 hidden lg:block"
+                className="secondary-button shrink-0"
                 onClick={handleLogout}
                 type="button"
               >
@@ -1919,16 +1939,17 @@ function Metrics() {
   }, []);
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {dashboardMetrics.map(([label, value, detail]) => (
-        <div className="rounded-lg border border-[#d9e0e7] bg-white p-4 shadow-sm" key={label}>
-          <div className="flex items-start justify-between gap-3">
-            <p className="text-sm font-medium text-[#667085]">{label}</p>
-            <span className="h-2 w-2 rounded-full bg-[#2d6c5d]" />
-          </div>
-          <strong className="mt-4 block text-2xl font-semibold text-[#101923]">{value}</strong>
-          <span className="mt-1 block text-xs text-[#7c8895]">{detail}</span>
-        </div>
+    <div className="app-metric-grid">
+      {dashboardMetrics.map(([label, value, detail], index) => (
+        <DashboardMetricCard
+          detail={detail}
+          icon={index === 0 ? "◌" : index === 1 ? "＋" : index === 2 ? "↗" : "!"}
+          key={label}
+          label={label}
+          loading={false}
+          tone={index === 3 ? "red" : index === 2 ? "green" : "teal"}
+          value={value}
+        />
       ))}
     </div>
   );
@@ -2169,6 +2190,55 @@ function isDailyAttentionStatus(statusKey: DailyStatusKey) {
     || statusKey === "absence_morning";
 }
 
+type DashboardMetricTone = "amber" | "green" | "red" | "teal";
+
+function DashboardMetricCard({
+  detail,
+  icon,
+  label,
+  loading,
+  tone = "teal",
+  value,
+}: {
+  detail: string;
+  icon: string;
+  label: string;
+  loading: boolean;
+  tone?: DashboardMetricTone;
+  value: string;
+}) {
+  return (
+    <article className="dashboard-metric-card" data-tone={tone}>
+      <div className="dashboard-metric-top">
+        <span>{label}</span>
+        <span aria-hidden="true" className="dashboard-metric-icon">{icon}</span>
+      </div>
+      <strong className="dashboard-metric-value">{loading ? "-" : value}</strong>
+      <span className="dashboard-metric-detail">{detail}</span>
+    </article>
+  );
+}
+
+function DashboardSystemItem({
+  detail,
+  title,
+  tone = "success",
+}: {
+  detail: string;
+  title: string;
+  tone?: "error" | "success" | "warning";
+}) {
+  return (
+    <div className="dashboard-system-item">
+      <span aria-hidden="true" className={`dashboard-system-dot ${tone === "success" ? "" : tone}`} />
+      <div>
+        <strong>{title}</strong>
+        <span>{detail}</span>
+      </div>
+    </div>
+  );
+}
+
 function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
   const companyId = useActiveCompanyId();
   const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
@@ -2264,6 +2334,14 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
     return isDailyAttentionStatus(getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays, attendanceJustifications));
   }).length;
   const okCount = employeesList.length - pendingCount;
+  const activityPeriods = [6, 8, 10, 12, 14, 16, 18, 20].map((hour) => ({
+    count: todayPunches.filter((punch) => punchDate(punch).getHours() >= hour && punchDate(punch).getHours() < hour + 2).length,
+    label: `${String(hour).padStart(2, "0")}h`,
+  }));
+  const activityMax = Math.max(1, ...activityPeriods.map((period) => period.count));
+  const period = getDaypart(now);
+  const currentDate = now.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", weekday: "long" });
+  const currentTime = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
   function renderPunchCell(row: DailyEmployeeRow, type: PunchType, expected: string) {
     const punch = row.punches.find(
@@ -2273,12 +2351,12 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
     const pending = row.pendingPunches.includes(type);
     return (
       <span
-        className={`inline-flex min-w-[58px] justify-center rounded-md px-2 py-1 text-xs font-semibold ${
+        className={`dashboard-punch-time ${
           pending
-            ? "border-2 border-[#d0443e] bg-[#fff0ef] text-[#a33a3a]"
+            ? "pending"
             : confirmed
-              ? "border border-[#b9ddd3] bg-[#f1faf7] text-[#18594c]"
-              : "border border-transparent text-[#667085]"
+              ? "confirmed"
+              : "expected"
         }`}
         title={punch ? `Batida registrada às ${formatPunchDateTime(punch)}` : undefined}
       >
@@ -2289,45 +2367,81 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
 
   return (
     <>
-      <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <section className="dashboard-panel">
+        <header className="dashboard-overview-header">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">Acompanhamento diário</p>
-            <h2 className="mt-1 text-xl font-semibold text-[#101923]">Visão geral da operação</h2>
-            <p className="mt-1 text-sm leading-6 text-[#667085]">Acompanhe as marcações do dia e identifique pendências antes do fechamento.</p>
+            <p className="dashboard-eyebrow">Acompanhamento diário</p>
+            <h2>Visão geral da operação</h2>
+            <p>Acompanhe as marcações do dia e identifique pendências antes do fechamento.</p>
           </div>
-        </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            ["Colaboradores", String(employeesList.length), "cadastros ativos"],
-            ["Batidas hoje", String(todayPunches.length), "registros recebidos"],
-            ["Sem pendência", String(okCount), "acompanhamento normal"],
-            ["Pendências e faltas", String(pendingCount), "bater ou justificar"],
-          ].map(([label, value, detail], index) => (
-            <div className={`rounded-md border p-4 ${index === 3 && pendingCount ? "border-[#f2b8b5] bg-[#fff0ef]" : "border-[#e3e8ee] bg-[#fbfcfd]"}`} key={label}>
-              <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
-              <strong className={`mt-2 block text-2xl font-semibold ${index === 3 && pendingCount ? "text-[#a33a3a]" : "text-[#101923]"}`}>{loading ? "-" : value}</strong>
-              <span className="mt-1 block text-xs text-[#7c8895]">{detail}</span>
-            </div>
-          ))}
+          <div className="dashboard-live-meta">
+            <span>{period.icon} {period.label} · ao vivo</span>
+            <strong>{currentTime}</strong>
+            <small>{currentDate}</small>
+          </div>
+        </header>
+        <div className="dashboard-metric-grid">
+          <DashboardMetricCard detail="cadastros ativos" icon="◌" label="Colaboradores" loading={loading} value={String(employeesList.length)} />
+          <DashboardMetricCard detail="registros recebidos" icon="✓" label="Batidas hoje" loading={loading} tone="green" value={String(todayPunches.length)} />
+          <DashboardMetricCard detail="acompanhamento normal" icon="↗" label="Sem pendência" loading={loading} tone="green" value={String(okCount)} />
+          <DashboardMetricCard detail="bater ou justificar" icon="!" label="Pendências e faltas" loading={loading} tone={pendingCount ? "red" : "green"} value={String(pendingCount)} />
         </div>
       </section>
 
-      <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
-        <div className="flex flex-col gap-3 border-b border-[#e3e8ee] p-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-sm font-medium text-[#667085]">Controle em tempo real</p>
-            <h2 className="mt-1 text-xl font-semibold text-[#101923]">Funcionários e status das batidas</h2>
+      <div className="dashboard-content-grid">
+        <section className="dashboard-activity-card">
+          <div className="dashboard-card-heading">
+            <div>
+              <p className="dashboard-eyebrow">Movimento do dia</p>
+              <h3>Registros de hoje</h3>
+              <p>Distribuição real das marcações por período.</p>
+            </div>
+            <span className="dashboard-card-caption">{todayPunches.length} registro(s)</span>
           </div>
-          <button className="secondary-button w-fit" disabled={loading} onClick={() => setRefreshToken((token) => token + 1)} type="button">
+          <div aria-label="Registros de hoje por período" className="dashboard-bars" role="img">
+            {activityPeriods.map((periodItem) => (
+              <div className="dashboard-bar-column" key={periodItem.label}>
+                <span className="dashboard-bar-value">{periodItem.count || "-"}</span>
+                <div className="dashboard-bar" style={{ height: `${Math.max(8, (periodItem.count / activityMax) * 100)}%` }} />
+                <span className="dashboard-bar-label">{periodItem.label}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="dashboard-system-card">
+          <div className="dashboard-card-heading">
+            <div>
+              <p className="dashboard-eyebrow">Integridade</p>
+              <h3>Status do sistema</h3>
+            </div>
+          </div>
+          <div className="dashboard-system-list">
+            <DashboardSystemItem detail={error || `${employeesList.length} colaborador(es) carregado(s) para hoje.`} title="Dados do dia" tone={error ? "error" : "success"} />
+            <DashboardSystemItem detail="Sincronização automática a cada 30 segundos." title="Atualização automática" />
+            <DashboardSystemItem detail={pendingCount ? `${pendingCount} registro(s) aguardando conferência.` : "Nenhuma pendência identificada."} title="Acompanhamento" tone={pendingCount ? "warning" : "success"} />
+          </div>
+        </section>
+      </div>
+
+      <section className="dashboard-table-panel">
+        <div className="dashboard-table-header">
+          <div>
+            <p className="dashboard-eyebrow">Controle em tempo real</p>
+            <h2>Funcionários e status das batidas</h2>
+            <p>As marcações pendentes ficam destacadas para conferência.</p>
+          </div>
+          <button className="secondary-button" disabled={loading} onClick={() => setRefreshToken((token) => token + 1)} type="button">
             {loading ? "Atualizando..." : "Atualizar agora"}
           </button>
         </div>
-        <div className="grid gap-3 border-b border-[#e3e8ee] bg-[#fbfcfd] p-4 md:grid-cols-[minmax(0,1fr)_220px]">
-          <Field label="Filtrar colaborador, cargo ou escala">
+        <div className="dashboard-filter-bar">
+          <label>
+            Filtrar colaborador, cargo ou escala
             <input className="input" onChange={(event) => setSearch(event.target.value)} placeholder="Digite para filtrar" value={search} />
-          </Field>
-          <Field label="Filtrar status">
+          </label>
+          <label>
+            Filtrar status
             <select className="input" onChange={(event) => setStatusFilter(event.target.value as DailyStatusKey | "all")} value={statusFilter}>
               <option value="all">Todos</option>
               <option value="pending">Batida pendente</option>
@@ -2340,104 +2454,82 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
               <option value="waiting">Aguardando entrada</option>
               <option value="off">Fora da escala</option>
             </select>
-          </Field>
+          </label>
         </div>
-        {error && <p className="m-4 rounded-md border border-[#f2b8b5] bg-[#fff0ef] p-3 text-sm font-semibold text-[#a33a3a]">{error}</p>}
-        <div className="table-scroll hidden lg:block">
-          <table className="w-full min-w-[920px] border-collapse text-left text-sm">
-            <thead className="bg-[#f8fafb] text-xs uppercase text-[#667085]">
+        {error && <p className="mx-6 mt-4 rounded-lg border border-[#f2b8b5] bg-[#fff0ef] p-3 text-sm font-semibold text-[#a33a3a]">{error}</p>}
+        <div className="dashboard-table-scroll hidden lg:block">
+          <table className="dashboard-table">
+            <thead>
               <tr>
                 {["Funcionário", "Escala", "Entrada", "Intervalo", "Retorno", "Saída", "Última batida", "Status"].map((head) => (
-                  <th className="px-4 py-3 font-semibold" key={head}>{head}</th>
+                  <th key={head}>{head}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {!loading && rows.length === 0 ? (
-                <tr><td className="px-4 py-10 text-center text-[#667085]" colSpan={8}>{employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}</td></tr>
+              {loading ? (
+                <tr><td colSpan={8}><div className="dashboard-empty-state">Carregando colaboradores...</div></td></tr>
+              ) : rows.length === 0 ? (
+                <tr><td colSpan={8}><div className="dashboard-empty-state">{employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}</div></td></tr>
               ) : rows.map((row) => (
-                <tr className={`border-t ${isDailyAttentionStatus(row.statusKey) ? "border-[#f2b8b5] bg-[#fff8f7]" : "border-[#e3e8ee]"}`} key={row.employee.employeeId}>
-                  <td className="px-4 py-4 font-semibold text-[#101923]">
-                    <div className="flex items-center gap-3">
-                      {employeePhotoUrls[row.employee.employeeId] ? (
-                        <img
-                          alt={`Foto de ${row.employee.name}`}
-                          className="h-9 w-9 rounded-md border border-[#d9e0e7] object-cover"
-                          src={employeePhotoUrls[row.employee.employeeId]}
-                        />
-                      ) : (
-                        <span className="grid h-9 w-9 place-items-center rounded-md border border-[#d9e0e7] bg-[#fbfcfd] text-xs font-bold text-[#18594c]">
-                          {row.employee.name.slice(0, 1).toUpperCase()}
-                        </span>
-                      )}
+                <tr className={isDailyAttentionStatus(row.statusKey) ? "dashboard-row-attention" : ""} key={row.employee.employeeId}>
+                  <td>
+                    <div className="dashboard-employee-cell">
+                      <span className="dashboard-employee-photo">
+                        {employeePhotoUrls[row.employee.employeeId] ? <img alt={`Foto de ${row.employee.name}`} src={employeePhotoUrls[row.employee.employeeId]} /> : row.employee.name.slice(0, 1).toUpperCase()}
+                      </span>
                       <span>{row.employee.name}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-4 text-[#667085]">{row.employee.shift}</td>
-                  <td className="px-4 py-4">{renderPunchCell(row, "entry", row.employee.schedule.start)}</td>
-                  <td className="px-4 py-4">{renderPunchCell(row, "lunch_out", row.employee.schedule.breakStart)}</td>
-                  <td className="px-4 py-4">{renderPunchCell(row, "lunch_back", row.employee.schedule.breakEnd)}</td>
-                  <td className="px-4 py-4">{renderPunchCell(row, "exit", row.employee.schedule.end)}</td>
-                  <td className="px-4 py-4 text-[#667085]">{row.latestPunch ? formatPunchDateTime(row.latestPunch) : "Sem batida hoje"}</td>
-                  <td className="px-4 py-4"><span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${dailyStatusClass(row.statusKey)}`}>{row.statusLabel}</span></td>
+                  <td className="text-[#64748b]">{row.employee.shift}</td>
+                  <td>{renderPunchCell(row, "entry", row.employee.schedule.start)}</td>
+                  <td>{renderPunchCell(row, "lunch_out", row.employee.schedule.breakStart)}</td>
+                  <td>{renderPunchCell(row, "lunch_back", row.employee.schedule.breakEnd)}</td>
+                  <td>{renderPunchCell(row, "exit", row.employee.schedule.end)}</td>
+                  <td className="text-[#64748b]">{row.latestPunch ? formatPunchDateTime(row.latestPunch) : "Sem batida hoje"}</td>
+                  <td><span className={`dashboard-status-pill ${dailyStatusClass(row.statusKey)}`}>{row.statusLabel}</span></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="space-y-3 p-4 lg:hidden">
+        <div className="dashboard-mobile-list lg:hidden">
           {loading ? (
-            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4 text-sm text-[#667085]">Carregando colaboradores...</div>
+            <div className="dashboard-empty-state">Carregando colaboradores...</div>
           ) : rows.length === 0 ? (
-            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-4 text-center text-sm text-[#667085]">
-              {employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}
-            </div>
+            <div className="dashboard-empty-state">{employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}</div>
           ) : rows.map((row) => (
-            <article className={`min-w-0 rounded-md border p-3 ${isDailyAttentionStatus(row.statusKey) ? "border-[#f2b8b5] bg-[#fff8f7]" : "border-[#e3e8ee] bg-white"}`} key={`mobile-${row.employee.employeeId}`}>
+            <article className={`dashboard-mobile-row ${isDailyAttentionStatus(row.statusKey) ? "attention" : ""}`} key={`mobile-${row.employee.employeeId}`}>
               <div className="flex min-w-0 items-start gap-3">
-                {employeePhotoUrls[row.employee.employeeId] ? (
-                  <img
-                    alt={`Foto de ${row.employee.name}`}
-                    className="h-10 w-10 shrink-0 rounded-md border border-[#d9e0e7] object-cover"
-                    src={employeePhotoUrls[row.employee.employeeId]}
-                  />
-                ) : (
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-[#d9e0e7] bg-[#fbfcfd] text-sm font-bold text-[#18594c]">
-                    {row.employee.name.slice(0, 1).toUpperCase()}
-                  </span>
-                )}
+                <span className="dashboard-employee-photo">
+                  {employeePhotoUrls[row.employee.employeeId] ? <img alt={`Foto de ${row.employee.name}`} src={employeePhotoUrls[row.employee.employeeId]} /> : row.employee.name.slice(0, 1).toUpperCase()}
+                </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-                    <p className="min-w-0 break-words text-sm font-semibold text-[#101923]">{row.employee.name}</p>
-                    <span className={`inline-flex max-w-full rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-4 ${dailyStatusClass(row.statusKey)}`}>
-                      {row.statusLabel}
-                    </span>
+                    <p className="min-w-0 break-words text-sm font-semibold text-[#142235]">{row.employee.name}</p>
+                    <span className={`dashboard-status-pill ${dailyStatusClass(row.statusKey)}`}>{row.statusLabel}</span>
                   </div>
-                  <p className="mt-1 break-words text-xs text-[#667085]">{row.employee.shift}</p>
+                  <p className="mt-1 break-words text-xs text-[#64748b]">{row.employee.shift}</p>
                 </div>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="dashboard-mobile-punch-grid">
                 {[
                   { label: "Entrada", value: renderPunchCell(row, "entry", row.employee.schedule.start) },
                   { label: "Intervalo", value: renderPunchCell(row, "lunch_out", row.employee.schedule.breakStart) },
                   { label: "Retorno", value: renderPunchCell(row, "lunch_back", row.employee.schedule.breakEnd) },
                   { label: "Saída", value: renderPunchCell(row, "exit", row.employee.schedule.end) },
                 ].map(({ label, value }) => (
-                  <div className="min-w-0 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] px-2 py-2" key={label}>
-                    <p className="text-[10px] font-semibold uppercase text-[#667085]">{label}</p>
-                    <div className="mt-1 min-w-0">{value}</div>
+                  <div className="dashboard-mobile-punch" key={label}>
+                    <p>{label}</p>
+                    <div>{value}</div>
                   </div>
                 ))}
               </div>
-              <p className="mt-3 break-words text-xs text-[#667085]">
-                Última batida: <span className="font-semibold text-[#26323f]">{row.latestPunch ? formatPunchDateTime(row.latestPunch) : "Sem batida hoje"}</span>
-              </p>
+              <p className="mt-3 break-words text-xs text-[#64748b]">Última batida: <span className="font-semibold text-[#142235]">{row.latestPunch ? formatPunchDateTime(row.latestPunch) : "Sem batida hoje"}</span></p>
             </article>
           ))}
         </div>
-        <div className="border-t border-[#e3e8ee] px-5 py-4 text-sm leading-6 text-[#667085]">
-          <strong className="text-[#a33a3a]">Pendência ou falta indicada</strong> exige batida, atestado ou justificativa aprovada antes do fechamento. A batida original nunca é apagada.
-        </div>
+        <div className="dashboard-note"><strong>Pendência ou falta indicada</strong> exige batida, atestado ou justificativa aprovada antes do fechamento. A batida original nunca é apagada.</div>
       </section>
     </>
   );
@@ -2617,7 +2709,7 @@ function PunchCard({
   setPin: (value: string) => void;
 }) {
   return (
-    <section className="rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
+    <section className="app-panel">
       <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
         <div>
           <p className="text-sm font-medium text-[#667085]">Registro rapido</p>
@@ -2663,7 +2755,7 @@ function PunchCard({
 
 function ComplianceCard() {
   return (
-    <section className="rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
+    <section className="app-panel">
       <p className="text-sm font-medium text-[#667085]">Compliance</p>
       <h2 className="mt-1 text-xl font-semibold text-[#101923]">Controles sensiveis</h2>
       <div className="mt-4 grid gap-3">
@@ -2768,8 +2860,8 @@ function AuthenticationSettingsScreen({
 
   return (
     <div className="grid min-w-0 gap-4">
-      <section className="overflow-hidden rounded-lg border border-[#cbd8d6] bg-white shadow-sm">
-        <div className="border-b border-[#d9e7e3] bg-[#f0faf7] px-4 py-4 sm:px-5">
+      <section className="app-panel overflow-hidden">
+        <div className="app-panel-heading app-panel-heading-soft">
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#187e69]">Configuracoes da empresa</p>
           <h2 className="mt-1 text-lg font-semibold text-[#102a35]">Identificacao para registro de ponto</h2>
           <p className="mt-1 max-w-3xl text-sm leading-5 text-[#526773]">
@@ -2777,7 +2869,7 @@ function AuthenticationSettingsScreen({
           </p>
         </div>
 
-        <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+        <div className="app-panel-content grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
           <div>
             <h3 className="text-sm font-semibold text-[#102a35]">Preferencia de autenticacao</h3>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -2845,15 +2937,15 @@ function AuthenticationSettingsScreen({
         </div>
       </section>
 
-      <section className="rounded-lg border border-[#cbd8d6] bg-white shadow-sm">
-        <div className="flex flex-wrap items-end justify-between gap-2 border-b border-[#e0e8eb] px-4 py-4 sm:px-5">
+      <section className="app-panel overflow-hidden">
+        <div className="app-panel-heading flex flex-wrap items-end justify-between gap-2">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#187e69]">Leitores candidatos</p>
             <h2 className="mt-1 text-base font-semibold text-[#102a35]">Cinco modelos para avaliacao</h2>
           </div>
           <span className="rounded-full bg-[#fff5dd] px-3 py-1 text-xs font-semibold text-[#795b12]">Nenhum aprovado ou conectado</span>
         </div>
-        <div className="grid gap-3 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-3">
+        <div className="app-panel-content grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {fingerprintReaderCandidates.map((reader) => (
             <article className="flex min-w-0 flex-col rounded-md border border-[#d6e0e5] bg-[#fbfcfd] p-3" key={reader.id}>
               <div className="flex items-start justify-between gap-2">
@@ -2882,7 +2974,7 @@ function AuthenticationSettingsScreen({
             </article>
           ))}
         </div>
-        <p className="border-t border-[#e0e8eb] px-4 py-3 text-xs leading-5 text-[#60717d] sm:px-5">
+        <p className="app-panel-footer">
           A lista e uma triagem tecnica, nao um ranking de vendas nem recomendacao de compra. O modelo final depende do tablet/computador, sistema operacional, politica de dados e teste do fornecedor.
         </p>
       </section>
@@ -4617,7 +4709,7 @@ function ExternalPunchScreen({
   }
 
   return (
-    <section className="mx-auto max-w-3xl rounded-lg border border-[#d9e0e7] bg-white p-4 shadow-sm md:p-6">
+    <section className="app-panel app-narrow-panel mx-auto max-w-3xl">
       <div className="flex flex-col gap-2 border-b border-[#e3e8ee] pb-4 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase text-[#2d6c5d]">Registro pelo celular</p>
@@ -4974,11 +5066,7 @@ function KioskScreen({
     <section className="kiosk-screen min-h-[100dvh] text-white">
       <header className="kiosk-clock-header">
         <div className="kiosk-brand-lockup">
-          <div className="kiosk-brand-mark" aria-hidden="true">O</div>
-          <div className="min-w-0">
-            <p className="kiosk-brand-name">Orquestracs</p>
-            <p className="kiosk-brand-product">Face ID</p>
-          </div>
+          <img alt="Orquestracs Face ID" className="kiosk-brand-wordmark" src="/orquestracs-face-id-wordmark.svg" />
         </div>
         <div className="kiosk-title-block">
           <p className="kiosk-eyebrow">Orquestracs Face ID</p>
@@ -6725,11 +6813,11 @@ function EmployeesTable({
   );
 
   if (embedded) {
-    return <div className="min-w-0 overflow-hidden rounded-md border border-[#e3e8ee]">{tableContent}</div>;
+    return <div className="app-table-shell min-w-0 overflow-hidden">{tableContent}</div>;
   }
 
   return (
-    <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+    <section className="app-table-shell min-w-0">
       {tableContent}
     </section>
   );
@@ -6739,7 +6827,7 @@ function ReportPreview() {
   const journeyLabels = ["Data", "Dia", "Entrada", "Saída intervalo", "Retorno", "Saída final", "Trabalhadas", "Banco/Falta", "Ocorrência"];
 
   return (
-    <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+    <section className="app-table-shell min-w-0">
       <div className="grid gap-3 border-b border-[#e3e8ee] p-5 lg:grid-cols-[1fr_auto] lg:items-end">
         <div>
           <p className="text-sm font-medium text-[#667085]">Relatorio de jornada detalhada</p>
@@ -6854,22 +6942,22 @@ function CollapsiblePanel({
   title: string;
 }) {
   return (
-    <section className="rounded-lg border border-[#d9e0e7] bg-white shadow-sm">
+    <section className="app-panel overflow-hidden">
       <button
         aria-expanded={isOpen}
-        className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-[#f8fafb]"
+        className="app-panel-toggle flex w-full items-center justify-between gap-4 text-left transition"
         onClick={onToggle}
         type="button"
       >
         <span>
-          <span className="block text-sm font-medium text-[#667085]">{subtitle}</span>
-          <span className="mt-1 block text-xl font-semibold text-[#101923]">{title}</span>
+          <span className="app-panel-kicker">{subtitle}</span>
+          <span className="app-panel-title">{title}</span>
         </span>
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#d9e0e7] bg-[#fbfcfd] text-lg font-semibold text-[#26323f]">
+        <span className="app-panel-toggle-icon">
           {isOpen ? "-" : "+"}
         </span>
       </button>
-      {isOpen && <div className="border-t border-[#e3e8ee] p-5">{children}</div>}
+      {isOpen && <div className="app-panel-body">{children}</div>}
     </section>
   );
 }
@@ -6884,17 +6972,19 @@ function Panel({
   title: string;
 }) {
   return (
-    <section className="min-w-0 rounded-lg border border-[#d9e0e7] bg-white p-5 shadow-sm">
-      <p className="text-sm font-medium text-[#667085]">{subtitle}</p>
-      <h2 className="mt-1 text-xl font-semibold text-[#101923]">{title}</h2>
-      <div className="mt-5">{children}</div>
+    <section className="app-panel min-w-0">
+      <div className="app-panel-heading">
+        <p className="app-panel-kicker">{subtitle}</p>
+        <h2 className="app-panel-title">{title}</h2>
+      </div>
+      <div className="app-panel-body">{children}</div>
     </section>
   );
 }
 
 function Field({ children, label }: { children: React.ReactNode; label: string }) {
   return (
-    <label className="grid gap-2 text-sm font-semibold text-[#26323f]">
+    <label className="app-field">
       {label}
       {children}
     </label>
@@ -7508,12 +7598,12 @@ function SaveButton({
 }
 
 function ActionRow({ children }: { children: React.ReactNode }) {
-  return <div className="mt-5 flex flex-wrap gap-2">{children}</div>;
+  return <div className="app-action-row">{children}</div>;
 }
 
 function CheckList({ items }: { items: string[] }) {
   return (
-    <div className="grid gap-3">
+    <div className="app-checklist">
       {items.map((item) => (
         <div className="info-note" key={item}>
           <span className="info-note-icon" aria-hidden="true" />
@@ -7525,5 +7615,5 @@ function CheckList({ items }: { items: string[] }) {
 }
 
 function TwoColumn({ children }: { children: React.ReactNode }) {
-  return <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_370px]">{children}</div>;
+  return <div className="app-two-column">{children}</div>;
 }

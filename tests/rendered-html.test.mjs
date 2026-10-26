@@ -68,7 +68,7 @@ test("mantem batidas originais no fluxo protegido do servidor", async () => {
   assert.match(rules, /match \/repIdempotency\/\{requestId\}/);
   assert.match(page, /Consultar comprovantes das últimas 48 horas/);
   assert.match(page, /Momento e clima/);
-  assert.match(page, /border-2 border-\[#d0443e\]/);
+  assert.match(page, /dashboard-punch-time/);
   assert.match(page, /getDailyPendingPunch/);
   assert.match(page, /listEmployeePunches\(companyId, employeeId\)/);
   assert.match(page, /inferNextPunchFromHistory/);
@@ -119,7 +119,9 @@ test("mantem navegacao responsiva para celular e tablet", async () => {
   assert.match(css, /\.table-scroll/);
   assert.match(css, /touch-action:\s*pan-x pan-y pinch-zoom/);
   assert.match(page, /className="table-scroll/);
-  assert.match(page, /className="space-y-3 p-4 lg:hidden"/);
+  assert.match(page, /dashboard-mobile-list/);
+  assert.match(page, /dashboard-panel/);
+  assert.match(page, /DashboardMetricCard/);
   assert.match(layout, /width:\s*"device-width"/);
   assert.match(css, /prefers-reduced-motion/);
 });

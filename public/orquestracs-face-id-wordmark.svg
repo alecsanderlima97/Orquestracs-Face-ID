@@ -1,0 +1,15 @@
+<svg width="300" height="76" viewBox="0 0 300 76" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Orquestracs Face ID</title>
+  <desc id="desc">Logomarca Orquestracs Face ID</desc>
+  <defs>
+    <linearGradient id="ring" x1="4" y1="5" x2="62" y2="67" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#15D9B1"/>
+      <stop offset="1" stop-color="#087F69"/>
+    </linearGradient>
+  </defs>
+  <rect width="300" height="72" rx="12" fill="#0B1722"/>
+  <path d="M53 9C35.327 9 21 23.327 21 41s14.327 32 32 32 32-14.327 32-32S70.673 9 53 9Zm0 11c11.598 0 21 9.402 21 21S64.598 62 53 62 32 52.598 32 41s9.402-21 21-21Z" fill="url(#ring)"/>
+  <path d="M53 27c-7.732 0-14 6.268-14 14s6.268 14 14 14c4.067 0 7.731-1.736 10.293-4.51A13.95 13.95 0 0 1 53 49c-4.418 0-8-3.582-8-8s3.582-8 8-8c4.418 0 8.25 2.287 10.293 5.51A13.95 13.95 0 0 1 53 27Z" fill="#0B1722"/>
+  <text x="101" y="31" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="700" letter-spacing="3.2">ORQUESTRACS</text>
+  <text x="101" y="55" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" letter-spacing="4.4">FACE <tspan fill="#15D9B1">ID</tspan></text>
+</svg>
