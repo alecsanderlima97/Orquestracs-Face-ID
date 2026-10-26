@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   GoogleAuthProvider,
   browserLocalPersistence,
@@ -16,12 +16,13 @@ import {
 import { clearLocalFaceProfile, FaceCamera, type FaceProfileSource, type RecognizedFace } from "@/app/components/FaceCamera";
 import AdminCentral from "@/app/components/AdminCentral";
 import { auth } from "@/lib/firebase/client";
-import { getMainCompany, saveMainCompany, uploadMainCompanyLogo } from "@/lib/services/companies";
+import { getCompany, getMainCompany, saveMainCompany, saveTenantCompany, uploadCompanyLogo } from "@/lib/services/companies";
 import type {
   AttendanceJustification,
   AttendanceJustificationPeriod,
   AttendanceJustificationType,
   AdjustmentType,
+  PunchAdjustment,
   Punch,
   PunchStatus,
   PunchType,
@@ -30,10 +31,17 @@ import { createFaceIdRecord, listFaceIdRecords, uploadFacePhoto } from "@/lib/se
 import { saveEmployeePin, verifyEmployeePin } from "@/lib/services/employee-pins";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
-import { createPunchAdjustment, listEmployeePunches, listEmployeePunchesByIds } from "@/lib/services/punches";
+import {
+  createPunchAdjustment,
+  listEmployeePunches,
+  listEmployeePunchesByIds,
+  listPunchAdjustments,
+  reviewPunchAdjustment,
+} from "@/lib/services/punches";
 import {
   createAttendanceJustification,
   listAttendanceJustifications,
+  reviewAttendanceJustification,
   uploadAttendanceEvidence,
 } from "@/lib/services/attendance-justifications";
 import {
@@ -77,6 +85,12 @@ type MaskType = "name" | "cpf" | "cnpj" | "phone" | "time" | "pin" | "date" | "c
 type EmployeeSection = "detail" | "face" | "form" | "list";
 
 const employees: EmployeeRow[] = [];
+
+const TenantIdContext = createContext("main");
+
+function useActiveCompanyId() {
+  return useContext(TenantIdContext);
+}
 
 type EmployeeRow = {
   active?: boolean;
@@ -420,18 +434,6 @@ function maskTime(value: string) {
   return `${hour}:${minute}`;
 }
 
-function addMinutesToTime(value: string, amount: number) {
-  const normalized = maskTime(value || "0000");
-  const [hour = "0", minute = "0"] = normalized.split(":");
-  const total = Number(hour) * 60 + Number(minute) + amount;
-  const day = 24 * 60;
-  const wrapped = ((total % day) + day) % day;
-  const nextHour = Math.floor(wrapped / 60).toString().padStart(2, "0");
-  const nextMinute = (wrapped % 60).toString().padStart(2, "0");
-
-  return `${nextHour}:${nextMinute}`;
-}
-
 function timeToMinutes(value: string) {
   const [hour = "0", minute = "0"] = maskTime(value).split(":");
   return Number(hour) * 60 + Number(minute);
@@ -692,11 +694,11 @@ function inferNextPunch(employeeId: string) {
   return inferNextPunchFromHistory(punches);
 }
 
-async function resolveNextPunch(employeeId: string) {
+async function resolveNextPunch(employeeId: string, companyId = "main") {
   const localNextPunch = inferNextPunch(employeeId);
 
   try {
-    const serverPunches = await listEmployeePunches("main", employeeId);
+    const serverPunches = await listEmployeePunches(companyId, employeeId);
     const today = new Date();
     const todayPunches = serverPunches.filter((punch) => sameDay(punchDate(punch), today));
     return todayPunches.length ? inferNextPunchFromHistory(todayPunches) : localNextPunch;
@@ -821,8 +823,8 @@ export default function Home() {
   const [lastPunchReceipt, setLastPunchReceipt] = useState<RepPunchReceipt | null>(null);
   const [user, setUser] = useState<User | null>(null);
 
-  async function refreshCompanyProfile() {
-    const company = await getMainCompany();
+  async function refreshCompanyProfile(companyId = appAccess?.tenantId || "main") {
+    const company = companyId === "main" ? await getMainCompany() : await getCompany(companyId);
     if (company) {
       setCompanyProfile(company as MainCompanyProfile);
       return;
@@ -843,6 +845,7 @@ export default function Home() {
         }),
       ]);
       setAppAccess(access);
+      void refreshCompanyProfile(access?.tenantId || "main");
       if (access?.role === "developer") {
         const [invites, config] = await Promise.all([
           listTenantInvites(access.tenantId),
@@ -1080,7 +1083,7 @@ export default function Home() {
       }
 
       try {
-        await saveMainCompany({
+        const companyData = {
           address: {
             city: fields.Cidade || "",
             complement: fields.Complemento || "",
@@ -1097,9 +1100,11 @@ export default function Home() {
           legalName: fields["Razao social"] || "",
           stateRegistration: fields["Inscricao estadual"] || "",
           tradeName: fields["Nome fantasia"] || "",
-        });
-        await refreshCompanyProfile();
-        setNotice("Empresa salva no Firebase em companies/main.");
+        };
+        if (activeCompanyId === "main") await saveMainCompany(companyData);
+        else await saveTenantCompany(activeCompanyId, companyData);
+        await refreshCompanyProfile(activeCompanyId);
+        setNotice(`Empresa salva no Firebase em companies/${activeCompanyId}.`);
       } catch (error) {
         console.error(error);
         setNotice("Nao foi possivel salvar no Firebase. Verifique Auth/Regras do Firestore.");
@@ -1109,7 +1114,7 @@ export default function Home() {
 
     if (action === "Politica de calculo da empresa") {
       try {
-        await saveMainCompany({
+        const workPolicy = {
           workPolicy: {
             absenceMode: fields["Tipo de controle"] === "Por dia" ? "day" : "period",
             afternoonAbsenceWeight: Number(fields["Valor falta tarde"] || DEFAULT_WORK_POLICY.afternoonAbsenceWeight),
@@ -1121,8 +1126,10 @@ export default function Home() {
             scheduledDays: Number(fields["Dias por semana"] || DEFAULT_WORK_POLICY.scheduledDays),
             toleranceMinutes: Number.parseInt(fields["Tolerancia padrao"] || "", 10) || DEFAULT_WORK_POLICY.toleranceMinutes,
           },
-        });
-        await refreshCompanyProfile();
+        };
+        if (activeCompanyId === "main") await saveMainCompany(workPolicy);
+        else await saveTenantCompany(activeCompanyId, workPolicy);
+        await refreshCompanyProfile(activeCompanyId);
         setNotice("Politica de calculo salva para esta empresa.");
       } catch (error) {
         console.error(error);
@@ -1140,7 +1147,7 @@ export default function Home() {
       const invite = await createTenantInvite({
         companyName: fields.Cliente || fields.Empresa || String(companyProfile?.tradeName || companyProfile?.legalName || "Empresa convidada"),
         role: roleByLabel[fields.Perfil || fields.Permissao || "Proprietario"] || "owner",
-        tenantId: appAccess?.tenantId || "main",
+        tenantId: activeCompanyId,
       });
       setTenantInvites((items) => [invite, ...items]);
       setNotice(`Convite criado: ${invite.code}. Envie esse codigo para o cliente.`);
@@ -1148,7 +1155,7 @@ export default function Home() {
     }
 
     if (action === "Salvar configuracao Admin SaaS") {
-      const tenantId = appAccess?.tenantId || "main";
+      const tenantId = activeCompanyId;
       const config = {
         aiCredits: {
           balance: Number(onlyDigits(fields["Creditos disponiveis"] || fields["Creditos mensais"] || "150")) || 150,
@@ -1172,7 +1179,7 @@ export default function Home() {
 
       await saveTenantSaasConfig(tenantId, config);
       setSaasConfig({ ...config, tenantId });
-      setNotice("Configuracao SaaS salva em tenants/main.");
+      setNotice(`Configuracao SaaS salva em tenants/${tenantId}.`);
       return;
     }
 
@@ -1298,7 +1305,7 @@ export default function Home() {
 
     if (!employee) {
       try {
-        const verified = await verifyEmployeePin("main", pin.trim());
+        const verified = await verifyEmployeePin(activeCompanyId, pin.trim());
         employeeName = verified.name;
         employeeId = verified.employeeId;
       } catch (error) {
@@ -1314,7 +1321,7 @@ export default function Home() {
       try {
         photoPath = await uploadPunchPhoto({
           blob: photoBlob,
-          companyId: "main",
+          companyId: activeCompanyId,
           employeeId,
           occurredAt,
           punchId,
@@ -1341,7 +1348,11 @@ export default function Home() {
     };
 
     try {
-      const registered = await registerRepPunch({ companyId: "main", ...punchPayload });
+      const registered = await registerRepPunch({
+        companyId: activeCompanyId,
+        idempotencyKey: `${activeCompanyId}:${employeeId}:${punchId}`,
+        ...punchPayload,
+      });
       setLastPunchReceipt(registered.receipt);
       appendLocalRecord("Comprovante de ponto", external ? "Ponto externo" : "Sala de ponto", {
         Hash: registered.receipt.hash,
@@ -1507,6 +1518,7 @@ export default function Home() {
   }
 
   const isDeveloperUser = appAccess?.role === "developer" || isPlatformOwnerEmail(user.email);
+  const activeCompanyId = appAccess?.tenantId || "main";
   const canManage = isDeveloperUser || appAccess?.role === "owner" || appAccess?.role === "admin";
   const readerSections: Section[] = [
     "Painel",
@@ -1544,7 +1556,8 @@ export default function Home() {
     : [companyAddress.city, companyAddress.state].filter(Boolean).join(" - ") || "Local da empresa";
 
   return (
-    <main className={`min-h-screen overflow-x-hidden text-[#17202a] ${kioskMode ? "kiosk-app-shell" : "bg-[#f4f6f8]"}`}>
+    <TenantIdContext.Provider value={activeCompanyId}>
+      <main className={`min-h-screen overflow-x-hidden text-[#17202a] ${kioskMode ? "kiosk-app-shell" : "bg-[#f4f6f8]"}`}>
       <div className={`sticky top-0 z-30 border-b border-[#d9e0e7] bg-white/95 px-3 py-2 shadow-sm backdrop-blur lg:hidden ${kioskMode ? "hidden" : ""}`}>
         <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-3">
           <button
@@ -1823,8 +1836,7 @@ export default function Home() {
           config={saasConfig}
           onClose={() => setAssistantOpen(false)}
           onConsumeCredit={async () => {
-            const tenantId = appAccess?.tenantId || "main";
-            const updated = await consumeAiCredit(tenantId, 1);
+            const updated = await consumeAiCredit(activeCompanyId, 1);
             setSaasConfig((current) => current ? applyCreditResult(current, updated) : current);
           }}
           onNavigate={go}
@@ -1836,9 +1848,9 @@ export default function Home() {
         onChange={(event) => {
           const file = event.target.files?.[0];
           if (file) {
-            void uploadMainCompanyLogo(file)
+            void uploadCompanyLogo(activeCompanyId, file)
               .then(async () => {
-                await refreshCompanyProfile();
+                await refreshCompanyProfile(activeCompanyId);
                 setNotice(`Logo "${file.name}" salva no Firebase Storage.`);
               })
               .catch((error) => {
@@ -1849,7 +1861,8 @@ export default function Home() {
         }}
         type="file"
       />
-    </main>
+      </main>
+    </TenantIdContext.Provider>
   );
 }
 
@@ -2124,6 +2137,7 @@ function isDailyAttentionStatus(statusKey: DailyStatusKey) {
 }
 
 function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
+  const companyId = useActiveCompanyId();
   const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
   const [punches, setPunches] = useState<Punch[]>([]);
   const [attendanceJustifications, setAttendanceJustifications] = useState<AttendanceJustification[]>([]);
@@ -2147,13 +2161,13 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
       setLoading(true);
       setError("");
       try {
-        const saved = await listEmployees("main");
+        const saved = await listEmployees(companyId);
         const mapped = saved.map((employee) =>
           toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
         );
         const [recentPunches, savedJustifications] = await Promise.all([
-          listEmployeePunchesByIds("main", mapped.map((employee) => employee.employeeId)),
-          listAttendanceJustifications("main"),
+          listEmployeePunchesByIds(companyId, mapped.map((employee) => employee.employeeId)),
+          listAttendanceJustifications(companyId),
         ]);
         if (!mounted) return;
         setEmployeesList(mapped);
@@ -2176,7 +2190,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
       mounted = false;
       window.clearInterval(refresh);
     };
-  }, [refreshToken]);
+  }, [companyId, refreshToken]);
 
   useEffect(() => {
     employeesList.forEach((employee) => {
@@ -2403,6 +2417,7 @@ function PunchReceiptCard({
   onClose: () => void;
   receipt: RepPunchReceipt;
 }) {
+  const companyId = useActiveCompanyId();
   const missingLegalData = !receipt.inpiRegistration || receipt.employeeCpf.length !== 11 || receipt.companyCnpj.length !== 14;
   const [recentReceipts, setRecentReceipts] = useState<RepPunchReceipt[] | null>(null);
   const [loadingRecent, setLoadingRecent] = useState(false);
@@ -2419,7 +2434,7 @@ function PunchReceiptCard({
     setLoadingRecent(true);
     setRecentError("");
     try {
-      const result = await listRecentRepReceipts("main", receipt.employeeId);
+      const result = await listRecentRepReceipts(companyId, receipt.employeeId);
       setRecentReceipts(result.receipts);
     } catch (error) {
       console.error(error);
@@ -2478,6 +2493,7 @@ function PunchReceiptCard({
 }
 
 function OwnReceiptLookupCard() {
+  const companyId = useActiveCompanyId();
   const [receiptPin, setReceiptPin] = useState("");
   const [result, setResult] = useState<{
     employeeName: string;
@@ -2495,7 +2511,7 @@ function OwnReceiptLookupCard() {
     setLoading(true);
     setError("");
     try {
-      const response = await listOwnRepReceipts("main", receiptPin);
+      const response = await listOwnRepReceipts(companyId, receiptPin);
       setResult({ employeeName: response.employeeName, receipts: response.receipts });
     } catch (requestError) {
       console.error(requestError);
@@ -2935,6 +2951,7 @@ function CompaniesScreen({
 }
 
 function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (action: string) => void }) {
+  const companyId = useActiveCompanyId();
   const [journeyMode, setJourneyMode] = useState<"coletiva" | "individual">("coletiva");
   const emptyEmployeeForm = {
     admissionDate: "",
@@ -2967,6 +2984,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
   });
   const [showFaceCamera, setShowFaceCamera] = useState(false);
   const [replaceFaceProfile, setReplaceFaceProfile] = useState(false);
+  const [biometricConsentAccepted, setBiometricConsentAccepted] = useState(false);
   const [faceCompletion, setFaceCompletion] = useState<{
     employee: LocalEmployee;
     nextPending: LocalEmployee | null;
@@ -3008,7 +3026,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
   async function loadEmployeePunches(employee: LocalEmployee) {
     setSelectedEmployeePunchesLoading(true);
     try {
-      const punches = await listEmployeePunchesByIds("main", [
+      const punches = await listEmployeePunchesByIds(companyId, [
         employee.employeeId,
       ]);
       const sorted = punches.sort((first, second) =>
@@ -3036,7 +3054,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
       setLocalEmployees(savedInBrowser);
 
       try {
-        const savedInFirebase = await listEmployees("main");
+        const savedInFirebase = await listEmployees(companyId);
         if (!mounted) return;
 
         const legacyPins = savedInFirebase
@@ -3048,7 +3066,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
 
         if (canEdit && legacyPins.length) {
           await Promise.all(legacyPins.map((employee) =>
-            saveEmployeePin("main", employee.employeeId, employee.pin),
+            saveEmployeePin(companyId, employee.employeeId, employee.pin),
           ));
         }
 
@@ -3067,7 +3085,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     return () => {
       mounted = false;
     };
-  }, [canEdit]);
+  }, [canEdit, companyId]);
 
   useEffect(() => {
     localEmployees.forEach((employee) => {
@@ -3091,6 +3109,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setEditingEmployeeId(null);
     setSelectedEmployee(null);
     setShowFaceCamera(false);
+    setBiometricConsentAccepted(false);
     setReplaceFaceProfile(false);
     setFaceCompletion(null);
     setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
@@ -3104,6 +3123,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setEmployeeSource("manual");
     setEditingEmployeeId(null);
     setShowFaceCamera(false);
+    setBiometricConsentAccepted(false);
     setReplaceFaceProfile(false);
     setFaceCompletion(null);
     setEmployeeSection("form", false);
@@ -3124,6 +3144,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setSelectedEmployee(target);
     setEditingEmployeeId(null);
     setReplaceFaceProfile(options?.replace === true);
+    setBiometricConsentAccepted(false);
     setFaceCompletion(null);
     setShowFaceCamera(true);
     setOpenEmployeeSections({ detail: false, face: true, form: false, list: true });
@@ -3139,6 +3160,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setSelectedEmployee(selected);
     setSelectedEmployeePunches([]);
     setShowFaceCamera(false);
+    setBiometricConsentAccepted(false);
     setReplaceFaceProfile(false);
     setFaceCompletion(null);
     setOpenEmployeeSections({ detail: true, face: false, form: false, list: true });
@@ -3159,6 +3181,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setEmployeeSource("manual");
     setEditingEmployeeId(employeeDocumentId(selected));
     setShowFaceCamera(false);
+    setBiometricConsentAccepted(false);
     setReplaceFaceProfile(false);
     setFaceCompletion(null);
     setOpenEmployeeSections({ detail: false, face: false, form: true, list: true });
@@ -3232,12 +3255,12 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
         await Promise.all(mappedEmployees.map(async (employee) => {
           const documentId = employeeDocumentId(employee);
           const { pin: importedPin, ...employeeWithoutPin } = employee;
-          await upsertEmployee("main", documentId, {
+          await upsertEmployee(companyId, documentId, {
             ...employeeWithoutPin,
             importSource: "json-import",
             importedAt: new Date().toISOString(),
           });
-          if (importedPin) await saveEmployeePin("main", documentId, importedPin);
+          if (importedPin) await saveEmployeePin(companyId, documentId, importedPin);
         }));
 
         const existingIds = new Set(mappedEmployees.map((employee) => employeeDocumentId(employee)));
@@ -3401,13 +3424,13 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     const employeeWithoutPin = Object.fromEntries(
       Object.entries(employee).filter(([key]) => key !== "pin"),
     );
-    await upsertEmployee("main", documentId, {
+    await upsertEmployee(companyId, documentId, {
       ...employeeWithoutPin,
       ...(editingEmployeeId ? {} : { createdAt: new Date().toISOString() }),
       source: employeeSource === "holerite" ? "holerite-import" : "manual",
       ...(employeeSource === "holerite" ? { importFileName: holeriteImportDraft?.fileName || "holerite.pdf" } : {}),
     });
-    if (employeeForm.pin) await saveEmployeePin("main", documentId, employeeForm.pin);
+    if (employeeForm.pin) await saveEmployeePin(companyId, documentId, employeeForm.pin);
 
     window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
     setLocalEmployees(updated);
@@ -3455,12 +3478,12 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     try {
       const photoPath = await uploadFacePhoto({
         blob: file,
-        companyId: "main",
+        companyId,
         employeeId: selectedEmployee.employeeId,
         photoId: `perfil-${crypto.randomUUID()}`,
       });
       updateEmployeeProfilePhoto(selectedEmployee, photoPath, URL.createObjectURL(file));
-      await upsertEmployee("main", employeeDocumentId(selectedEmployee), { profilePhotoPath: photoPath });
+      await upsertEmployee(companyId, employeeDocumentId(selectedEmployee), { profilePhotoPath: photoPath });
       onAction(`Foto de ${selectedEmployee.name} atualizada.`);
     } catch (error) {
       console.error(error);
@@ -3476,7 +3499,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     if (!confirmed) return;
 
     try {
-      await upsertEmployee("main", employeeDocumentId(employee), {
+      await upsertEmployee(companyId, employeeDocumentId(employee), {
         faceCaptureCount: 0,
         faceIdStatus: "not_registered",
         faceRegisteredAt: null,
@@ -3512,7 +3535,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     if (!confirmed) return;
 
     try {
-      await upsertEmployee("main", employeeDocumentId(employee), {
+      await upsertEmployee(companyId, employeeDocumentId(employee), {
         active: false,
         status: "Inativo",
       });
@@ -3534,6 +3557,10 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
 
   function markFaceRegistered(captureCount: number, photoBlob?: Blob) {
     if (!selectedEmployee) return;
+    if (!biometricConsentAccepted) {
+      onAction("Confirme o aceite biometrico antes de salvar o cadastro facial.");
+      return;
+    }
     const completed = captureCount >= REQUIRED_FACE_CAPTURES;
     const captureId = crypto.randomUUID();
 
@@ -3555,7 +3582,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setLocalEmployees(updated);
     setSelectedEmployee(current);
     if (current) {
-      void upsertEmployee("main", employeeDocumentId(current), {
+      void upsertEmployee(companyId, employeeDocumentId(current), {
         faceCaptureCount: captureCount,
         faceIdStatus: completed ? "registered" : current.faceIdStatus,
         ...(completed ? { faceRegisteredAt: new Date().toISOString(), status: "Face ID cadastrado" } : { status: `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}` }),
@@ -3564,13 +3591,13 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
       if (photoBlob) {
         void uploadFacePhoto({
           blob: photoBlob,
-          companyId: "main",
+          companyId,
           employeeId: current.employeeId,
           photoId: captureId,
         }).then((photoPath) => {
           void createFaceIdRecord({
-            capturedBy: "web-kiosk",
-            companyId: "main",
+            capturedBy: "server-authenticated",
+            companyId,
             consentAcceptedAt: new Date(),
             createdAt: new Date(),
             employeeId: current.employeeId,
@@ -3909,6 +3936,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
                 punchMode: selectedEmployee!.punchMode || "automatic",
                 schedule: selectedEmployee!.schedule,
                }}
+               registrationAllowed={biometricConsentAccepted}
                onProfileUpdated={markFaceRegistered}
                onStatus={onAction}
                replaceProfile={replaceFaceProfile}
@@ -3921,6 +3949,15 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
               <p className="mt-3 text-xs font-semibold text-white">
                 Status: {selectedEmployee!.faceIdStatus === "registered" ? "Face ID cadastrado" : "Aguardando captura"}
               </p>
+              <label className="mt-4 flex items-start gap-2 rounded-md border border-white/15 bg-white/[0.06] p-3 text-xs leading-5 text-white/80">
+                <input
+                  checked={biometricConsentAccepted}
+                  className="mt-1"
+                  onChange={(event) => setBiometricConsentAccepted(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Confirmo que o colaborador foi informado sobre o uso da imagem e do reconhecimento facial para controle de jornada, conforme a politica da empresa.</span>
+              </label>
             </div>
           </div>
         )}
@@ -4233,6 +4270,7 @@ function ExternalPunchScreen({
   onAction: (action: string) => void;
   onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob, context?: PunchContext) => Promise<boolean>;
 }) {
+  const companyId = useActiveCompanyId();
   const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
   const [pin, setPin] = useState("");
   const [reason, setReason] = useState("");
@@ -4245,7 +4283,7 @@ function ExternalPunchScreen({
 
   useEffect(() => {
     let mounted = true;
-    void listEmployees("main")
+    void listEmployees(companyId)
       .then((saved) => {
         if (!mounted) return;
         setEmployeesList(saved.map((employee) =>
@@ -4255,7 +4293,7 @@ function ExternalPunchScreen({
       .catch((error) => console.error("Falha ao carregar autorizacoes de ponto externo.", error));
 
     return () => { mounted = false; };
-  }, []);
+  }, [companyId]);
 
   async function identifyExternalEmployee(employee: RecognizedFace, photoBlob?: Blob) {
     setConfirmation("");
@@ -4279,7 +4317,7 @@ function ExternalPunchScreen({
     }
 
     try {
-      const verified = await verifyEmployeePin("main", pin);
+      const verified = await verifyEmployeePin(companyId, pin);
       if (verified.employeeId !== registered.employeeId) {
         setRecognizedEmployee(null);
         onAction("O PIN informado nao corresponde ao rosto reconhecido.");
@@ -4443,6 +4481,7 @@ function KioskScreen({
   weatherIcon: string;
   weatherLabel: string;
 }) {
+  const companyId = useActiveCompanyId();
   const [recognizedEmployee, setRecognizedEmployee] = useState<RecognizedFace | null>(null);
   const [selectedPunch, setSelectedPunch] = useState("Entrada 1");
   const [journeyFinished, setJourneyFinished] = useState(false);
@@ -4467,7 +4506,7 @@ function KioskScreen({
 
     async function loadFaceProfileSources() {
       try {
-        const saved = await listEmployees("main");
+        const saved = await listEmployees(companyId);
         const registered = saved
           .map((employee) => toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id))
           .filter((employee) => employee.active !== false && employee.faceIdStatus === "registered");
@@ -4477,7 +4516,7 @@ function KioskScreen({
             try {
               let photoPaths: string[] = [];
               try {
-                const faceRecords = await listFaceIdRecords("main", employee.employeeId);
+                const faceRecords = await listFaceIdRecords(companyId, employee.employeeId);
                 photoPaths = faceRecords.slice(0, 3).map((record) => record.photoPath);
               } catch (error) {
                 console.warn(`Não foi possível consultar o histórico facial de ${employee.name}.`, error);
@@ -4520,7 +4559,7 @@ function KioskScreen({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [companyId]);
 
   useEffect(() => {
     return () => {
@@ -4550,7 +4589,7 @@ function KioskScreen({
 
   async function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
     setSequenceLoading(true);
-    const nextPunch = await resolveNextPunch(employee.employeeId);
+    const nextPunch = await resolveNextPunch(employee.employeeId, companyId);
     setSequenceLoading(false);
     setTimingWarning(null);
     setBlockingMessage("");
@@ -4925,6 +4964,7 @@ function MonthlyClosingScreen({
   company: MainCompanyProfile | null;
   onAction: (action: string) => void;
 }) {
+  const companyId = useActiveCompanyId();
   const now = new Date();
   const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -4934,6 +4974,7 @@ function MonthlyClosingScreen({
   const [responsible, setResponsible] = useState("");
   const [lastSummary, setLastSummary] = useState<MonthlyMirrorSummary[]>([]);
   const [attendanceJustifications, setAttendanceJustifications] = useState<AttendanceJustification[]>([]);
+  const [punchAdjustments, setPunchAdjustments] = useState<PunchAdjustment[]>([]);
   const [adjustmentEmployeeId, setAdjustmentEmployeeId] = useState("");
   const [adjustmentDate, setAdjustmentDate] = useState(now.toISOString().slice(0, 10));
   const [adjustmentTime, setAdjustmentTime] = useState("07:00");
@@ -4950,9 +4991,10 @@ function MonthlyClosingScreen({
 
     async function load() {
       try {
-        const [savedInFirebase, savedJustifications] = await Promise.all([
-          listEmployees("main"),
-          listAttendanceJustifications("main"),
+        const [savedInFirebase, savedJustifications, savedAdjustments] = await Promise.all([
+          listEmployees(companyId),
+          listAttendanceJustifications(companyId),
+          listPunchAdjustments(companyId),
         ]);
         if (!mounted) return;
         setEmployeesList(
@@ -4961,6 +5003,7 @@ function MonthlyClosingScreen({
           ),
         );
         setAttendanceJustifications(savedJustifications);
+        setPunchAdjustments(savedAdjustments);
       } catch {
         if (mounted) setEmployeesList(getLocalEmployees());
       } finally {
@@ -4973,7 +5016,7 @@ function MonthlyClosingScreen({
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [companyId]);
 
   const selectedEmployees =
     selectedEmployeeId === "all"
@@ -4991,7 +5034,7 @@ function MonthlyClosingScreen({
     const period = getMonthPeriod(Number(year), Number(month));
     const summaries = await Promise.all(
       selectedEmployees.map(async (employee) => {
-        const punches = await listEmployeePunchesByIds("main", [
+        const punches = await listEmployeePunchesByIds(companyId, [
           employee.employeeId,
         ]);
         return buildMonthlyMirrorSummary(employee, punches, period, workPolicy, attendanceJustifications);
@@ -5029,10 +5072,10 @@ function MonthlyClosingScreen({
     }
 
     try {
-      await createPunchAdjustment("main", {
+      const created = await createPunchAdjustment(companyId, {
         adjustedPunchType: adjustmentPunchType,
         adjustedTime: adjustedAt,
-        companyId: "main",
+        companyId,
         createdAt: new Date(),
         createdBy: responsible.trim(),
         employeeId: employee.employeeId,
@@ -5041,12 +5084,42 @@ function MonthlyClosingScreen({
         type: adjustmentType,
       });
 
+      setPunchAdjustments((current) => [
+        ...current,
+        {
+          adjustedPunchType: adjustmentPunchType,
+          adjustedTime: adjustedAt,
+          companyId,
+          createdAt: new Date(),
+          createdBy: responsible.trim(),
+          employeeId: employee.employeeId,
+          evidence: "Ajuste manual registrado no fechamento mensal.",
+          id: created.id,
+          reason: adjustmentReason.trim(),
+          status: "pending",
+          type: adjustmentType,
+        },
+      ]);
+
       setAdjustmentReason("");
-      onAction(`Ajuste de ${employee.name} salvo com justificativa.`);
+      onAction(`Ajuste de ${employee.name} registrado para aprovacao do responsavel.`);
     } catch (error) {
       console.error(error);
       onAction("Nao foi possivel salvar o ajuste no Firebase. Verifique a conexao e tente novamente.");
       throw error;
+    }
+  }
+
+  async function reviewAdjustment(adjustmentId: string, decision: "approved" | "rejected") {
+    try {
+      const result = await reviewPunchAdjustment(companyId, adjustmentId, decision, responsible.trim());
+      setPunchAdjustments((current) => current.map((item) =>
+        item.id === adjustmentId ? { ...item, status: result.status as PunchAdjustment["status"] } : item,
+      ));
+      onAction(decision === "approved" ? "Ajuste aprovado e incluído na conferencia." : "Ajuste rejeitado; a batida original foi preservada.");
+    } catch (error) {
+      console.error(error);
+      onAction("Nao foi possivel revisar o ajuste. Verifique sua permissao.");
     }
   }
 
@@ -5073,14 +5146,14 @@ function MonthlyClosingScreen({
       const evidencePath = justificationFile
         ? await uploadAttendanceEvidence({
             blob: justificationFile,
-            companyId: "main",
+            companyId,
             date: adjustmentDate,
             employeeId: employee.employeeId,
             evidenceId,
           })
         : undefined;
       const justification: Omit<AttendanceJustification, "id"> = {
-        companyId: "main",
+        companyId,
         createdAt: new Date(),
         createdBy: responsible.trim(),
         date: adjustmentDate,
@@ -5088,19 +5161,32 @@ function MonthlyClosingScreen({
         ...(evidencePath ? { evidencePath, evidenceName: justificationFile?.name } : {}),
         period: justificationPeriod,
         reason: adjustmentReason.trim(),
-        status: "approved",
+        status: "pending",
         type: justificationType,
       };
-      const created = await createAttendanceJustification("main", justification);
+      const created = await createAttendanceJustification(companyId, justification);
       setAttendanceJustifications((current) => [...current, { ...justification, id: created.id }]);
       setJustificationFile(null);
       setAdjustmentReason("");
-      onAction(`Justificativa de ${employee.name} aprovada e registrada.`);
+      onAction(`Justificativa de ${employee.name} registrada para análise do responsável.`);
     } catch (error) {
       console.error(error);
       onAction("Não foi possível salvar a justificativa. Verifique a conexão e as permissões.");
     } finally {
       setJustificationSaving(false);
+    }
+  }
+
+  async function reviewJustification(justificationId: string, decision: "approved" | "rejected") {
+    try {
+      const result = await reviewAttendanceJustification(companyId, justificationId, decision, responsible.trim());
+      setAttendanceJustifications((current) => current.map((item) =>
+        item.id === justificationId ? { ...item, status: result.status as AttendanceJustification["status"] } : item,
+      ));
+      onAction(decision === "approved" ? "Justificativa aprovada e considerada no fechamento." : "Justificativa rejeitada; a pendencia permanece para conferencia.");
+    } catch (error) {
+      console.error(error);
+      onAction("Nao foi possivel revisar a justificativa. Verifique sua permissao.");
     }
   }
 
@@ -5218,7 +5304,7 @@ function MonthlyClosingScreen({
             <select className="input" onChange={(event) => setAdjustmentType(event.target.value as AdjustmentType)} value={adjustmentType}>
               <option value="forgotten_with_evidence">Esquecimento com evidencia</option>
               <option value="external_work">Trabalho externo</option>
-              <option value="manager_entry">Lancado pelo responsavel</option>
+              <option value="manager_punch">Lancado pelo responsavel</option>
               <option value="operational_error">Erro operacional</option>
             </select>
           </Field>
@@ -5283,7 +5369,7 @@ function MonthlyClosingScreen({
             />
           </Field>
           <div className="rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-3 text-xs leading-5 text-[#24594d]">
-            <strong>Classificação:</strong> a ocorrência fica aprovada pelo responsável informado e deixa de contar como falta no espelho mensal.
+            <strong>Classificação:</strong> a ocorrência entra como pendente e só deixa de contar como falta após aprovação do responsável.
           </div>
         </div>
         {justificationFile && <p className="mt-3 text-xs text-[#667085]">Anexo selecionado: {justificationFile.name}</p>}
@@ -5292,6 +5378,52 @@ function MonthlyClosingScreen({
             {justificationSaving ? "Salvando justificativa..." : "Salvar justificativa"}
           </SaveButton>
         </ActionRow>
+      </Panel>
+
+      <Panel title="Ajustes pendentes" subtitle="Aprovacao server-side antes de entrar na conferencia do fechamento">
+        <div className="grid gap-2">
+          {punchAdjustments.filter((item) => item.status === "pending").map((item) => {
+            const employee = employeesList.find((candidate) => candidate.employeeId === item.employeeId);
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#efd9a8] bg-[#fff8e9] px-3 py-3" key={item.id}>
+                <div>
+                  <p className="text-sm font-semibold text-[#26323f]">{employee?.name || "Colaborador"} · {formatUnknownDateTime(item.adjustedTime)}</p>
+                  <p className="mt-1 text-xs text-[#6f4c0a]">{item.type} · {item.adjustedPunchType} · {item.reason}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button className="primary-button" onClick={() => void reviewAdjustment(item.id, "approved")} type="button">Aprovar</button>
+                  <button className="secondary-button" onClick={() => void reviewAdjustment(item.id, "rejected")} type="button">Rejeitar</button>
+                </div>
+              </div>
+            );
+          })}
+          {!punchAdjustments.some((item) => item.status === "pending") && (
+            <p className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3 text-sm text-[#667085]">Nenhum ajuste pendente.</p>
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="Justificativas pendentes" subtitle="Aprovação server-side antes de alterar a leitura do fechamento">
+        <div className="grid gap-2">
+          {attendanceJustifications.filter((item) => item.status === "pending").map((item) => {
+            const employee = employeesList.find((candidate) => candidate.employeeId === item.employeeId);
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#efd9a8] bg-[#fff8e9] px-3 py-3" key={item.id}>
+                <div>
+                  <p className="text-sm font-semibold text-[#26323f]">{employee?.name || "Colaborador"} · {item.date}</p>
+                  <p className="mt-1 text-xs text-[#6f4c0a]">{item.type} · {item.period} · {item.reason}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button className="primary-button" onClick={() => void reviewJustification(item.id, "approved")} type="button">Aprovar</button>
+                  <button className="secondary-button" onClick={() => void reviewJustification(item.id, "rejected")} type="button">Rejeitar</button>
+                </div>
+              </div>
+            );
+          })}
+          {!attendanceJustifications.some((item) => item.status === "pending") && (
+            <p className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3 text-sm text-[#667085]">Nenhuma justificativa pendente.</p>
+          )}
+        </div>
       </Panel>
 
       <Panel title="Conferencia por funcionario" subtitle="Base do arquivo mensal e da ficha individual">
@@ -5379,6 +5511,7 @@ function MonthlyClosingScreen({
 }
 
 function ReportsScreen({ onAction }: { onAction: (action: string) => void }) {
+  const companyId = useActiveCompanyId();
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 8)}01`;
   const [startDate, setStartDate] = useState(monthStart);
@@ -5392,7 +5525,7 @@ function ReportsScreen({ onAction }: { onAction: (action: string) => void }) {
     }
     setExporting(true);
     try {
-      const exported = await generateRepExports("main", startDate, endDate);
+      const exported = await generateRepExports(companyId, startDate, endDate);
       downloadTextFile(exported.filenames.afd, exported.afd, "text/plain;charset=iso-8859-1");
       window.setTimeout(() => {
         downloadTextFile(exported.filenames.aej, exported.aej, "text/plain;charset=iso-8859-1");
@@ -5487,6 +5620,7 @@ function AdminComplianceScreen({
   invites: TenantInvite[];
   onAction: (action: string) => void;
 }) {
+  const companyId = useActiveCompanyId();
   const effectiveConfig: TenantSaasConfig = config || {
     aiCredits: { balance: 150, bonus: 0, included: 150, renewalMonth: new Date().toISOString().slice(0, 7), status: "Ativo", used: 0 },
     billing: { amount: "R$ 0,00", dueDate: "", graceDays: 5, status: "Teste" },
@@ -5494,7 +5628,7 @@ function AdminComplianceScreen({
     name: "Cliente Face ID",
     plan: "Essencial",
     status: "Teste",
-    tenantId: "main",
+    tenantId: companyId,
   };
 
   const pendingInvites = invites.filter((invite) => invite.status === "Ativo").length;
@@ -5520,7 +5654,7 @@ function AdminComplianceScreen({
     const monthStart = `${today.slice(0, 8)}01`;
     setCheckingReadiness(true);
     try {
-      const result = await generateRepExports("main", monthStart, today);
+      const result = await generateRepExports(companyId, monthStart, today);
       setReadinessCheck({
         missingFields: result.missingFields,
         officialReady: result.officialReady,
@@ -5854,6 +5988,7 @@ function AssistantPanel({
   onConsumeCredit: () => Promise<void>;
   onNavigate: (section: Section) => void;
 }) {
+  const activeCompanyId = useActiveCompanyId();
   const help: Record<Section, { title: string; steps: string[]; questions: string[] }> = {
     Painel: {
       title: "Visao geral do sistema",
@@ -5996,7 +6131,7 @@ function AssistantPanel({
       url.searchParams.set("product", "ai_credits");
       url.searchParams.set("packageId", packageId);
       url.searchParams.set("credits", String(credits));
-      url.searchParams.set("externalCustomerId", config?.tenantId || "main");
+      url.searchParams.set("externalCustomerId", config?.tenantId || activeCompanyId);
       url.searchParams.set("returnUrl", window.location.href);
       window.open(url.toString(), "_blank", "noopener,noreferrer");
     } catch {
@@ -6545,6 +6680,15 @@ function punchDate(punch: Punch) {
     return value.toDate() as Date;
   }
   return new Date(String(value));
+}
+
+function formatUnknownDateTime(value: unknown) {
+  if (value instanceof Date) return value.toLocaleString("pt-BR");
+  if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+    return (value.toDate() as Date).toLocaleString("pt-BR");
+  }
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? "Horario indisponivel" : date.toLocaleString("pt-BR");
 }
 
 function formatPunchDateTime(punch: Punch) {

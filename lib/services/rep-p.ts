@@ -23,6 +23,7 @@ type RegisterRepPunchInput = {
   companyId: string;
   deviceId: string;
   employeeId: string;
+  idempotencyKey: string;
   externalReason?: string;
   location?: {
     accuracy?: number;

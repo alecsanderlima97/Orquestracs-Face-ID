@@ -1,8 +1,11 @@
-import { addDoc, collection, getDocs, orderBy, query } from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { ref, uploadBytes } from "firebase/storage";
-import { db, storage } from "@/lib/firebase/client";
+import { db, firebaseApp, storage } from "@/lib/firebase/client";
 import { facePhotoPath } from "@/lib/firebase/paths";
 import type { FaceIdRecord } from "@/lib/models";
+
+const functions = getFunctions(firebaseApp, "us-east1");
 
 function faceIdRef(companyId: string, employeeId: string) {
   return collection(db, "companies", companyId, "employees", employeeId, "faceId");
@@ -25,7 +28,12 @@ export async function uploadFacePhoto({
 }
 
 export async function createFaceIdRecord(record: Omit<FaceIdRecord, "id">) {
-  return addDoc(faceIdRef(record.companyId, record.employeeId), record);
+  const callable = httpsCallable<
+    Omit<FaceIdRecord, "id"> & { consentVersion: string },
+    { faceId: string }
+  >(functions, "registerFaceIdCapture");
+  const result = await callable({ ...record, consentVersion: "biometria-v1" });
+  return { id: result.data.faceId };
 }
 
 export async function listFaceIdRecords(companyId: string, employeeId: string) {

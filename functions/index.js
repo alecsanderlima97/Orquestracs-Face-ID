@@ -143,6 +143,47 @@ async function requirePlatformOwner(request) {
   }
 }
 
+function parseIsoDate(value, label) {
+  const parsed = new Date(value);
+  if (!value || Number.isNaN(parsed.getTime())) {
+    throw new HttpsError("invalid-argument", `${label} invalida.`);
+  }
+  return parsed;
+}
+
+function auditEventHash(previousHash, event) {
+  return crypto
+    .createHash("sha256")
+    .update(`${previousHash || ""}:${JSON.stringify(event)}`, "utf8")
+    .digest("hex");
+}
+
+async function appendAuditEvent(transaction, companyId, event, auditStateSnapshot) {
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const previousHash = normalizedText(auditStateSnapshot?.data()?.lastHash);
+  const createdAt = event.createdAt || Timestamp.now();
+  const payload = {
+    ...event,
+    companyId,
+    createdAt,
+  };
+  const hash = auditEventHash(previousHash, {
+    ...payload,
+    createdAt: createdAt.toMillis(),
+  });
+  const auditRef = db.collection(`companies/${companyId}/auditLogs`).doc();
+  transaction.create(auditRef, {
+    ...payload,
+    hash,
+    previousHash: previousHash || null,
+  });
+  transaction.set(auditStateRef, {
+    lastHash: hash,
+    updatedAt: createdAt,
+  }, { merge: true });
+  return { auditId: auditRef.id, hash };
+}
+
 function creditAmount(value, { maximum, label }) {
   const amount = Number(value);
   if (!Number.isInteger(amount) || amount < 1 || amount > maximum) {
@@ -376,6 +417,7 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
   const scheduledPunch = normalizedText(request.data?.scheduledPunch);
   const origin = normalizedText(request.data?.origin);
   const deviceId = normalizedText(request.data?.deviceId).slice(0, 160);
+  const idempotencyKey = normalizedText(request.data?.idempotencyKey).slice(0, 160);
   const photoPath = normalizedText(request.data?.photoPath).slice(0, 500);
   const externalReason = normalizedText(request.data?.externalReason).slice(0, 500);
   const validTypes = ["entry", "lunch_out", "lunch_back", "exit"];
@@ -386,8 +428,8 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
   if (!companyId || !requestedEmployeeId || !validTypes.includes(type)) {
     throw new HttpsError("invalid-argument", "Empresa, colaborador e tipo de marcacao sao obrigatorios.");
   }
-  if (!validSources.includes(source) || !validOrigins.includes(origin) || !deviceId) {
-    throw new HttpsError("invalid-argument", "Origem, metodo e dispositivo invalidos.");
+  if (!validSources.includes(source) || !validOrigins.includes(origin) || !deviceId || !idempotencyKey) {
+    throw new HttpsError("invalid-argument", "Origem, metodo, dispositivo e chave idempotente sao obrigatorios.");
   }
   if (scheduledPunch && !validScheduledPunches.includes(scheduledPunch)) {
     throw new HttpsError("invalid-argument", "Etapa da jornada invalida.");
@@ -420,12 +462,19 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
   const repDateTime = formatRepDateTime(now.toDate());
   const employeeId = normalizedText(employee.employeeId) || employeeSnapshot.id;
   const stateRef = db.doc(`companies/${companyId}/repState/main`);
+  const idempotencyRef = db.doc(`companies/${companyId}/repIdempotency/${idempotencyKey}`);
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
   const punchRef = db.collection(`companies/${companyId}/punches`).doc();
   const arpRef = db.doc(`companies/${companyId}/arpRecords/${punchRef.id}`);
   const location = sanitizeLocation(request.data?.location);
 
   const result = await db.runTransaction(async (transaction) => {
     const stateSnapshot = await transaction.get(stateRef);
+    const idempotencySnapshot = await transaction.get(idempotencyRef);
+    if (idempotencySnapshot.exists) {
+      return { ...idempotencySnapshot.data()?.result, reused: true };
+    }
+    const auditStateSnapshot = await transaction.get(auditStateRef);
     const state = stateSnapshot.data() || {};
     const nsr = Number(state.lastNsr || 0) + 1;
     const previousHash = normalizedText(state.lastHash);
@@ -445,6 +494,7 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       employeeDocumentId: employeeSnapshot.id,
       externalReason,
       hash,
+      idempotencyKey,
       location,
       nsr,
       occurredAt: now,
@@ -470,13 +520,29 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       lastNsr: nsr,
       updatedAt: now,
     }, { merge: true });
-    return { hash, nsr };
+    const auditEvent = {
+      action: "punch.registered",
+      actorEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      actorUserId: request.auth.uid,
+      deviceId,
+      entityId: punchRef.id,
+      entityType: "punch",
+      metadata: { employeeId, nsr, origin, source, type },
+      createdAt: now,
+    };
+    await appendAuditEvent(transaction, companyId, auditEvent, auditStateSnapshot);
+    const result = { hash, nsr, punchId: punchRef.id };
+    transaction.create(idempotencyRef, {
+      createdAt: now,
+      result,
+    });
+    return { ...result, reused: false };
   });
 
   return {
     complianceMode,
     missingFields,
-    punchId: punchRef.id,
+    punchId: result.punchId,
     receipt: {
       companyCnpj,
       companyName: normalizedText(company.legalName || company.tradeName),
@@ -490,6 +556,256 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       title: "Comprovante de Registro de Ponto do Trabalhador",
     },
   };
+});
+
+const adjustmentTypes = ["forgotten_with_evidence", "external_work", "manager_punch", "operational_error"];
+const justificationTypes = ["medical_certificate", "external_work", "forgotten_punch", "late_justification", "other"];
+const justificationPeriods = ["morning", "afternoon", "full_day"];
+
+export const createPunchAdjustment = onCall(callableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const employeeId = normalizedText(request.data?.employeeId);
+  const punchId = normalizedText(request.data?.punchId);
+  const type = normalizedText(request.data?.type);
+  const adjustedPunchType = normalizedText(request.data?.adjustedPunchType);
+  const reason = normalizedText(request.data?.reason).slice(0, 1000);
+  const evidence = normalizedText(request.data?.evidence).slice(0, 1000);
+  if (!companyId || !employeeId || !adjustedPunchType || !reason) {
+    throw new HttpsError("invalid-argument", "Empresa, colaborador, tipo, horario e motivo sao obrigatorios.");
+  }
+  if (!adjustmentTypes.includes(type)) throw new HttpsError("invalid-argument", "Tipo de ajuste invalido.");
+  if (!["entry", "lunch_out", "lunch_back", "exit"].includes(adjustedPunchType)) {
+    throw new HttpsError("invalid-argument", "Tipo de batida ajustada invalido.");
+  }
+
+  await requireManager(request, companyId);
+  const employeeSnapshot = await findEmployee(companyId, employeeId);
+  if (!employeeSnapshot) throw new HttpsError("not-found", "Colaborador nao encontrado.");
+  if (punchId) {
+    const punchSnapshot = await db.doc(`companies/${companyId}/punches/${punchId}`).get();
+    if (!punchSnapshot.exists || punchSnapshot.data()?.employeeId !== employeeId) {
+      throw new HttpsError("not-found", "Batida original nao encontrada para este colaborador.");
+    }
+  }
+
+  const adjustedAt = parseIsoDate(request.data?.adjustedTime, "Data e horario do ajuste");
+  const createdAt = Timestamp.now();
+  const adjustmentRef = db.collection(`companies/${companyId}/adjustments`).doc();
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const result = await db.runTransaction(async (transaction) => {
+    const auditStateSnapshot = await transaction.get(auditStateRef);
+    transaction.create(adjustmentRef, {
+      adjustedPunchType,
+      adjustedTime: Timestamp.fromDate(adjustedAt),
+      companyId,
+      createdAt,
+      createdBy: request.auth.uid,
+      createdByEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      employeeId,
+      evidence,
+      ...(punchId ? { punchId } : {}),
+      reason,
+      status: "pending",
+      type,
+    });
+    await appendAuditEvent(transaction, companyId, {
+      action: "punch.adjustment_requested",
+      actorEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      actorUserId: request.auth.uid,
+      entityId: adjustmentRef.id,
+      entityType: "punch_adjustment",
+      metadata: { adjustedPunchType, employeeId, punchId: punchId || null, type },
+      createdAt,
+    }, auditStateSnapshot);
+    return { adjustmentId: adjustmentRef.id, status: "pending" };
+  });
+
+  return { companyId, ...result };
+});
+
+export const reviewPunchAdjustment = onCall(callableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const adjustmentId = normalizedText(request.data?.adjustmentId);
+  const decision = normalizedText(request.data?.decision);
+  const reviewReason = normalizedText(request.data?.reviewReason).slice(0, 1000);
+  if (!companyId || !adjustmentId || !["approved", "rejected"].includes(decision)) {
+    throw new HttpsError("invalid-argument", "Empresa, ajuste e decisao sao obrigatorios.");
+  }
+  await requireManager(request, companyId);
+  const adjustmentRef = db.doc(`companies/${companyId}/adjustments/${adjustmentId}`);
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const reviewedAt = Timestamp.now();
+  const result = await db.runTransaction(async (transaction) => {
+    const [adjustmentSnapshot, auditStateSnapshot] = await Promise.all([
+      transaction.get(adjustmentRef),
+      transaction.get(auditStateRef),
+    ]);
+    if (!adjustmentSnapshot.exists) throw new HttpsError("not-found", "Ajuste nao encontrado.");
+    if (adjustmentSnapshot.data()?.status !== "pending") {
+      throw new HttpsError("failed-precondition", "Este ajuste ja foi analisado.");
+    }
+    transaction.update(adjustmentRef, {
+      reviewedAt,
+      reviewedBy: request.auth.uid,
+      reviewedByEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      reviewReason,
+      status: decision,
+    });
+    await appendAuditEvent(transaction, companyId, {
+      action: `punch.adjustment_${decision}`,
+      actorEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      actorUserId: request.auth.uid,
+      entityId: adjustmentId,
+      entityType: "punch_adjustment",
+      metadata: { decision, reviewReason },
+      createdAt: reviewedAt,
+    }, auditStateSnapshot);
+    return { adjustmentId, status: decision };
+  });
+
+  return { companyId, ...result };
+});
+
+export const createAttendanceJustification = onCall(callableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const employeeId = normalizedText(request.data?.employeeId);
+  const date = normalizedText(request.data?.date);
+  const period = normalizedText(request.data?.period);
+  const type = normalizedText(request.data?.type);
+  const reason = normalizedText(request.data?.reason).slice(0, 1000);
+  const evidencePath = normalizedText(request.data?.evidencePath).slice(0, 500);
+  const evidenceName = normalizedText(request.data?.evidenceName).slice(0, 200);
+  if (!companyId || !employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !reason) {
+    throw new HttpsError("invalid-argument", "Empresa, colaborador, data e motivo sao obrigatorios.");
+  }
+  if (!justificationPeriods.includes(period) || !justificationTypes.includes(type)) {
+    throw new HttpsError("invalid-argument", "Periodo ou tipo de justificativa invalido.");
+  }
+  if (evidencePath && !evidencePath.startsWith(`companies/${companyId}/employees/${employeeId}/attendance-evidence/`)) {
+    throw new HttpsError("invalid-argument", "Anexo de justificativa invalido.");
+  }
+  await requireManager(request, companyId);
+  if (!(await findEmployee(companyId, employeeId))) throw new HttpsError("not-found", "Colaborador nao encontrado.");
+
+  const createdAt = Timestamp.now();
+  const justificationRef = db.collection(`companies/${companyId}/attendanceJustifications`).doc();
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const result = await db.runTransaction(async (transaction) => {
+    const auditStateSnapshot = await transaction.get(auditStateRef);
+    transaction.create(justificationRef, {
+      companyId,
+      createdAt,
+      createdBy: request.auth.uid,
+      createdByEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      date,
+      employeeId,
+      ...(evidencePath ? { evidencePath, evidenceName } : {}),
+      period,
+      reason,
+      status: "pending",
+      type,
+    });
+    await appendAuditEvent(transaction, companyId, {
+      action: "attendance_justification_requested",
+      actorEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      actorUserId: request.auth.uid,
+      entityId: justificationRef.id,
+      entityType: "attendance_justification",
+      metadata: { date, employeeId, period, type },
+      createdAt,
+    }, auditStateSnapshot);
+    return { justificationId: justificationRef.id, status: "pending" };
+  });
+
+  return { companyId, ...result };
+});
+
+export const registerFaceIdCapture = onCall(callableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const employeeId = normalizedText(request.data?.employeeId);
+  const photoPath = normalizedText(request.data?.photoPath).slice(0, 500);
+  const consentAccepted = request.data?.consentAccepted === true;
+  const consentVersion = normalizedText(request.data?.consentVersion).slice(0, 80);
+  if (!companyId || !employeeId || !photoPath || !consentAccepted || !consentVersion) {
+    throw new HttpsError("invalid-argument", "Empresa, colaborador, foto e aceite biometrico sao obrigatorios.");
+  }
+  if (!photoPath.startsWith(`companies/${companyId}/employees/${employeeId}/face-id/`)) {
+    throw new HttpsError("invalid-argument", "Caminho da foto facial invalido.");
+  }
+  await requireManager(request, companyId);
+  if (!(await findEmployee(companyId, employeeId))) throw new HttpsError("not-found", "Colaborador nao encontrado.");
+
+  const createdAt = Timestamp.now();
+  const faceRef = db.collection(`companies/${companyId}/employees/${employeeId}/faceId`).doc();
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const result = await db.runTransaction(async (transaction) => {
+    const auditStateSnapshot = await transaction.get(auditStateRef);
+    transaction.create(faceRef, {
+      capturedBy: request.auth.uid,
+      capturedByEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      companyId,
+      consentAcceptedAt: createdAt,
+      consentVersion,
+      createdAt,
+      employeeId,
+      photoPath,
+    });
+    await appendAuditEvent(transaction, companyId, {
+      action: "face_id.capture_registered",
+      actorEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      actorUserId: request.auth.uid,
+      entityId: faceRef.id,
+      entityType: "face_id",
+      metadata: { consentVersion, employeeId, photoPath },
+      createdAt,
+    }, auditStateSnapshot);
+    return { faceId: faceRef.id };
+  });
+
+  return { companyId, employeeId, ...result };
+});
+
+export const reviewAttendanceJustification = onCall(callableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const justificationId = normalizedText(request.data?.justificationId);
+  const decision = normalizedText(request.data?.decision);
+  const reviewReason = normalizedText(request.data?.reviewReason).slice(0, 1000);
+  if (!companyId || !justificationId || !["approved", "rejected"].includes(decision)) {
+    throw new HttpsError("invalid-argument", "Empresa, justificativa e decisao sao obrigatorios.");
+  }
+  await requireManager(request, companyId);
+  const justificationRef = db.doc(`companies/${companyId}/attendanceJustifications/${justificationId}`);
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const reviewedAt = Timestamp.now();
+  const result = await db.runTransaction(async (transaction) => {
+    const [justificationSnapshot, auditStateSnapshot] = await Promise.all([
+      transaction.get(justificationRef),
+      transaction.get(auditStateRef),
+    ]);
+    if (!justificationSnapshot.exists) throw new HttpsError("not-found", "Justificativa nao encontrada.");
+    if (justificationSnapshot.data()?.status !== "pending") {
+      throw new HttpsError("failed-precondition", "Esta justificativa ja foi analisada.");
+    }
+    transaction.update(justificationRef, {
+      reviewedAt,
+      reviewedBy: request.auth.uid,
+      reviewedByEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      reviewReason,
+      status: decision,
+    });
+    await appendAuditEvent(transaction, companyId, {
+      action: `attendance_justification_${decision}`,
+      actorEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      actorUserId: request.auth.uid,
+      entityId: justificationId,
+      entityType: "attendance_justification",
+      metadata: { decision, reviewReason },
+      createdAt: reviewedAt,
+    }, auditStateSnapshot);
+    return { justificationId, status: decision };
+  });
+
+  return { companyId, ...result };
 });
 
 export const listRecentRepReceipts = onCall(callableOptions, async (request) => {
@@ -1116,6 +1432,41 @@ export const syncPortalOnCompanyWrite = onDocumentWritten({
 }, async (event) => {
   if (!event.data) return;
   await runPortalSync(`event:company:${event.params.companyId}`, { delayMs: 1500 });
+});
+
+export const auditEmployeeWrite = onDocumentWritten({
+  region: "us-east1",
+  document: "companies/{companyId}/employees/{employeeId}",
+}, async (event) => {
+  if (!event.data) return;
+
+  const beforeExists = event.data.before.exists;
+  const afterExists = event.data.after.exists;
+  const before = beforeExists ? event.data.before.data() || {} : {};
+  const after = afterExists ? event.data.after.data() || {} : {};
+  const changedFields = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]))
+    .filter((field) => before[field] !== after[field])
+    .sort();
+  const action = !beforeExists && afterExists
+    ? "employee.created"
+    : beforeExists && afterExists
+      ? "employee.updated"
+      : "employee.deleted";
+  const createdAt = Timestamp.now();
+  const auditStateRef = db.doc(`companies/${event.params.companyId}/auditState/main`);
+
+  await db.runTransaction(async (transaction) => {
+    const auditStateSnapshot = await transaction.get(auditStateRef);
+    await appendAuditEvent(transaction, event.params.companyId, {
+      action,
+      actorEmail: "firebase-trigger",
+      actorUserId: "system",
+      entityId: event.params.employeeId,
+      entityType: "employee",
+      metadata: { changedFields },
+      createdAt,
+    }, auditStateSnapshot);
+  });
 });
 
 export const syncPortalOnUserWrite = onDocumentWritten({

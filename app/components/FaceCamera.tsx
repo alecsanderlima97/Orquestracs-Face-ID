@@ -34,6 +34,7 @@ type StoredFaceProfile = RecognizedFace & {
 type FaceCameraProps = {
   compact?: boolean;
   employee?: RecognizedFace;
+  registrationAllowed?: boolean;
   onCameraState?: (state: "idle" | "loading" | "ready" | "error") => void;
   onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void;
   onRecognized?: (employee: RecognizedFace, photoBlob?: Blob) => void;
@@ -58,6 +59,7 @@ export function clearLocalFaceProfile(employeeId: string) {
 export function FaceCamera({
   compact = false,
   employee,
+  registrationAllowed = true,
   onCameraState,
   onProfileUpdated,
   onRecognized,
@@ -243,6 +245,11 @@ export function FaceCamera({
   async function registerFace() {
     if (!employee) {
       updateMessage("Selecione ou cadastre um colaborador antes da captura facial.");
+      return;
+    }
+
+    if (!registrationAllowed) {
+      updateMessage("Confirme o aceite biometrico antes de capturar o Face ID.");
       return;
     }
 

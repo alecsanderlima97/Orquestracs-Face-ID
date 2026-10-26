@@ -56,16 +56,20 @@ export async function getMainCompany() {
   return snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as Record<string, unknown>) : null;
 }
 
-export async function uploadMainCompanyLogo(file: File) {
+export async function uploadCompanyLogo(companyId: string, file: File) {
   const extension = file.name.split(".").pop()?.toLowerCase() || "webp";
-  const logoRef = ref(storage, companyLogoPath(MAIN_COMPANY_ID, extension));
+  const logoRef = ref(storage, companyLogoPath(companyId, extension));
 
   await uploadBytes(logoRef, file, {
     contentType: file.type || "image/webp",
   });
 
   const logoUrl = await getDownloadURL(logoRef);
-  await saveMainCompany({ logoUrl });
+  await saveTenantCompany(companyId, { logoUrl });
 
   return logoUrl;
+}
+
+export async function uploadMainCompanyLogo(file: File) {
+  return uploadCompanyLogo(MAIN_COMPANY_ID, file);
 }

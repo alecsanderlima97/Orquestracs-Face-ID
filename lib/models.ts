@@ -155,6 +155,7 @@ export type PunchAdjustment = {
   evidence: string;
   createdBy: string;
   createdAt: Date;
+  status?: "pending" | "approved" | "rejected";
 };
 
 export type AttendanceJustificationType =

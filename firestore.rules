@@ -48,7 +48,7 @@ service cloud.firestore {
 
         match /faceId/{recordId} {
           allow read: if canReadTenant(companyId);
-          allow create: if canWriteTenant(companyId);
+          allow create: if false;
           allow update, delete: if false;
         }
       }
@@ -74,22 +74,27 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
 
+      match /repIdempotency/{requestId} {
+        allow read, create, update, delete: if false;
+      }
+
+      match /auditState/{stateId} {
+        allow read, create, update, delete: if false;
+      }
+
       match /adjustments/{adjustmentId} {
         allow read: if canReadTenant(companyId);
-        allow create: if canWriteTenant(companyId);
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
 
       match /attendanceJustifications/{justificationId} {
         allow read: if canReadTenant(companyId);
-        allow create: if canWriteTenant(companyId);
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
 
       match /auditLogs/{logId} {
         allow read: if canReadTenant(companyId);
-        allow create: if canWriteTenant(companyId);
-        allow update, delete: if false;
+        allow create, update, delete: if false;
       }
 
       match /reports/{reportId} {
