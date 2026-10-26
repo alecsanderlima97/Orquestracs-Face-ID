@@ -79,6 +79,7 @@ type Section =
   | "Fechamento mensal"
   | "Relatorios"
   | "LGPD e auditoria"
+  | "Configuracoes"
   | "Admin";
 
 type MaskType = "name" | "cpf" | "cnpj" | "phone" | "time" | "pin" | "date" | "cep";
@@ -228,8 +229,15 @@ const navItems: Section[] = [
   "Fechamento mensal",
   "Relatorios",
   "LGPD e auditoria",
+  "Configuracoes",
   "Admin",
 ];
+
+type AuthenticationPreference = {
+  mode: "face" | "fingerprint" | "either" | "both" | "pin";
+  pinFallback: boolean;
+  readerModel: string;
+};
 
 type MainCompanyProfile = Record<string, unknown> & {
   cnpj?: string;
@@ -1032,6 +1040,14 @@ export default function Home() {
     await signOut(auth);
   }
 
+  async function saveAuthenticationPreferences(preferences: AuthenticationPreference) {
+    const payload = { authenticationPreferences: preferences };
+    if (activeCompanyId === "main") await saveMainCompany(payload);
+    else await saveTenantCompany(activeCompanyId, payload);
+    await refreshCompanyProfile(activeCompanyId);
+    setNotice("Preferencias de identificacao salvas para esta empresa.");
+  }
+
   async function handleAcceptInvite() {
     if (!user) return;
     setLoginMessage("Validando convite...");
@@ -1059,6 +1075,7 @@ export default function Home() {
       "Fechamento mensal": "Conferencia mensal para contador",
       Relatorios: "Espelho de ponto e jornada detalhada",
       "LGPD e auditoria": "Consentimento, logs e trilha inviolavel",
+      Configuracoes: "Metodos de identificacao e dispositivos",
       Admin: "Controle interno, convites e permissoes",
     };
 
@@ -1527,6 +1544,7 @@ export default function Home() {
     "Banco de horas",
     "Relatorios",
     "LGPD e auditoria",
+    "Configuracoes",
   ];
   const visibleNavItems = navItems.filter((item) =>
     (item !== "Admin" || isDeveloperUser)
@@ -1642,6 +1660,13 @@ export default function Home() {
                 </button>
               ))}
             </nav>
+            <button
+              className="mt-auto min-h-11 rounded-md border border-white/15 px-3 py-2.5 text-left text-sm font-semibold text-white/80 transition hover:border-white/30 hover:bg-white/[0.06] hover:text-white"
+              onClick={handleLogout}
+              type="button"
+            >
+              Sair da conta
+            </button>
           </aside>
         </div>
       )}
@@ -1711,7 +1736,7 @@ export default function Home() {
 
         <section className={kioskMode ? "kiosk-content-section" : centralAdminMode ? "min-w-0" : "grid min-w-0 gap-4 sm:gap-5"}>
           <header className={kioskMode || centralAdminMode ? "hidden" : "rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5"}>
-            <div className="relative">
+            <div className="relative grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,360px)] sm:items-center lg:block">
               <div className="min-w-0 lg:max-w-[280px]">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
                   Orquestracs Face ID
@@ -1724,7 +1749,7 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="mt-4 flex justify-center lg:absolute lg:right-[72px] lg:top-3 lg:mt-0 lg:w-[360px]">
+              <div className="mt-0 flex justify-start sm:justify-end lg:absolute lg:right-[72px] lg:top-3 lg:mt-0 lg:w-[360px]">
                 <div className={`w-full max-w-[360px] rounded-lg border px-3 py-2.5 ${headerWeather.shellClass}`}>
                   <div className="flex items-center gap-3">
                     <span aria-hidden="true" className="min-w-[3.5rem] text-center text-3xl leading-none">{headerWeather.icon}</span>
@@ -1814,6 +1839,14 @@ export default function Home() {
           {active === "Fechamento mensal" && <MonthlyClosingScreen company={companyProfile} onAction={demoAction} />}
           {active === "Relatorios" && <ReportsScreen onAction={demoAction} />}
           {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
+          {active === "Configuracoes" && (
+            <AuthenticationSettingsScreen
+              canEdit={canManage}
+              company={companyProfile}
+              key={`${activeCompanyId}-${String(companyProfile?.updatedAt || "")}`}
+              onSave={saveAuthenticationPreferences}
+            />
+          )}
           {active === "Admin" && (
             <AdminScreen company={companyProfile} config={saasConfig} invites={tenantInvites} onAction={demoAction} />
           )}
@@ -2642,6 +2675,218 @@ function ComplianceCard() {
         ))}
       </div>
     </section>
+  );
+}
+
+const fingerprintReaderCandidates = [
+  {
+    id: "secugen-hamster-pro-20",
+    manufacturer: "SecuGen",
+    model: "Hamster Pro 20",
+    integration: "WebAPI e SDK oficial; requer cliente local no computador do quiosque.",
+    url: "https://secugen.com/products/hamster-pro-20/",
+    docsUrl: "https://secugen.com/products/webapi/",
+  },
+  {
+    id: "secugen-hamster-pro-30",
+    manufacturer: "SecuGen",
+    model: "Hamster Pro 30",
+    integration: "WebAPI e SDK oficial; validar disponibilidade e compatibilidade do cliente local.",
+    url: "https://secugen.com/products/",
+    docsUrl: "https://secugen.com/products/webapi/",
+  },
+  {
+    id: "hid-digitalpersona-4500",
+    manufacturer: "HID DigitalPersona",
+    model: "4500",
+    integration: "SDK oficial e API web; exige componente DigitalPersona instalado localmente.",
+    url: "https://www.hidglobal.com/products/4500-fingerprint-reader",
+    docsUrl: "https://docs.hidglobal.com/digitalpersona-v4.3.0/ad/dev/web-client-api.htm",
+  },
+  {
+    id: "controlid-idbio-pro",
+    manufacturer: "Control iD",
+    model: "iDBio Pro",
+    integration: "SDK e documentacao do fabricante; confirmar interface e modo de integracao para o quiosque.",
+    url: "https://www.controlid.com.br/docs/idbio-pt/",
+    docsUrl: "https://www.controlid.com.br/docs/idbio-pt/",
+  },
+  {
+    id: "xperix-biomini-slim-3",
+    manufacturer: "Xperix",
+    model: "BioMini Slim 3",
+    integration: "BioMini SDK oficial para Windows, Linux e Android; requer prova de conceito no dispositivo alvo.",
+    url: "https://www.xperix.com/products/biomini-slim-3",
+    docsUrl: "https://www.xperix.com/products/developer/sdks",
+  },
+] as const;
+
+function AuthenticationSettingsScreen({
+  canEdit,
+  company,
+  onSave,
+}: {
+  canEdit: boolean;
+  company: MainCompanyProfile | null;
+  onSave: (preferences: AuthenticationPreference) => Promise<void>;
+}) {
+  const saved = (company?.authenticationPreferences || {}) as Partial<AuthenticationPreference>;
+  const [mode, setMode] = useState<AuthenticationPreference["mode"]>(
+    saved.mode && ["face", "fingerprint", "either", "both", "pin"].includes(saved.mode)
+      ? saved.mode
+      : "either",
+  );
+  const [pinFallback, setPinFallback] = useState(saved.pinFallback !== false);
+  const [readerModel, setReaderModel] = useState(saved.readerModel || "");
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [hasError, setHasError] = useState(false);
+
+  async function submitPreferences() {
+    setSaving(true);
+    setFeedback("");
+    setHasError(false);
+    try {
+      await onSave({ mode, pinFallback, readerModel });
+      setFeedback("Preferencias salvas. Elas ainda nao alteram a marcacao em producao.");
+    } catch (error) {
+      console.error(error);
+      setHasError(true);
+      setFeedback("Nao foi possivel salvar. Confira sua permissao e tente novamente.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const methods: Array<{ id: AuthenticationPreference["mode"]; title: string; detail: string }> = [
+    { id: "face", title: "Somente facial", detail: "Reconhecimento facial como metodo principal." },
+    { id: "fingerprint", title: "Somente digital", detail: "Leitor dedicado, apos integracao e validacao." },
+    { id: "either", title: "Facial ou digital", detail: "Funcionario escolhe um dos metodos habilitados." },
+    { id: "both", title: "Facial e digital", detail: "Duas verificacoes; depende de compatibilidade tecnica." },
+    { id: "pin", title: "PIN + foto", detail: "Alternativa por codigo e evidencia fotografica." },
+  ];
+
+  return (
+    <div className="grid min-w-0 gap-4">
+      <section className="overflow-hidden rounded-lg border border-[#cbd8d6] bg-white shadow-sm">
+        <div className="border-b border-[#d9e7e3] bg-[#f0faf7] px-4 py-4 sm:px-5">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#187e69]">Configuracoes da empresa</p>
+          <h2 className="mt-1 text-lg font-semibold text-[#102a35]">Identificacao para registro de ponto</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-5 text-[#526773]">
+            Defina a preferencia para esta empresa. O quiosque continua usando Face ID e PIN + foto ate a integracao do leitor ser testada e ativada.
+          </p>
+        </div>
+
+        <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+          <div>
+            <h3 className="text-sm font-semibold text-[#102a35]">Preferencia de autenticacao</h3>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {methods.map((method) => (
+                <label
+                  className={`flex min-h-[82px] cursor-pointer gap-3 rounded-md border p-3 transition ${
+                    mode === method.id
+                      ? "border-[#0fae8a] bg-[#effbf7] ring-1 ring-[#0fae8a]"
+                      : "border-[#d6e0e5] bg-white hover:border-[#79bdae]"
+                  } ${!canEdit ? "cursor-not-allowed opacity-65" : ""}`}
+                  key={method.id}
+                >
+                  <input
+                    checked={mode === method.id}
+                    className="mt-1 accent-[#07846d]"
+                    disabled={!canEdit}
+                    name="authentication-mode"
+                    onChange={() => setMode(method.id)}
+                    type="radio"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-[#102a35]">{method.title}</span>
+                    <span className="mt-1 block text-xs leading-4 text-[#60717d]">{method.detail}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+
+            <label className={`mt-4 flex items-start gap-3 rounded-md border border-[#d6e0e5] bg-[#f8fafb] p-3 ${!canEdit ? "opacity-65" : ""}`}>
+              <input
+                checked={pinFallback}
+                className="mt-1 accent-[#07846d]"
+                disabled={!canEdit}
+                onChange={(event) => setPinFallback(event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                <span className="block text-sm font-semibold text-[#102a35]">Manter PIN + foto como alternativa</span>
+                <span className="mt-1 block text-xs leading-4 text-[#60717d]">Recomendado para falha de leitura ou indisponibilidade do equipamento.</span>
+              </span>
+            </label>
+
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button className="primary-button" disabled={!canEdit || saving} onClick={submitPreferences} type="button">
+                {saving ? "Salvando..." : "Salvar preferencias"}
+              </button>
+              {!canEdit && <span className="text-xs text-[#667085]">Somente administradores podem alterar.</span>}
+              {feedback && (
+                <span aria-live="polite" className={`text-sm font-medium ${hasError ? "text-[#b42318]" : "text-[#187e69]"}`}>
+                  {feedback}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <aside className="rounded-md border border-[#e8d6a8] bg-[#fff9e9] p-4">
+            <h3 className="text-sm font-semibold text-[#674d12]">Ativacao da digital: pendente</h3>
+            <ul className="mt-2 grid gap-2 text-xs leading-5 text-[#6b5b32]">
+              <li>As preferencias acima sao registradas por empresa, mas ainda nao mudam o fluxo real do quiosque.</li>
+              <li>Antes de ativar: escolher e testar um leitor, instalar o componente local e validar a comunicacao com o backend.</li>
+              <li>Templates biometricos exigem protecao, acesso restrito, retencao definida e revisao da base legal LGPD.</li>
+              <li>Nao armazenar imagem bruta da digital sem necessidade tecnica comprovada.</li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-[#cbd8d6] bg-white shadow-sm">
+        <div className="flex flex-wrap items-end justify-between gap-2 border-b border-[#e0e8eb] px-4 py-4 sm:px-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#187e69]">Leitores candidatos</p>
+            <h2 className="mt-1 text-base font-semibold text-[#102a35]">Cinco modelos para avaliacao</h2>
+          </div>
+          <span className="rounded-full bg-[#fff5dd] px-3 py-1 text-xs font-semibold text-[#795b12]">Nenhum aprovado ou conectado</span>
+        </div>
+        <div className="grid gap-3 p-4 sm:p-5 md:grid-cols-2 xl:grid-cols-3">
+          {fingerprintReaderCandidates.map((reader) => (
+            <article className="flex min-w-0 flex-col rounded-md border border-[#d6e0e5] bg-[#fbfcfd] p-3" key={reader.id}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold uppercase text-[#60717d]">{reader.manufacturer}</p>
+                  <h3 className="mt-1 text-sm font-semibold text-[#102a35]">{reader.model}</h3>
+                </div>
+                <label className="flex shrink-0 items-center gap-1.5 text-[10px] font-semibold text-[#51636e]">
+                  <input
+                    aria-label={`Selecionar ${reader.manufacturer} ${reader.model} para avaliacao`}
+                    checked={readerModel === reader.id}
+                    className="accent-[#07846d]"
+                    disabled={!canEdit}
+                    name="fingerprint-reader"
+                    onChange={() => setReaderModel(reader.id)}
+                    type="radio"
+                  />
+                  Avaliar
+                </label>
+              </div>
+              <p className="mt-2 flex-1 text-xs leading-5 text-[#60717d]">{reader.integration}</p>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold">
+                <a className="text-[#087a70] underline-offset-2 hover:underline" href={reader.url} rel="noreferrer" target="_blank">Produto oficial</a>
+                <a className="text-[#087a70] underline-offset-2 hover:underline" href={reader.docsUrl} rel="noreferrer" target="_blank">SDK / API</a>
+              </div>
+            </article>
+          ))}
+        </div>
+        <p className="border-t border-[#e0e8eb] px-4 py-3 text-xs leading-5 text-[#60717d] sm:px-5">
+          A lista e uma triagem tecnica, nao um ranking de vendas nem recomendacao de compra. O modelo final depende do tablet/computador, sistema operacional, politica de dados e teste do fornecedor.
+        </p>
+      </section>
+    </div>
   );
 }
 
@@ -6111,6 +6356,15 @@ function AssistantPanel({
         "Nao edite batida original; crie ajuste rastreado.",
       ],
       questions: ["Biometria pode?", "Como funciona log inviolavel?", "Precisa termo?"],
+    },
+    Configuracoes: {
+      title: "Metodos de identificacao",
+      steps: [
+        "Escolha a preferencia futura entre Face ID, digital e PIN + foto.",
+        "A selecao de um leitor e apenas avaliacao; nao ativa o equipamento.",
+        "A digital so podera entrar no quiosque depois de um teste de hardware e revisao de seguranca e privacidade.",
+      ],
+      questions: ["Quais leitores foram avaliados?", "A digital ja esta ativa?", "Como manter o PIN como alternativa?"],
     },
     Admin: {
       title: "Admin Orquestracs",
