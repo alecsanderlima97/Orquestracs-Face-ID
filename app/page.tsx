@@ -1814,7 +1814,7 @@ export default function Home() {
               dateLabel={headerDate}
               locationLabel={kioskLocation}
               onAction={demoAction}
-              onExit={() => setActive("Painel")}
+              onExit={() => void handleLogout()}
               onRegister={registerPunch}
               pin={pin}
               setPin={setPin}
@@ -4957,56 +4957,87 @@ function KioskScreen({
     punchOptions.find((option) => option.value === selectedPunch) || punchOptions[0];
   const manualSelection = recognizedEmployee?.punchMode === "manual";
 
+  const cameraStatusLabel = cameraState === "ready"
+    ? "Câmera pronta"
+    : cameraState === "loading"
+      ? "Preparando câmera"
+      : cameraState === "error"
+        ? "Câmera indisponível"
+        : "Câmera aguardando";
+  const cameraStatusClass = cameraState === "ready"
+    ? "kiosk-status-ready"
+    : cameraState === "error"
+      ? "kiosk-status-error"
+      : "kiosk-status-pending";
+
   return (
-    <section className="kiosk-screen min-h-[100dvh] rounded-lg border border-white/10 bg-[#101923] p-4 text-white shadow-sm md:p-6">
+    <section className="kiosk-screen min-h-[100dvh] text-white">
       <header className="kiosk-clock-header">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7ee2c4]">Orquestracs Face ID</p>
-          <h1 className="mt-1 text-xl font-semibold text-white md:text-2xl">Sala de ponto</h1>
-          <p className="mt-1 text-sm text-white/60">Reconhecimento facial e confirmação da jornada</p>
+        <div className="kiosk-brand-lockup">
+          <div className="kiosk-brand-mark" aria-hidden="true">O</div>
+          <div className="min-w-0">
+            <p className="kiosk-brand-name">Orquestracs</p>
+            <p className="kiosk-brand-product">Face ID</p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="kiosk-title-block">
+          <p className="kiosk-eyebrow">Orquestracs Face ID</p>
+          <h1>Sala de ponto</h1>
+          <p>Reconhecimento facial e confirmação da jornada</p>
+        </div>
+        <div className="kiosk-header-actions">
           <div className="kiosk-clock-card">
-            <span aria-hidden="true" className="text-3xl leading-none">{weatherIcon}</span>
+            <span aria-hidden="true" className="kiosk-weather-icon">{weatherIcon}</span>
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#2d6c5d]">Momento e clima</p>
-              <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                <span className="text-sm font-bold text-[#143f37]">{weatherLabel}</span>
-                <span className="font-mono text-2xl font-bold tracking-normal text-[#101923]">{timeLabel}</span>
+              <p className="kiosk-card-label">Momento e clima</p>
+              <div className="kiosk-clock-line">
+                <span className="kiosk-weather-label">{weatherLabel}</span>
+                <span className="kiosk-time">{timeLabel}</span>
               </div>
-              <p className="mt-0.5 text-xs capitalize text-[#54716a]">{dateLabel} · {weatherDetail}</p>
-              <p className="mt-0.5 text-xs font-semibold text-[#2d6c5d]">{locationLabel}</p>
+              <p className="kiosk-date-line">{dateLabel} · {weatherDetail}</p>
+              <p className="kiosk-location-line">{locationLabel}</p>
+            </div>
+          </div>
+          <div className={`kiosk-system-status ${cameraStatusClass}`}>
+            <span className="kiosk-status-dot" aria-hidden="true" />
+            <div>
+              <strong>{cameraStatusLabel}</strong>
+              <span>Reconhecimento automático</span>
             </div>
           </div>
           <button className="kiosk-exit-button" onClick={onExit} type="button">Sair</button>
         </div>
       </header>
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 md:p-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+
+      <div className="kiosk-workspace md:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="kiosk-recognition-panel">
+          <div className="kiosk-stepper" aria-label="Etapas do registro">
+            {[
+              ["1", "Reconhecimento", "Posicione o rosto"],
+              ["2", "Identificação", "Validando funcionário"],
+              ["3", "Registro", "Gravando ponto"],
+              ["4", "Confirmação", "Mensagem de voz"],
+            ].map(([step, label, detail], index) => (
+              <div className={`kiosk-step ${index === 0 && !recognizedEmployee ? "is-active" : recognizedEmployee && index === 1 ? "is-active" : confirmation && index === 3 ? "is-active" : ""}`} key={step}>
+                <span className="kiosk-step-icon">{index === 0 ? "◉" : index === 1 ? "♙" : index === 2 ? "✓" : "◖"}</span>
+                <strong>{step}. {label}</strong>
+                <span>{detail}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="kiosk-camera-heading">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#b7d7ce]">
-                Sala de ponto
-              </p>
-              <h2 className="mt-2 text-xl font-semibold md:text-2xl">Tablet em modo reconhecimento</h2>
-              <p className="mt-1 text-sm text-white/60">
-                Funcionarios chegam, ficam em frente a camera e confirmam a presenca.
-              </p>
+              <p className="kiosk-eyebrow">Reconhecimento automático</p>
+              <h2>Fique em frente à câmera</h2>
+              <p>O sistema identifica o funcionário sem tocar na tela.</p>
             </div>
-            <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${
-              cameraState === "ready"
-                ? "bg-[#dcebe6] text-[#143f37]"
-                : cameraState === "loading"
-                  ? "bg-[#fff4d6] text-[#6b4500]"
-                  : cameraState === "error"
-                    ? "bg-[#ffe5e5] text-[#7a2020]"
-                    : "bg-white/10 text-white/75"
-            }`}>
-              {cameraState === "ready" ? "Câmera ativa" : cameraState === "loading" ? "Preparando câmera" : cameraState === "error" ? "Câmera indisponível" : "Câmera desativada"}
+            <span className={`kiosk-camera-badge ${cameraStatusClass}`}>
+              <span className="kiosk-status-dot" aria-hidden="true" /> {cameraStatusLabel}
             </span>
           </div>
 
-          <div className="mt-4">
+          <div className="kiosk-camera-shell">
             <FaceCamera
               autoRecognize
               autoStart
@@ -5016,24 +5047,41 @@ function KioskScreen({
               profileSources={faceProfileSources}
               recognitionPaused={Boolean(recognizedEmployee || confirmation || sequenceLoading)}
             />
-            <p className="mt-3 text-center text-sm text-white/55">
-                {sequenceLoading
-                  ? "Conferindo a última batida registrada..."
-                  : recognizedEmployee
-                  ? `${recognizedEmployee.name} identificado. Confirme a batida.`
-                  : cameraState === "ready"
-                    ? "Aguardando o próximo funcionário..."
-                    : "Preparando o reconhecimento facial..."}
-            </p>
+          </div>
+          <div className="kiosk-live-status">
+            <span className="kiosk-live-item"><span className="kiosk-status-dot" aria-hidden="true" /> {cameraState === "ready" ? "Aguardando o próximo funcionário..." : "Câmera em preparação"}</span>
+            <span className="kiosk-live-item"><span className="kiosk-status-dot" aria-hidden="true" /> Conexão protegida</span>
+            <span className="kiosk-live-item"><span className="kiosk-status-dot" aria-hidden="true" /> Registro em tempo real</span>
           </div>
         </div>
 
-        <aside className="grid content-start gap-3">
-          <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 md:p-5" ref={confirmPanelRef}>
-            <p className="text-lg font-semibold text-white">
-              {manualSelection ? "Escolha a marcação" : "Marcação identificada"}
-            </p>
-            <div className="mt-4 grid gap-3">
+        <aside className="kiosk-side-panel">
+          <div className="kiosk-side-card kiosk-last-card">
+            <div className="kiosk-side-heading"><span aria-hidden="true">◷</span><h2>Última marcação</h2></div>
+            <div className="kiosk-last-record">
+              <span className="kiosk-avatar">{confirmation ? confirmation.employeeName.split(" ").map((part) => part[0]).slice(0, 2).join("") : "--"}</span>
+              <div className="min-w-0">
+                <strong>{confirmation ? confirmation.employeeName : "Aguardando funcionário"}</strong>
+                <span>{confirmation ? `${confirmation.type} · hoje às ${confirmation.time}` : "Nenhuma marcação nesta sessão"}</span>
+              </div>
+              <span className="kiosk-record-icon" aria-hidden="true">✓</span>
+            </div>
+          </div>
+
+          <div className="kiosk-side-card kiosk-next-card">
+            <div className="kiosk-side-heading"><span aria-hidden="true">▣</span><h2>Próxima marcação</h2></div>
+            <div className="kiosk-next-record">
+              <span className="kiosk-next-icon" aria-hidden="true">{selectedPresentation.icon}</span>
+              <div className="min-w-0">
+                <strong>{journeyFinished ? "Jornada encerrada" : selectedPunch}</strong>
+                <span>{journeyFinished ? "Todas as marcações foram realizadas" : selectedPresentation.description}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="kiosk-side-card kiosk-identification-card" ref={confirmPanelRef}>
+            <div className="kiosk-side-heading"><span aria-hidden="true">♙</span><h2>{manualSelection ? "Escolha a marcação" : "Marcação identificada"}</h2></div>
+            <div className="mt-3 grid gap-3">
               {manualSelection ? (
                 <div className="grid grid-cols-2 gap-3">
                   {punchOptions.map((option) => (
@@ -5060,7 +5108,7 @@ function KioskScreen({
                   ))}
                 </div>
               ) : (
-                <div className="rounded-xl border-2 border-[#7ee2c4] bg-[#dcebe6] p-5 text-center text-[#143f37]">
+                <div className="kiosk-punch-card">
                   <span aria-hidden="true" className="block text-6xl">
                     {journeyFinished ? "✅" : selectedPresentation.icon}
                   </span>
@@ -5096,7 +5144,7 @@ function KioskScreen({
                 </div>
               )}
               <button
-                className="min-h-16 rounded-xl bg-[#38c793] px-5 text-lg font-black text-[#082c22] shadow-lg transition hover:-translate-y-0.5 hover:bg-[#45d8a2] disabled:cursor-not-allowed disabled:bg-[#52616f] disabled:text-white/50 disabled:hover:translate-y-0"
+                className="kiosk-confirm-button"
                 disabled={!recognizedEmployee || sequenceLoading || journeyFinished || Boolean(confirmation) || Boolean(blockingMessage)}
                 onClick={() => void confirmPunch()}
                 type="button"
@@ -5106,14 +5154,14 @@ function KioskScreen({
               {recognizedEmployee && !confirmation && (
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
-                    className="secondary-button border-white/25 bg-white/[0.06] text-white hover:bg-white/10"
+                    className="kiosk-cancel-button"
                     onClick={() => resetRecognition()}
                     type="button"
                   >
                     Cancelar
                   </button>
                   <button
-                    className="secondary-button border-[#f5b942] bg-[#fff4d6] text-[#6b4500] hover:bg-[#ffe8a6]"
+                    className="kiosk-pin-button"
                     onClick={usePinFallback}
                     type="button"
                   >
@@ -5125,7 +5173,7 @@ function KioskScreen({
           </div>
 
           {confirmation && (
-            <div aria-live="assertive" className="rounded-xl border-4 border-[#7ee2c4] bg-[#dff8ee] p-6 text-center text-[#0b4939] shadow-lg">
+            <div aria-live="assertive" className="kiosk-confirmation-card">
               <span aria-hidden="true" className="block text-6xl">✓</span>
               <p className="mt-3 text-2xl font-black">PONTO REGISTRADO</p>
               <p className="mt-2 text-lg font-bold">{confirmation.employeeName}</p>
@@ -5133,7 +5181,7 @@ function KioskScreen({
             </div>
           )}
 
-          <div className="rounded-lg border border-white/10 bg-white text-[#17202a]" id="kiosk-pin-fallback">
+          <div className="kiosk-side-card kiosk-light-card" id="kiosk-pin-fallback">
             <button
               aria-expanded={pinFallbackOpen}
               className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
@@ -5180,7 +5228,7 @@ function KioskScreen({
             )}
           </div>
 
-          <div className="rounded-lg border border-[#cfe3dc] bg-[#f1faf7] text-[#24594d]">
+          <div className="kiosk-side-card kiosk-light-card kiosk-details-card">
             <button
               aria-expanded={kioskDetailsOpen}
               className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
@@ -5201,6 +5249,11 @@ function KioskScreen({
               <span>Log inviolavel</span>
             </div>
             )}
+          </div>
+          <div className="kiosk-side-card kiosk-digital-card">
+            <div className="kiosk-side-heading"><span aria-hidden="true">◎</span><h2>Leitor digital</h2></div>
+            <p>Disponível após a escolha e validação do equipamento.</p>
+            <span className="kiosk-coming-soon">Em breve</span>
           </div>
         </aside>
       </div>

@@ -139,7 +139,7 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(page, /speakPunchConfirmation/);
   assert.match(page, /Aguardando o próximo funcionário/);
   assert.match(page, /kiosk-clock-header/);
-  assert.match(page, /onExit=\{\(\) => setActive\("Painel"\)\}/);
+  assert.match(page, /onExit=\{\(\) => void handleLogout\(\)\}/);
   assert.match(page, /!kioskMode/);
   assert.match(camera, /profileSources\?: FaceProfileSource\[\]/);
   assert.match(camera, /autoRecognize\?: boolean/);
