@@ -133,10 +133,19 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
 
   assert.match(page, /kioskMode/);
   assert.match(page, /profileSources=\{faceProfileSources\}/);
+  assert.match(page, /autoRecognize/);
+  assert.match(page, /autoStart/);
+  assert.match(page, /recognitionPaused=\{Boolean\(recognizedEmployee \|\| confirmation \|\| sequenceLoading\)\}/);
+  assert.match(page, /speakPunchConfirmation/);
+  assert.match(page, /Aguardando o próximo funcionário/);
   assert.match(page, /kiosk-clock-header/);
   assert.match(page, /onExit=\{\(\) => setActive\("Painel"\)\}/);
   assert.match(page, /!kioskMode/);
   assert.match(camera, /profileSources\?: FaceProfileSource\[\]/);
+  assert.match(camera, /autoRecognize\?: boolean/);
+  assert.match(camera, /autoStart\?: boolean/);
+  assert.match(camera, /recognitionPaused\?: boolean/);
+  assert.match(camera, /lastRecognitionDescriptorRef/);
   assert.match(camera, /loadRemoteProfiles/);
   assert.match(camera, /fetchImage\(source\.photoUrl\)/);
   assert.match(page, /listFaceIdRecords\(companyId, employee\.employeeId\)/);

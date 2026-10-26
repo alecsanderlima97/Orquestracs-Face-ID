@@ -32,8 +32,11 @@ type StoredFaceProfile = RecognizedFace & {
 };
 
 type FaceCameraProps = {
+  autoRecognize?: boolean;
+  autoStart?: boolean;
   compact?: boolean;
   employee?: RecognizedFace;
+  recognitionPaused?: boolean;
   registrationAllowed?: boolean;
   onCameraState?: (state: "idle" | "loading" | "ready" | "error") => void;
   onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void;
@@ -57,8 +60,11 @@ export function clearLocalFaceProfile(employeeId: string) {
 }
 
 export function FaceCamera({
+  autoRecognize = false,
+  autoStart = false,
   compact = false,
   employee,
+  recognitionPaused = false,
   registrationAllowed = true,
   onCameraState,
   onProfileUpdated,
@@ -75,6 +81,10 @@ export function FaceCamera({
   const [message, setMessage] = useState("Ative a câmera para começar.");
   const remoteProfilesRef = useRef<StoredFaceProfile[] | null>(null);
   const replacementStartedRef = useRef(false);
+  const startInFlightRef = useRef(false);
+  const processingRef = useRef(false);
+  const lastRecognitionDescriptorRef = useRef<Float32Array | null>(null);
+  const faceAwayFramesRef = useRef(0);
 
   useEffect(() => {
     remoteProfilesRef.current = null;
@@ -87,6 +97,12 @@ export function FaceCamera({
   useEffect(() => {
     onCameraState?.(cameraState);
   }, [cameraState, onCameraState]);
+
+  useEffect(() => {
+    if (!autoStart || cameraState !== "idle") return;
+    void startCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, cameraState]);
 
   useEffect(() => {
     return () => {
@@ -124,6 +140,9 @@ export function FaceCamera({
       updateMessage("A câmera exige HTTPS. Abra o domínio seguro do sistema ou use localhost para testar.");
       return;
     }
+
+    if (startInFlightRef.current || cameraState === "loading" || cameraState === "ready") return;
+    startInFlightRef.current = true;
 
     setCameraState("loading");
     updateMessage("Carregando câmera e reconhecimento...");
@@ -173,6 +192,8 @@ export function FaceCamera({
         SecurityError: "O navegador bloqueou a câmera por segurança. Use o endereço HTTPS do sistema.",
       }[errorName as "NotAllowedError" | "NotFoundError" | "NotReadableError" | "OverconstrainedError" | "SecurityError"];
       updateMessage(errorMessage || "Não foi possível preparar a câmera. Confira o dispositivo, a permissão e o endereço HTTPS.");
+    } finally {
+      startInFlightRef.current = false;
     }
   }
 
@@ -297,9 +318,11 @@ export function FaceCamera({
     }
   }
 
-  async function recognizeFace() {
+  async function recognizeFace(automatic = false) {
+    if (processingRef.current) return;
+    processingRef.current = true;
     setProcessing(true);
-    updateMessage("Comparando o rosto...");
+    if (!automatic) updateMessage("Comparando o rosto...");
 
     try {
       const faceApi = faceApiRef.current;
@@ -307,17 +330,40 @@ export function FaceCamera({
         ? [...getProfiles(), ...(await loadRemoteProfiles(faceApi))]
         : getProfiles();
       if (!profiles.length) {
-        updateMessage("Nenhum rosto cadastrado foi sincronizado para este aparelho. Cadastre o Face ID dos colaboradores.");
+        if (!automatic) updateMessage("Nenhum rosto cadastrado foi sincronizado para este aparelho. Cadastre o Face ID dos colaboradores.");
         return;
       }
 
       const detection = await readDescriptor();
       if (!detection) {
-        updateMessage("Nenhum rosto nítido foi encontrado. Posicione-se no centro.");
+        if (automatic) {
+          faceAwayFramesRef.current += 1;
+          if (faceAwayFramesRef.current >= 2) {
+            lastRecognitionDescriptorRef.current = null;
+            faceAwayFramesRef.current = 0;
+          }
+        } else {
+          updateMessage("Nenhum rosto nítido foi encontrado. Posicione-se no centro.");
+        }
         return;
       }
 
       if (!faceApi) return;
+
+      if (automatic && lastRecognitionDescriptorRef.current) {
+        const distanceFromPrevious = faceApi.euclideanDistance(
+          lastRecognitionDescriptorRef.current,
+          detection.descriptor,
+        );
+        if (distanceFromPrevious < 0.45) {
+          faceAwayFramesRef.current = 0;
+          return;
+        }
+        faceAwayFramesRef.current += 1;
+        if (faceAwayFramesRef.current < 2) return;
+        lastRecognitionDescriptorRef.current = null;
+        faceAwayFramesRef.current = 0;
+      }
 
       let bestMatch: { distance: number; profile: StoredFaceProfile } | null = null;
 
@@ -335,6 +381,8 @@ export function FaceCamera({
 
       if (bestMatch && bestMatch.distance <= MATCH_THRESHOLD) {
         const match = bestMatch as { distance: number; profile: StoredFaceProfile };
+        lastRecognitionDescriptorRef.current = detection.descriptor;
+        faceAwayFramesRef.current = 0;
         updateMessage(
           `${match.profile.name} reconhecido (similaridade técnica: ${Math.round((1 - match.distance) * 100)}%).`,
         );
@@ -347,16 +395,37 @@ export function FaceCamera({
           },
           await captureFrame(),
         );
-      } else {
+      } else if (!automatic) {
         updateMessage("Rosto não reconhecido. Use o PIN ou tente novamente.");
       }
     } catch (error) {
       console.error(error);
       updateMessage("O cadastro facial local está inválido. Cadastre o rosto novamente.");
     } finally {
+      processingRef.current = false;
       setProcessing(false);
     }
   }
+
+  useEffect(() => {
+    if (!autoRecognize || cameraState !== "ready" || recognitionPaused) return;
+
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const loop = async () => {
+      if (cancelled) return;
+      await recognizeFace(true);
+      if (!cancelled) timer = window.setTimeout(loop, 850);
+    };
+
+    void loop();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRecognize, cameraState, profileSources, recognitionPaused]);
 
   return (
     <div className={`rounded-lg border border-white/10 bg-[#0b121a] ${compact ? "p-3" : "p-5"}`}>
@@ -387,9 +456,13 @@ export function FaceCamera({
           <button className="primary-button" disabled={cameraState === "loading"} onClick={startCamera} type="button">
             {cameraState === "loading" ? "Preparando..." : "Ativar câmera"}
           </button>
+        ) : autoRecognize ? (
+          <div aria-live="polite" className="rounded-md border border-[#7ee2c4]/40 bg-[#7ee2c4]/10 px-4 py-3 text-center text-sm font-semibold text-[#b7d7ce]">
+            {recognitionPaused ? "Aguardando a confirmação..." : "Posicione o rosto no centro. O reconhecimento é automático."}
+          </div>
         ) : (
           <>
-            <button className="primary-button face-recognize-button" disabled={processing} onClick={recognizeFace} type="button">
+            <button className="primary-button face-recognize-button" disabled={processing} onClick={() => void recognizeFace(false)} type="button">
               {processing ? "Processando..." : "Reconhecer rosto"}
             </button>
             {employee && (

@@ -4587,6 +4587,24 @@ function KioskScreen({
     window.speechSynthesis.speak(voiceMessage);
   }
 
+  function voiceName(name: string) {
+    return name.trim().split(/\s+/)[0] || "colaborador";
+  }
+
+  function speakPunchConfirmation(type: string, name: string) {
+    const firstName = voiceName(name);
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite";
+    const message = type === "Saída 1"
+      ? `Ponto registrado. Bom intervalo, ${firstName}!`
+      : type === "Entrada 2"
+        ? `Ponto registrado. ${greeting}, ${firstName}! Bom retorno.`
+        : type === "Saída 2"
+          ? `Ponto registrado. ${greeting}, ${firstName}! Bom descanso.`
+          : `Ponto registrado. ${greeting}, ${firstName}!`;
+    speak(message);
+  }
+
   async function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
     setSequenceLoading(true);
     const nextPunch = await resolveNextPunch(employee.employeeId, companyId);
@@ -4599,11 +4617,11 @@ function KioskScreen({
     if (employee.punchMode !== "manual" && nextPunch) setSelectedPunch(nextPunch);
     onAction(`${employee.name} reconhecido. Sequência atualizada pela última batida registrada.`);
     if (nextPunch === null) {
-      speak(`${employee.name}, jornada encerrada.`);
+      speak(`${voiceName(employee.name)}, jornada encerrada.`);
     } else if (employee.punchMode === "manual") {
-      speak(`${employee.name}, escolha a marcação.`);
+      speak(`${voiceName(employee.name)}, escolha a marcação.`);
     } else {
-      speak(`${employee.name}. ${nextPunch}. Confirme.`);
+      speak(`${voiceName(employee.name)}, confirme o ponto.`);
     }
     window.setTimeout(() => {
       confirmPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -4671,7 +4689,7 @@ function KioskScreen({
       time,
       type: selectedPunch,
     });
-    speak(`${selectedPunch} registrada com sucesso, ${recognizedEmployee.name}, às ${time}.`);
+    speakPunchConfirmation(selectedPunch, recognizedEmployee.name);
 
     resetTimerRef.current = window.setTimeout(() => {
       setConfirmation(null);
@@ -4681,7 +4699,7 @@ function KioskScreen({
       setTimingWarning(null);
       setRecognizedPhoto(undefined);
       setBlockingMessage("");
-    }, 6000);
+    }, 3000);
   }
 
   const punchOptions = [
@@ -4745,17 +4763,22 @@ function KioskScreen({
 
           <div className="mt-4">
             <FaceCamera
+              autoRecognize
+              autoStart
               onCameraState={setCameraState}
               onRecognized={identifyFace}
               onStatus={onAction}
               profileSources={faceProfileSources}
+              recognitionPaused={Boolean(recognizedEmployee || confirmation || sequenceLoading)}
             />
             <p className="mt-3 text-center text-sm text-white/55">
                 {sequenceLoading
                   ? "Conferindo a última batida registrada..."
                   : recognizedEmployee
-                    ? `${recognizedEmployee.name} reconhecido - pronto para confirmar a batida`
-                    : "Teste experimental: cadastre e reconheça o rosto neste aparelho"}
+                  ? `${recognizedEmployee.name} identificado. Confirme a batida.`
+                  : cameraState === "ready"
+                    ? "Aguardando o próximo funcionário..."
+                    : "Preparando o reconhecimento facial..."}
             </p>
           </div>
         </div>
