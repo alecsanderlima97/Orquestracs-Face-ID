@@ -5034,7 +5034,7 @@ function KioskScreen({
       portugueseVoices.find((voice) => /natural|online|francisca|luciana|maria/i.test(voice.name)) ||
       portugueseVoices[0];
     if (naturalVoice) voiceMessage.voice = naturalVoice;
-    voiceMessage.rate = 0.98;
+    voiceMessage.rate = 1.16;
     voiceMessage.pitch = 1.03;
     voiceMessage.volume = 0.92;
     window.speechSynthesis.speak(voiceMessage);
@@ -5046,15 +5046,11 @@ function KioskScreen({
 
   function speakPunchConfirmation(type: string, name: string) {
     const firstName = voiceName(name);
-    const hour = new Date().getHours();
-    const greeting = hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite";
     const message = type === "Saída 1"
-      ? `Ponto registrado. Bom intervalo, ${firstName}!`
-      : type === "Entrada 2"
-        ? `Ponto registrado. ${greeting}, ${firstName}! Bom retorno.`
-        : type === "Saída 2"
-          ? `Ponto registrado. ${greeting}, ${firstName}! Bom descanso.`
-          : `Ponto registrado. ${greeting}, ${firstName}!`;
+      ? `Ponto registrado, ${firstName}. Intervalo.`
+      : type === "Saída 2"
+        ? `Ponto registrado, ${firstName}. Jornada encerrada.`
+        : `Ponto registrado, ${firstName}.`;
     speak(message);
   }
 
@@ -5152,7 +5148,7 @@ function KioskScreen({
       setTimingWarning(null);
       setRecognizedPhoto(undefined);
       setBlockingMessage("");
-    }, 3000);
+    }, 1800);
   }
 
   const punchOptions = [

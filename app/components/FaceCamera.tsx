@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 const FACE_PROFILES_KEY = "orquestracs-face-id-local-profiles";
 const MATCH_THRESHOLD = 0.5;
 const MAX_CAPTURES_PER_EMPLOYEE = 5;
+const AUTO_RECOGNITION_INTERVAL_MS = 500;
 
 type FaceApiModule = typeof import("@vladmandic/face-api");
 
@@ -416,7 +417,7 @@ export function FaceCamera({
     const loop = async () => {
       if (cancelled) return;
       await recognizeFace(true);
-      if (!cancelled) timer = window.setTimeout(loop, 850);
+      if (!cancelled) timer = window.setTimeout(loop, AUTO_RECOGNITION_INTERVAL_MS);
     };
 
     void loop();
