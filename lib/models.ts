@@ -124,6 +124,7 @@ export type Punch = {
   id: string;
   companyId: string;
   employeeId: string;
+  scheduledPunch?: "Entrada 1" | "Saída 1" | "Entrada 2" | "Saída 2";
   type: PunchType;
   status: PunchStatus;
   occurredAt: Date;

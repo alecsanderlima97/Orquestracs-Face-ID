@@ -626,6 +626,15 @@ type PunchContext = {
   origin?: "kiosk" | "external";
 };
 
+type ScheduledPunch = NonNullable<Punch["scheduledPunch"]>;
+
+const scheduledPunchOrder: ScheduledPunch[] = [
+  "Entrada 1",
+  "Saída 1",
+  "Entrada 2",
+  "Saída 2",
+];
+
 function getPunchDeviceId() {
   const storageKey = "orquestracs-face-id-device-id";
   const existing = window.localStorage.getItem(storageKey);
@@ -665,27 +674,58 @@ function getLocalRecords() {
   ) as LocalRecord[];
 }
 
-function inferNextPunchFromHistory(punches: Array<Pick<Punch, "occurredAt" | "type">>) {
+function inferNextPunchFromHistory(
+  punches: Array<Pick<Punch, "occurredAt" | "type" | "scheduledPunch">>,
+  now = new Date(),
+  schedule?: LocalEmployee["schedule"],
+) {
   const orderedPunches = punches
     .map((punch) => ({ punch, date: punchDate(punch as Punch) }))
     .filter((item) => !Number.isNaN(item.date.getTime()))
     .sort((first, second) => first.date.getTime() - second.date.getTime())
-    .map((item) => item.punch);
+    .map((item) => item);
 
-  const latestPunch = orderedPunches.at(-1);
-  if (!latestPunch) return "Entrada 1";
-  if (latestPunch.type === "exit") return null;
-  if (latestPunch.type === "lunch_out") return "Entrada 2";
-  if (latestPunch.type === "lunch_back") return "Saída 2";
-  if (latestPunch.type === "entry") {
-    const entryCount = orderedPunches.filter((punch) => punch.type === "entry").length;
-    return entryCount >= 2 ? "Saída 2" : "Saída 1";
-  }
+  const completed = new Set<ScheduledPunch>();
+  orderedPunches.forEach(({ punch, date }, index) => {
+    if (punch.scheduledPunch && scheduledPunchOrder.includes(punch.scheduledPunch)) {
+      completed.add(punch.scheduledPunch);
+      return;
+    }
 
-  return "Entrada 1";
+    // Registros antigos não tinham a etapa da jornada. Recuperamos a etapa
+    // pelo tipo e pelo horário para manter a sequência entre máquinas.
+    const breakStart = minutesFromTime(schedule?.breakStart || "11:30");
+    const breakEnd = minutesFromTime(schedule?.breakEnd || "13:00");
+    const punchMinutes = date.getHours() * 60 + date.getMinutes();
+    const previousEntries = orderedPunches
+      .slice(0, index)
+      .filter((item) => item.punch.type === "entry").length;
+    const fallback: ScheduledPunch = punch.type === "lunch_out"
+      ? "Saída 1"
+      : punch.type === "lunch_back"
+        ? "Entrada 2"
+        : punch.type === "exit"
+          ? punchMinutes <= breakStart ? "Saída 1" : "Saída 2"
+          : punchMinutes >= breakEnd || previousEntries > 0 ? "Entrada 2" : "Entrada 1";
+    completed.add(fallback);
+  });
+
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const breakEnd = minutesFromTime(schedule?.breakEnd || "13:00");
+
+  // Avança sempre pelo estágio mais alto já registrado. Assim, uma entrada
+  // da tarde nunca faz a próxima marcação voltar para a entrada da manhã.
+  if (completed.has("Saída 2")) return null;
+  if (completed.has("Entrada 2")) return "Saída 2";
+  if (completed.has("Saída 1")) return "Entrada 2";
+  if (completed.has("Entrada 1")) return "Saída 1";
+
+  // Sem marcações anteriores, uma chegada depois do início do segundo período
+  // é tratada como Entrada 2; antes disso, permanece Entrada 1.
+  return currentMinutes >= breakEnd ? "Entrada 2" : "Entrada 1";
 }
 
-function inferNextPunch(employeeId: string) {
+function inferNextPunch(employeeId: string, schedule?: LocalEmployee["schedule"]) {
   const today = new Date().toDateString();
   const punches = getLocalRecords()
     .filter((record) => {
@@ -698,20 +738,25 @@ function inferNextPunch(employeeId: string) {
     })
     .map((record) => ({
       occurredAt: new Date(record.fields.Horário || record.savedAt),
+      scheduledPunch: scheduledPunchOrder.includes(record.fields.Tipo as ScheduledPunch)
+        ? record.fields.Tipo as ScheduledPunch
+        : undefined,
       type: mapPunchType(record.fields.Tipo || ""),
     }));
 
-  return inferNextPunchFromHistory(punches);
+  return inferNextPunchFromHistory(punches, new Date(), schedule);
 }
 
-async function resolveNextPunch(employeeId: string, companyId: string) {
-  const localNextPunch = inferNextPunch(employeeId);
+async function resolveNextPunch(employeeId: string, companyId: string, schedule?: LocalEmployee["schedule"]) {
+  const localNextPunch = inferNextPunch(employeeId, schedule);
 
   try {
     const serverPunches = await listEmployeePunches(companyId, employeeId);
     const today = new Date();
     const todayPunches = serverPunches.filter((punch) => sameDay(punchDate(punch), today));
-    return todayPunches.length ? inferNextPunchFromHistory(todayPunches) : localNextPunch;
+    return todayPunches.length
+      ? inferNextPunchFromHistory(todayPunches, today, schedule)
+      : localNextPunch;
   } catch (error) {
     console.warn("Não foi possível consultar a sequência real das batidas; usando o histórico local.", error);
     return localNextPunch;
@@ -4738,7 +4783,7 @@ function ExternalPunchScreen({
       return;
     }
 
-    const nextPunch = inferNextPunch(registered.employeeId);
+    const nextPunch = inferNextPunch(registered.employeeId, registered.schedule);
     const recognized = {
       ...employee,
       employeeId: registered.employeeId,
@@ -5015,7 +5060,7 @@ function KioskScreen({
 
   async function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
     setSequenceLoading(true);
-    const nextPunch = await resolveNextPunch(employee.employeeId, companyId);
+    const nextPunch = await resolveNextPunch(employee.employeeId, companyId, employee.schedule);
     setSequenceLoading(false);
     setTimingWarning(null);
     setBlockingMessage("");
@@ -5370,6 +5415,31 @@ function KioskScreen({
                 className="secondary-button"
                 onClick={() => {
                   void (async () => {
+                  let nextPunch: string | null = selectedPunch;
+                  try {
+                    setSequenceLoading(true);
+                    const verified = await verifyEmployeePin(companyId, pin.trim());
+                    nextPunch = await resolveNextPunch(verified.employeeId, companyId);
+                    setSequenceLoading(false);
+                    if (!nextPunch) {
+                      setBlockingMessage("As quatro marcações de hoje já foram registradas.");
+                      speak("A jornada de hoje já foi encerrada.");
+                      return;
+                    }
+                    const resolvedPunch = nextPunch;
+                    setSelectedPunch(resolvedPunch);
+                    if (await onRegister(resolvedPunch)) {
+                      const time = new Date().toLocaleTimeString("pt-BR", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      });
+                      speak(`${resolvedPunch} registrada com sucesso às ${time}.`);
+                    }
+                    return;
+                  } catch {
+                    setSequenceLoading(false);
+                  }
+
                   if (await onRegister(selectedPunch)) {
                     const time = new Date().toLocaleTimeString("pt-BR", {
                       hour: "2-digit",

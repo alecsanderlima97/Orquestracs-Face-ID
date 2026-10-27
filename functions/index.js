@@ -506,6 +506,7 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       serverRecordedAt: now,
       source,
       status,
+      scheduledPunch: scheduledPunch || null,
       type,
     };
     transaction.create(punchRef, punch);
@@ -527,7 +528,7 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       deviceId,
       entityId: punchRef.id,
       entityType: "punch",
-      metadata: { employeeId, nsr, origin, source, type },
+      metadata: { employeeId, nsr, origin, scheduledPunch, source, type },
       createdAt: now,
     };
     await appendAuditEvent(transaction, companyId, auditEvent, auditStateSnapshot);
