@@ -76,41 +76,46 @@ export function isPlatformOwnerEmail(email?: string | null) {
   return PLATFORM_OWNER_EMAILS.includes((email || "").toLowerCase());
 }
 
-export async function getUserTenantAccess(user: User): Promise<TenantAccess | null> {
+export async function getUserTenantAccesses(user: User): Promise<TenantAccess[]> {
   if (isPlatformOwnerEmail(user.email)) {
-    return {
+    return [{
       companyName: "Orquestracs",
       role: "developer",
       tenantId: DEFAULT_TENANT_ID,
-    };
+    }];
   }
 
   const memberships = await getDocs(collection(db, `userTenants/${user.uid}/memberships`));
-  if (memberships.empty) return null;
+  const accesses = await Promise.all(memberships.docs.map(async (membership) => {
+    const data = membership.data();
+    const tenantUser = await getDoc(doc(db, `tenants/${membership.id}/users/${user.uid}`));
+    if (!tenantUser.exists()) return null;
 
-  const membership = memberships.docs[0];
-  const data = membership.data();
-  const tenantUser = await getDoc(doc(db, `tenants/${membership.id}/users/${user.uid}`));
+    const canonicalAccess = tenantUser.data();
+    return {
+      companyName: String(data.companyName || "Empresa"),
+      role: (canonicalAccess.role || "reader") as TenantRole,
+      tenantId: membership.id,
+    } satisfies TenantAccess;
+  }));
 
-  if (!tenantUser.exists()) return null;
+  return accesses
+    .filter((access): access is TenantAccess => Boolean(access))
+    .sort((left, right) => left.companyName.localeCompare(right.companyName, "pt-BR") || left.tenantId.localeCompare(right.tenantId));
+}
 
-  const canonicalAccess = tenantUser.data();
-
-  return {
-    companyName: String(data.companyName || "Empresa"),
-    role: (canonicalAccess.role || "reader") as TenantRole,
-    tenantId: membership.id,
-  };
+export async function getUserTenantAccess(user: User): Promise<TenantAccess | null> {
+  return (await getUserTenantAccesses(user))[0] || null;
 }
 
 export async function createTenantInvite({
   companyName,
   role,
-  tenantId = DEFAULT_TENANT_ID,
+  tenantId,
 }: {
   companyName: string;
   role: Exclude<TenantRole, "developer">;
-  tenantId?: string;
+  tenantId: string;
 }) {
   const code = crypto.randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase();
   const invite: TenantInvite = {
@@ -130,7 +135,7 @@ export async function createTenantInvite({
   return invite;
 }
 
-export async function listTenantInvites(tenantId = DEFAULT_TENANT_ID) {
+export async function listTenantInvites(tenantId: string) {
   const snapshot = await getDocs(query(collection(db, "invites"), where("tenantId", "==", tenantId)));
   const now = Date.now();
 
@@ -144,7 +149,7 @@ export async function listTenantInvites(tenantId = DEFAULT_TENANT_ID) {
     .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
 }
 
-export async function getTenantSaasConfig(tenantId = DEFAULT_TENANT_ID): Promise<TenantSaasConfig> {
+export async function getTenantSaasConfig(tenantId: string): Promise<TenantSaasConfig> {
   const snapshot = await getDoc(doc(db, `tenants/${tenantId}`));
   return mapTenantSaasConfig(snapshot.data() || {}, tenantId);
 }
@@ -336,7 +341,7 @@ export function subscribePlatformTenantClients(
 }
 
 export async function saveTenantSaasConfig(
-  tenantId = DEFAULT_TENANT_ID,
+  tenantId: string,
   config: Omit<TenantSaasConfig, "tenantId">,
 ) {
   await setDoc(

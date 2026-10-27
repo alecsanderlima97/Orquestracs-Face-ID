@@ -37,16 +37,28 @@ test("renderiza a aplicacao Orquestracs Face ID", async () => {
 });
 
 test("mantem batidas originais no fluxo protegido do servidor", async () => {
-  const [page, punchService, repService, functions, rules] = await Promise.all([
+  const [page, punchService, repService, functions, rules, credits, tenantAccess] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/services/punches.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/services/rep-p.ts", import.meta.url), "utf8"),
     readFile(new URL("../functions/index.js", import.meta.url), "utf8"),
     readFile(new URL("../firestore.rules", import.meta.url), "utf8"),
+    readFile(new URL("../lib/services/ai-credits.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/services/tenant-access.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /registerRepPunch\(/);
   assert.doesNotMatch(page, /createPunch\(/);
+  assert.match(page, /const TenantIdContext = createContext\(""\)/);
+  assert.match(page, /async function refreshCompanyProfile\(companyId: string\)/);
+  assert.doesNotMatch(page, /refreshCompanyProfile\(\);/);
+  assert.doesNotMatch(page, /resolveNextPunch\(employeeId: string, companyId = "main"\)/);
+  assert.match(page, /isPlatformOwnerEmail\(user\.email\) \? "main" : ""/);
+  assert.doesNotMatch(credits, /consumeAiCredit\(tenantId = "main"/);
+  assert.doesNotMatch(tenantAccess, /(?:listTenantInvites|getTenantSaasConfig|saveTenantSaasConfig)\([^)]*tenantId = DEFAULT_TENANT_ID/);
+  assert.match(tenantAccess, /export async function getUserTenantAccesses\(user: User\)/);
+  assert.match(page, /getUserTenantAccesses\(currentUser\)/);
+  assert.match(page, /orquestracs-active-tenant/);
   assert.doesNotMatch(punchService, /export async function createPunch\s*\(/);
   assert.match(rules, /match \/punches\/\{punchId\}/);
   assert.match(rules, /allow create, update, delete: if false/);

@@ -58,7 +58,7 @@ import {
   acceptTenantInvite,
   createTenantInvite,
   getTenantSaasConfig,
-  getUserTenantAccess,
+  getUserTenantAccesses,
   isPlatformOwnerEmail,
   listTenantInvites,
   saveTenantSaasConfig,
@@ -87,7 +87,9 @@ type EmployeeSection = "detail" | "face" | "form" | "list";
 
 const employees: EmployeeRow[] = [];
 
-const TenantIdContext = createContext("main");
+// O tenant só existe depois que a sessão e o convite/membership foram resolvidos.
+// Manter o contexto vazio durante essa fase evita consultar a empresa principal por engano.
+const TenantIdContext = createContext("");
 
 function useActiveCompanyId() {
   return useContext(TenantIdContext);
@@ -702,7 +704,7 @@ function inferNextPunch(employeeId: string) {
   return inferNextPunchFromHistory(punches);
 }
 
-async function resolveNextPunch(employeeId: string, companyId = "main") {
+async function resolveNextPunch(employeeId: string, companyId: string) {
   const localNextPunch = inferNextPunch(employeeId);
 
   try {
@@ -815,6 +817,7 @@ export default function Home() {
   const [accessLoading, setAccessLoading] = useState(true);
   const [accessError, setAccessError] = useState("");
   const [appAccess, setAppAccess] = useState<TenantAccess | null>(null);
+  const [tenantAccesses, setTenantAccesses] = useState<TenantAccess[]>([]);
   const [currentDateTime, setCurrentDateTime] = useState("");
   const [companyProfile, setCompanyProfile] = useState<MainCompanyProfile | null>(null);
   const [weatherSnapshot, setWeatherSnapshot] = useState<WeatherSnapshot | null>(null);
@@ -831,7 +834,12 @@ export default function Home() {
   const [lastPunchReceipt, setLastPunchReceipt] = useState<RepPunchReceipt | null>(null);
   const [user, setUser] = useState<User | null>(null);
 
-  async function refreshCompanyProfile(companyId = appAccess?.tenantId || "main") {
+  async function refreshCompanyProfile(companyId: string) {
+    if (!companyId) {
+      setCompanyProfile(null);
+      return;
+    }
+
     const company = companyId === "main" ? await getMainCompany() : await getCompany(companyId);
     if (company) {
       setCompanyProfile(company as MainCompanyProfile);
@@ -845,19 +853,30 @@ export default function Home() {
   async function refreshAccess(currentUser: User) {
     setAccessLoading(true);
     setAccessError("");
+    setCompanyProfile(null);
+    setTenantInvites([]);
+    setSaasConfig(null);
     try {
       const access = await Promise.race([
-        getUserTenantAccess(currentUser),
+        getUserTenantAccesses(currentUser),
         new Promise<never>((_, reject) => {
           window.setTimeout(() => reject(new Error("access-timeout")), 10000);
         }),
       ]);
-      setAppAccess(access);
-      void refreshCompanyProfile(access?.tenantId || "main");
-      if (access?.role === "developer") {
+      setTenantAccesses(access);
+      const rememberedTenantId = window.localStorage.getItem(`orquestracs-active-tenant:${currentUser.uid}`);
+      const selectedAccess = access.find((item) => item.tenantId === rememberedTenantId) || access[0] || null;
+      setAppAccess(selectedAccess);
+      if (selectedAccess) {
+        window.localStorage.setItem(`orquestracs-active-tenant:${currentUser.uid}`, selectedAccess.tenantId);
+        void refreshCompanyProfile(selectedAccess.tenantId);
+      } else {
+        setCompanyProfile(null);
+      }
+      if (selectedAccess?.role === "developer") {
         const [invites, config] = await Promise.all([
-          listTenantInvites(access.tenantId),
-          getTenantSaasConfig(access.tenantId),
+          listTenantInvites(selectedAccess.tenantId),
+          getTenantSaasConfig(selectedAccess.tenantId),
         ]);
         setTenantInvites(invites);
         setSaasConfig(config);
@@ -865,6 +884,7 @@ export default function Home() {
     } catch (error) {
       console.error(error);
       setAppAccess(null);
+      setTenantAccesses([]);
       setAccessError("Nao foi possivel carregar as permissoes agora. Verifique sua conexao e tente novamente.");
     } finally {
       setAccessLoading(false);
@@ -892,10 +912,11 @@ export default function Home() {
       setUser(currentUser);
       setAuthLoading(false);
       if (currentUser) {
-        void refreshCompanyProfile();
         void refreshAccess(currentUser);
       } else {
         setAppAccess(null);
+        setTenantAccesses([]);
+        setCompanyProfile(null);
         setAccessLoading(false);
       }
     });
@@ -1054,11 +1075,40 @@ export default function Home() {
     try {
       const access = await acceptTenantInvite(inviteCode, user);
       setAppAccess(access);
+      setTenantAccesses((current) => current.some((item) => item.tenantId === access.tenantId) ? current : [...current, access]);
+      setCompanyProfile(null);
+      window.localStorage.setItem(`orquestracs-active-tenant:${user.uid}`, access.tenantId);
+      void refreshCompanyProfile(access.tenantId);
       setLoginMessage("");
       setNotice(`Acesso liberado para ${access.companyName}.`);
     } catch (error) {
       console.error(error);
       setLoginMessage("Convite invalido, expirado ou ja utilizado.");
+    }
+  }
+
+  function handleTenantChange(tenantId: string) {
+    const nextAccess = tenantAccesses.find((item) => item.tenantId === tenantId);
+    if (!nextAccess || nextAccess.tenantId === appAccess?.tenantId) return;
+
+    setAppAccess(nextAccess);
+    setCompanyProfile(null);
+    setWeatherSnapshot(null);
+    setWeatherCoordinates(null);
+    setTenantInvites([]);
+    setSaasConfig(null);
+    setActive("Painel");
+    setMobileMenuOpen(false);
+    if (user) window.localStorage.setItem(`orquestracs-active-tenant:${user.uid}`, nextAccess.tenantId);
+    void refreshCompanyProfile(nextAccess.tenantId);
+    if (nextAccess.role === "developer") {
+      void Promise.all([
+        listTenantInvites(nextAccess.tenantId),
+        getTenantSaasConfig(nextAccess.tenantId),
+      ]).then(([invites, config]) => {
+        setTenantInvites(invites);
+        setSaasConfig(config);
+      });
     }
   }
 
@@ -1582,7 +1632,7 @@ export default function Home() {
   }
 
   const isDeveloperUser = appAccess?.role === "developer" || isPlatformOwnerEmail(user.email);
-  const activeCompanyId = appAccess?.tenantId || "main";
+  const activeCompanyId = appAccess?.tenantId || (isPlatformOwnerEmail(user.email) ? "main" : "");
   const canManage = isDeveloperUser || appAccess?.role === "owner" || appAccess?.role === "admin";
   const readerSections: Section[] = [
     "Painel",
@@ -1684,8 +1734,19 @@ export default function Home() {
               </button>
             </div>
             <div className="mt-4 rounded-md border border-white/10 bg-white/[0.04] p-3">
-              <p className="text-xs uppercase text-white/45">Empresa</p>
-              <p className="mt-1 truncate text-sm font-semibold text-white">{String(companyName)}</p>
+              <p className="text-xs uppercase text-white/45">Empresa ativa</p>
+              {tenantAccesses.length > 1 ? (
+                <select
+                  aria-label="Selecionar empresa ativa"
+                  className="mt-2 min-h-10 w-full rounded-md border border-white/15 bg-[#16242f] px-2 text-sm font-semibold text-white outline-none focus:border-[#8bcab9]"
+                  onChange={(event) => handleTenantChange(event.target.value)}
+                  value={appAccess?.tenantId || ""}
+                >
+                  {tenantAccesses.map((tenant) => <option key={tenant.tenantId} value={tenant.tenantId}>{tenant.companyName}</option>)}
+                </select>
+              ) : (
+                <p className="mt-1 truncate text-sm font-semibold text-white">{String(companyName)}</p>
+              )}
               <p className="mt-1 truncate text-xs text-white/55">{String(companyCnpj)}</p>
             </div>
             <nav className="mt-4 grid gap-1 overflow-y-auto pb-5 text-sm">
@@ -1727,7 +1788,7 @@ export default function Home() {
                 />
               </div>
               <div className="mt-5 rounded-md border border-white/10 bg-white/[0.04] p-3">
-                <p className="text-xs uppercase tracking-[0.12em] text-white/45">Empresa</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-white/45">Empresa ativa</p>
                 <div className="mt-2 flex items-center gap-3">
                   {companyProfile?.logoUrl ? (
                     <img
@@ -1745,6 +1806,16 @@ export default function Home() {
                     <p className="mt-1 truncate text-xs text-white/55">{String(companyCnpj)}</p>
                   </div>
                 </div>
+                {tenantAccesses.length > 1 ? (
+                  <select
+                    aria-label="Selecionar empresa ativa"
+                    className="mt-3 min-h-10 w-full rounded-md border border-white/15 bg-[#16242f] px-2 text-sm font-semibold text-white outline-none focus:border-[#8bcab9]"
+                    onChange={(event) => handleTenantChange(event.target.value)}
+                    value={appAccess?.tenantId || ""}
+                  >
+                    {tenantAccesses.map((tenant) => <option key={tenant.tenantId} value={tenant.tenantId}>{tenant.companyName}</option>)}
+                  </select>
+                ) : null}
               </div>
             </div>
 

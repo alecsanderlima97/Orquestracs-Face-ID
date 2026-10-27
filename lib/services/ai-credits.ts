@@ -4,7 +4,7 @@ import type { TenantSaasConfig } from "@/lib/services/tenant-access";
 
 const functions = getFunctions(firebaseApp, "us-east1");
 
-export async function consumeAiCredit(tenantId = "main", amount = 1) {
+export async function consumeAiCredit(tenantId: string, amount = 1) {
   const callable = httpsCallable<
     { tenantId: string; amount: number },
     { tenantId: string; balance: number; used: number; bonus: number; included: number }
