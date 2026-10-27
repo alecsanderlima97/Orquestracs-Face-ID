@@ -5219,11 +5219,10 @@ function KioskScreen({
             {[
               ["1", "Reconhecimento", "Posicione o rosto"],
               ["2", "Identificação", "Validando funcionário"],
-              ["3", "Registro", "Gravando ponto"],
-              ["4", "Confirmação", "Mensagem de voz"],
+              ["3", "Confirmar", "Confirme o ponto"],
             ].map(([step, label, detail], index) => (
-              <div className={`kiosk-step ${index === 0 && !recognizedEmployee ? "is-active" : recognizedEmployee && index === 1 ? "is-active" : confirmation && index === 3 ? "is-active" : ""}`} key={step}>
-                <span className="kiosk-step-icon">{index === 0 ? "◉" : index === 1 ? "♙" : index === 2 ? "✓" : "◖"}</span>
+              <div className={`kiosk-step ${index === 0 && !recognizedEmployee ? "is-active" : recognizedEmployee && index === 1 ? "is-active" : confirmation && index === 2 ? "is-active" : ""}`} key={step}>
+                <span className="kiosk-step-icon">{index === 0 ? "◉" : index === 1 ? "♙" : "✓"}</span>
                 <strong>{step}. {label}</strong>
                 <span>{detail}</span>
               </div>
