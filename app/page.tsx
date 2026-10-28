@@ -22,6 +22,7 @@ import type {
   AttendanceJustificationPeriod,
   AttendanceJustificationType,
   AdjustmentType,
+  BankHoursAdjustment,
   PunchAdjustment,
   Punch,
   PunchStatus,
@@ -44,6 +45,11 @@ import {
   reviewAttendanceJustification,
   uploadAttendanceEvidence,
 } from "@/lib/services/attendance-justifications";
+import {
+  createBankHoursAdjustment,
+  listBankHoursAdjustments,
+  reviewBankHoursAdjustment,
+} from "@/lib/services/hours-bank";
 import {
   generateRepExports,
   listOwnRepReceipts,
@@ -339,6 +345,7 @@ type MonthlyMirrorRow = {
 
 type MonthlyMirrorSummary = {
   absencePoints: number;
+  bankAdjustmentMinutes: number;
   earlyLeaveMinutes: number;
   employee: LocalEmployee;
   incompleteAfternoons: number;
@@ -2001,7 +2008,7 @@ export default function Home() {
               setPin={setPin}
             />
           )}
-          {active === "Banco de horas" && <HoursBankScreen canEdit={canManage} onAction={demoAction} />}
+          {active === "Banco de horas" && <HoursBankScreen canEdit={canManage} company={companyProfile} onAction={demoAction} />}
           {active === "Fechamento mensal" && <MonthlyClosingScreen company={companyProfile} onAction={demoAction} />}
           {active === "Relatorios" && <ReportsScreen company={companyProfile} onAction={demoAction} />}
           {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
@@ -5515,17 +5522,269 @@ function KioskScreen({
   );
 }
 
-function HoursBankScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (action: string) => void }) {
+function HoursBankScreen({ canEdit, company, onAction }: { canEdit: boolean; company: MainCompanyProfile | null; onAction: (action: string) => void }) {
+  const companyId = useActiveCompanyId();
+  const now = new Date();
+  const [month, setMonth] = useState(String(now.getMonth() + 1).padStart(2, "0"));
+  const [year, setYear] = useState(String(now.getFullYear()));
+  const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
+  const [punches, setPunches] = useState<Punch[]>([]);
+  const [attendanceJustifications, setAttendanceJustifications] = useState<AttendanceJustification[]>([]);
+  const [bankAdjustments, setBankAdjustments] = useState<BankHoursAdjustment[]>([]);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [direction, setDirection] = useState<BankHoursAdjustment["direction"]>("add");
+  const [adjustmentHours, setAdjustmentHours] = useState("1");
+  const [adjustmentMinutes, setAdjustmentMinutes] = useState("00");
+  const [effectiveDate, setEffectiveDate] = useState(now.toISOString().slice(0, 10));
+  const [reason, setReason] = useState("");
+  const [responsibleName, setResponsibleName] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  async function loadData() {
+    try {
+      const savedEmployees = await listEmployees(companyId);
+      const mappedEmployees = savedEmployees.map((employee) =>
+        toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id),
+      );
+      const employeeIds = mappedEmployees.map((employee) => employee.employeeId);
+      const [savedPunches, savedJustifications, savedAdjustments] = await Promise.all([
+        listEmployeePunchesByIds(companyId, employeeIds),
+        listAttendanceJustifications(companyId),
+        listBankHoursAdjustments(companyId),
+      ]);
+      setEmployeesList(mappedEmployees);
+      setPunches(savedPunches);
+      setAttendanceJustifications(savedJustifications);
+      setBankAdjustments(savedAdjustments);
+      setSelectedEmployeeId((current) => current || mappedEmployees[0]?.employeeId || "");
+    } catch (error) {
+      console.error(error);
+      const localEmployees = getLocalEmployees();
+      setEmployeesList(localEmployees);
+      setPunches([]);
+      setAttendanceJustifications([]);
+      setBankAdjustments([]);
+      setSelectedEmployeeId((current) => current || localEmployees[0]?.employeeId || "");
+      onAction("Não foi possível carregar o banco de horas do Firebase. Exibindo os colaboradores locais.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // Carrega os dados externos quando a empresa ativa muda.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadData();
+    // A empresa ativa muda quando o usuário troca de cliente no mesmo acesso.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
+
+  const selectedYear = Number(year) || now.getFullYear();
+  const selectedMonth = Number(month) || now.getMonth() + 1;
+  const period = getMonthPeriod(selectedYear, selectedMonth);
+  const summaries = useMemo(
+    () => {
+      const selectedPeriod = getMonthPeriod(selectedYear, selectedMonth);
+      const workPolicy = getCompanyWorkPolicy(company);
+      return employeesList.map((employee) => buildMonthlyMirrorSummary(
+        employee,
+        punches.filter((punch) => punch.employeeId === employee.employeeId),
+        selectedPeriod,
+        workPolicy,
+        attendanceJustifications,
+        bankAdjustments,
+      ));
+    },
+    [attendanceJustifications, bankAdjustments, company, employeesList, punches, selectedMonth, selectedYear],
+  );
+  const pendingAdjustments = bankAdjustments.filter((adjustment) => adjustment.status === "pending");
+  const historicAdjustments = bankAdjustments
+    .filter((adjustment) => adjustment.status !== "pending")
+    .sort((first, second) => String(second.effectiveDate).localeCompare(String(first.effectiveDate)))
+    .slice(0, 20);
+
+  async function saveBankAdjustment() {
+    const hours = Number(adjustmentHours);
+    const minutes = Number(adjustmentMinutes);
+    const totalMinutes = hours * 60 + minutes;
+    if (!selectedEmployeeId || !Number.isInteger(hours) || hours < 0 || !Number.isInteger(minutes) || minutes < 0 || minutes > 59 || totalMinutes < 1) {
+      onAction("Informe o colaborador e uma quantidade válida de horas e minutos.");
+      return;
+    }
+    if (!effectiveDate || !reason.trim() || !responsibleName.trim()) {
+      onAction("Informe data, motivo e responsável antes de registrar o ajuste.");
+      return;
+    }
+
+    await createBankHoursAdjustment(companyId, {
+      direction,
+      effectiveDate,
+      employeeId: selectedEmployeeId,
+      minutes: totalMinutes,
+      reason: reason.trim(),
+      responsibleName: responsibleName.trim(),
+    });
+    setReason("");
+    setAdjustmentHours("1");
+    setAdjustmentMinutes("00");
+    await loadData();
+    onAction("Ajuste de banco registrado e enviado para aprovação.");
+  }
+
+  async function reviewAdjustment(adjustmentId: string, decision: "approved" | "rejected") {
+    try {
+      await reviewBankHoursAdjustment(
+        companyId,
+        adjustmentId,
+        decision,
+        decision === "rejected" ? "Rejeitado pelo responsável no banco de horas." : "Aprovado pelo responsável no banco de horas.",
+      );
+      await loadData();
+      onAction(decision === "approved" ? "Ajuste aprovado e incluído no saldo." : "Ajuste rejeitado e mantido fora do saldo.");
+    } catch (error) {
+      console.error(error);
+      onAction("Não foi possível revisar o ajuste de banco. Verifique sua permissão.");
+    }
+  }
+
+  function employeeName(employeeId: string) {
+    return employeesList.find((employee) => employee.employeeId === employeeId)?.name || "Colaborador não encontrado";
+  }
+
+  function balanceTone(minutes: number) {
+    if (minutes > 0) return "border-[#b7e4cf] bg-[#e8f8f0] text-[#0d7a58]";
+    if (minutes < 0) return "border-[#f2b8b5] bg-[#fff0ef] text-[#b42318]";
+    return "border-[#d9e0e7] bg-[#f8fafc] text-[#667085]";
+  }
+
   return (
     <>
       <Metrics />
       <Panel title="Banco de horas" subtitle="Saldos por colaborador e periodo">
-        <EmployeesTable canEdit={canEdit} onAction={onAction} compact />
-        {canEdit && (
+        <div className="grid gap-3 md:grid-cols-3">
+          <Field label="Mês">
+            <select className="input" onChange={(event) => setMonth(event.target.value)} value={month}>
+              {monthOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Ano">
+            <input className="input" inputMode="numeric" onChange={(event) => setYear(event.target.value.replace(/\D/g, "").slice(0, 4))} value={year} />
+          </Field>
+          <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3 text-sm text-[#667085]">
+            <span className="text-xs font-semibold uppercase">Período consultado</span>
+            <strong className="mt-2 block text-[#101923]">{period.label}</strong>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
+          {[
+            ["Funcionários", String(summaries.length)],
+            ["Saldo positivo", String(summaries.filter((summary) => summary.totalBalanceMinutes > 0).length)],
+            ["Saldo negativo", String(summaries.filter((summary) => summary.totalBalanceMinutes < 0).length)],
+            ["Ajustes pendentes", String(pendingAdjustments.length)],
+          ].map(([label, value]) => (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
+              <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
+              <strong className="mt-2 block text-lg text-[#101923]">{value}</strong>
+            </div>
+          ))}
+        </div>
+
+        <div className="table-scroll mt-5">
+          <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+            <thead className="bg-[#101923] text-xs uppercase text-white">
+              <tr>
+                <th className="px-3 py-3">Funcionário</th>
+                <th className="px-3 py-3">Faltas</th>
+                <th className="px-3 py-3">Horas extras</th>
+                <th className="px-3 py-3">Banco de horas</th>
+                <th className="px-3 py-3">Situação</th>
+                <th className="px-3 py-3">Ação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td className="px-3 py-8 text-center text-[#667085]" colSpan={6}>Carregando saldos...</td></tr>
+              ) : summaries.length === 0 ? (
+                <tr><td className="px-3 py-8 text-center text-[#667085]" colSpan={6}>Nenhum colaborador cadastrado.</td></tr>
+              ) : summaries.map((summary) => {
+                const balance = summary.totalBalanceMinutes;
+                return (
+                  <tr className="border-b border-[#e3e8ee]" key={summary.employee.employeeId}>
+                    <td className="px-3 py-3"><strong className="text-[#101923]">{summary.employee.name}</strong><span className="text-xs text-[#667085]">{summary.employee.role || "Cargo não informado"}</span></td>
+                    <td className="px-3 py-3 font-semibold text-[#26323f]">{summary.absencePoints}</td>
+                    <td className="px-3 py-3 font-semibold text-[#0d7a58]">{formatDurationClock(Math.max(balance, 0))}</td>
+                    <td className="px-3 py-3 font-semibold">{formatDurationClock(balance)}</td>
+                    <td className="px-3 py-3"><span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${balanceTone(balance)}`}>{balance > 0 ? "Positivo" : balance < 0 ? "Negativo" : "Zerado"}</span></td>
+                    <td className="px-3 py-3">{canEdit ? <button className="secondary-button px-3 py-2 text-xs" onClick={() => setSelectedEmployeeId(summary.employee.employeeId)} type="button">Ajustar</button> : <span className="text-xs text-[#667085]">Somente consulta</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      {canEdit && (
+        <Panel title="Ajuste manual do banco" subtitle="Adicione ou desconte horas somente com motivo e responsável">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="Colaborador">
+              <select className="input" disabled={loading} onChange={(event) => setSelectedEmployeeId(event.target.value)} value={selectedEmployeeId}>
+                {employeesList.map((employee) => <option key={employee.employeeId} value={employee.employeeId}>{employee.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Operação">
+              <select className="input" onChange={(event) => setDirection(event.target.value as BankHoursAdjustment["direction"])} value={direction}>
+                <option value="add">Adicionar horas</option>
+                <option value="remove">Descontar horas</option>
+              </select>
+            </Field>
+            <Field label="Horas">
+              <input className="input" min="0" onChange={(event) => setAdjustmentHours(event.target.value.replace(/\D/g, ""))} type="number" value={adjustmentHours} />
+            </Field>
+            <Field label="Minutos">
+              <input className="input" max="59" min="0" onChange={(event) => setAdjustmentMinutes(event.target.value.replace(/\D/g, "").slice(0, 2))} type="number" value={adjustmentMinutes} />
+            </Field>
+            <Field label="Data de referência">
+              <input className="input" onChange={(event) => setEffectiveDate(event.target.value)} type="date" value={effectiveDate} />
+            </Field>
+            <Field label="Responsável">
+              <input className="input" onChange={(event) => setResponsibleName(event.target.value)} placeholder="Nome do responsável" value={responsibleName} />
+            </Field>
+            <div className="md:col-span-2">
+              <Field label="Motivo">
+                <textarea className="input min-h-[42px]" onChange={(event) => setReason(event.target.value)} placeholder="Ex.: acordo de compensação aprovado" value={reason} />
+              </Field>
+            </div>
+          </div>
           <ActionRow>
-            <button className="primary-button" onClick={() => onAction("Fechamento do banco")} type="button">Fechar periodo</button>
-            <button className="secondary-button" onClick={() => onAction("Abono de horas")} type="button">Registrar abono</button>
+            <SaveButton disabled={loading || !employeesList.length} onClick={saveBankAdjustment}>Registrar ajuste</SaveButton>
           </ActionRow>
+          <p className="mt-3 text-xs leading-5 text-[#667085]">O lançamento fica pendente. Depois da aprovação, ele entra no saldo do funcionário e no histórico de auditoria. A batida original nunca é alterada.</p>
+        </Panel>
+      )}
+
+      <Panel title="Ajustes do banco" subtitle="Pendentes e lançamentos já analisados">
+        {pendingAdjustments.length === 0 && historicAdjustments.length === 0 ? (
+          <p className="text-sm text-[#667085]">Nenhum ajuste de banco registrado para esta empresa.</p>
+        ) : (
+          <div className="table-scroll">
+            <table className="w-full min-w-[840px] border-collapse text-left text-sm">
+              <thead className="bg-[#101923] text-xs uppercase text-white"><tr><th className="px-3 py-3">Funcionário</th><th className="px-3 py-3">Data</th><th className="px-3 py-3">Valor</th><th className="px-3 py-3">Motivo</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Ação</th></tr></thead>
+              <tbody>
+                {[...pendingAdjustments, ...historicAdjustments].map((adjustment) => (
+                  <tr className="border-b border-[#e3e8ee]" key={adjustment.id}>
+                    <td className="px-3 py-3">{employeeName(adjustment.employeeId)}</td>
+                    <td className="px-3 py-3">{new Date(`${adjustment.effectiveDate}T12:00:00`).toLocaleDateString("pt-BR")}</td>
+                    <td className={`px-3 py-3 font-semibold ${adjustment.minutes >= 0 ? "text-[#0d7a58]" : "text-[#b42318]"}`}>{formatDurationClock(adjustment.minutes)}</td>
+                    <td className="max-w-[260px] px-3 py-3">{adjustment.reason}<span className="block text-xs text-[#667085]">Responsável: {adjustment.responsibleName}</span></td>
+                    <td className="px-3 py-3">{adjustment.status === "pending" ? "Pendente" : adjustment.status === "approved" ? "Aprovado" : "Rejeitado"}</td>
+                    <td className="px-3 py-3">{canEdit && adjustment.status === "pending" ? <div className="flex flex-wrap gap-2"><button className="primary-button px-3 py-2 text-xs" onClick={() => void reviewAdjustment(adjustment.id, "approved")} type="button">Aprovar</button><button className="secondary-button px-3 py-2 text-xs" onClick={() => void reviewAdjustment(adjustment.id, "rejected")} type="button">Rejeitar</button></div> : <span className="text-xs text-[#667085]">-</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Panel>
     </>
@@ -5549,6 +5808,7 @@ function MonthlyClosingScreen({
   const [responsible, setResponsible] = useState("");
   const [lastSummary, setLastSummary] = useState<MonthlyMirrorSummary[]>([]);
   const [attendanceJustifications, setAttendanceJustifications] = useState<AttendanceJustification[]>([]);
+  const [bankAdjustments, setBankAdjustments] = useState<BankHoursAdjustment[]>([]);
   const [punchAdjustments, setPunchAdjustments] = useState<PunchAdjustment[]>([]);
   const [adjustmentEmployeeId, setAdjustmentEmployeeId] = useState("");
   const [adjustmentDate, setAdjustmentDate] = useState(now.toISOString().slice(0, 10));
@@ -5566,9 +5826,10 @@ function MonthlyClosingScreen({
 
     async function load() {
       try {
-        const [savedInFirebase, savedJustifications, savedAdjustments] = await Promise.all([
+        const [savedInFirebase, savedJustifications, savedBankAdjustments, savedAdjustments] = await Promise.all([
           listEmployees(companyId),
           listAttendanceJustifications(companyId),
+          listBankHoursAdjustments(companyId),
           listPunchAdjustments(companyId),
         ]);
         if (!mounted) return;
@@ -5578,6 +5839,7 @@ function MonthlyClosingScreen({
           ),
         );
         setAttendanceJustifications(savedJustifications);
+        setBankAdjustments(savedBankAdjustments);
         setPunchAdjustments(savedAdjustments);
       } catch {
         if (mounted) setEmployeesList(getLocalEmployees());
@@ -5612,7 +5874,7 @@ function MonthlyClosingScreen({
         const punches = await listEmployeePunchesByIds(companyId, [
           employee.employeeId,
         ]);
-        return buildMonthlyMirrorSummary(employee, punches, period, workPolicy, attendanceJustifications);
+          return buildMonthlyMirrorSummary(employee, punches, period, workPolicy, attendanceJustifications, bankAdjustments);
       }),
     );
     setLastSummary(summaries);
@@ -7496,6 +7758,7 @@ function buildMonthlyMirrorSummary(
   period: MonthPeriod,
   workPolicy: WorkPolicy,
   justifications: AttendanceJustification[] = [],
+  bankAdjustments: BankHoursAdjustment[] = [],
 ): MonthlyMirrorSummary {
   const validPunches = punches
     .filter((punch) => {
@@ -7597,10 +7860,20 @@ function buildMonthlyMirrorSummary(
   const lateMinutes = rows.reduce((total, row) => total + row.lateMinutes, 0);
   const earlyLeaveMinutes = rows.reduce((total, row) => total + row.earlyLeaveMinutes, 0);
   const totalWorkedMinutes = rows.reduce((total, row) => total + row.workedMinutes, 0);
-  const totalBalanceMinutes = rows.reduce((total, row) => total + row.balanceMinutes, 0);
+  const manualBalanceMinutes = bankAdjustments
+    .filter((adjustment) => adjustment.employeeId === employee.employeeId)
+    .filter((adjustment) => adjustment.status === "approved")
+    .filter((adjustment) => {
+      const firstDay = `${period.year}-${String(period.month).padStart(2, "0")}-01`;
+      const lastDay = localDateKey(period.end);
+      return adjustment.effectiveDate >= firstDay && adjustment.effectiveDate <= lastDay;
+    })
+    .reduce((total, adjustment) => total + adjustment.minutes, 0);
+  const totalBalanceMinutes = rows.reduce((total, row) => total + row.balanceMinutes, 0) + manualBalanceMinutes;
 
   return {
     absencePoints,
+    bankAdjustmentMinutes: manualBalanceMinutes,
     earlyLeaveMinutes,
     employee,
     incompleteAfternoons,
@@ -7718,6 +7991,7 @@ function openPrintableMonthlyMirror({
         <div><span>Atrasos</span><strong>${escapeHtml(formatDurationClock(summary.lateMinutes))}</strong></div>
         <div><span>Saida antecipada</span><strong>${escapeHtml(formatDurationClock(summary.earlyLeaveMinutes))}</strong></div>
         <div><span>Banco de horas</span><strong>${escapeHtml(formatDurationClock(summary.totalBalanceMinutes))}</strong></div>
+         <div><span>Ajustes aprovados</span><strong>${escapeHtml(formatDurationClock(summary.bankAdjustmentMinutes))}</strong></div>
         <div><span>Dias pendentes</span><strong>${summary.pendingDays}</strong></div>
         <div><span>Responsavel</span><strong>${escapeHtml(responsible || "Nao informado")}</strong></div>
       </div>

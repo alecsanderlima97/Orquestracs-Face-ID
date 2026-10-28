@@ -87,6 +87,11 @@ service cloud.firestore {
         allow create, update, delete: if false;
       }
 
+      match /bankHoursAdjustments/{adjustmentId} {
+        allow read: if canReadTenant(companyId);
+        allow create, update, delete: if false;
+      }
+
       match /attendanceJustifications/{justificationId} {
         allow read: if canReadTenant(companyId);
         allow create, update, delete: if false;

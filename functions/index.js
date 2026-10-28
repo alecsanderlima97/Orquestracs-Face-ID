@@ -667,6 +667,113 @@ export const reviewPunchAdjustment = onCall(callableOptions, async (request) => 
   return { companyId, ...result };
 });
 
+const bankAdjustmentDirections = ["add", "remove"];
+
+export const createBankHoursAdjustment = onCall(callableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const employeeId = normalizedText(request.data?.employeeId);
+  const effectiveDate = normalizedText(request.data?.effectiveDate);
+  const direction = normalizedText(request.data?.direction);
+  const reason = normalizedText(request.data?.reason).slice(0, 1000);
+  const responsibleName = normalizedText(request.data?.responsibleName).slice(0, 160);
+  const minutes = Number(request.data?.minutes);
+
+  if (!companyId || !employeeId || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate) || !reason || !responsibleName) {
+    throw new HttpsError("invalid-argument", "Empresa, colaborador, data, motivo e responsavel sao obrigatorios.");
+  }
+  if (!bankAdjustmentDirections.includes(direction)) {
+    throw new HttpsError("invalid-argument", "Direcao do ajuste de banco invalida.");
+  }
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60 * 24 * 31) {
+    throw new HttpsError("invalid-argument", "A quantidade deve estar entre 1 minuto e 31 dias.");
+  }
+
+  await requireManager(request, companyId);
+  const employeeSnapshot = await findEmployee(companyId, employeeId);
+  if (!employeeSnapshot) throw new HttpsError("not-found", "Colaborador nao encontrado.");
+
+  const createdAt = Timestamp.now();
+  const adjustmentRef = db.collection(`companies/${companyId}/bankHoursAdjustments`).doc();
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const signedMinutes = direction === "remove" ? -minutes : minutes;
+  const result = await db.runTransaction(async (transaction) => {
+    const auditStateSnapshot = await transaction.get(auditStateRef);
+    transaction.create(adjustmentRef, {
+      companyId,
+      createdAt,
+      createdBy: request.auth.uid,
+      createdByEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      direction,
+      effectiveDate,
+      employeeId,
+      minutes: signedMinutes,
+      reason,
+      responsibleName,
+      status: "pending",
+    });
+    await appendAuditEvent(transaction, companyId, {
+      action: "bank_hours.adjustment_requested",
+      actorEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      actorUserId: request.auth.uid,
+      entityId: adjustmentRef.id,
+      entityType: "bank_hours_adjustment",
+      metadata: { direction, effectiveDate, employeeId, minutes: signedMinutes, responsibleName },
+      createdAt,
+    }, auditStateSnapshot);
+    return { adjustmentId: adjustmentRef.id, status: "pending" };
+  });
+
+  return { companyId, ...result };
+});
+
+export const reviewBankHoursAdjustment = onCall(callableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const adjustmentId = normalizedText(request.data?.adjustmentId);
+  const decision = normalizedText(request.data?.decision);
+  const reviewReason = normalizedText(request.data?.reviewReason).slice(0, 1000);
+  if (!companyId || !adjustmentId || !["approved", "rejected"].includes(decision)) {
+    throw new HttpsError("invalid-argument", "Empresa, ajuste e decisao sao obrigatorios.");
+  }
+  if (decision === "rejected" && !reviewReason) {
+    throw new HttpsError("invalid-argument", "Informe o motivo da rejeicao.");
+  }
+
+  await requireManager(request, companyId);
+  const adjustmentRef = db.doc(`companies/${companyId}/bankHoursAdjustments/${adjustmentId}`);
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const reviewedAt = Timestamp.now();
+  const result = await db.runTransaction(async (transaction) => {
+    const [adjustmentSnapshot, auditStateSnapshot] = await Promise.all([
+      transaction.get(adjustmentRef),
+      transaction.get(auditStateRef),
+    ]);
+    if (!adjustmentSnapshot.exists) throw new HttpsError("not-found", "Ajuste de banco nao encontrado.");
+    if (adjustmentSnapshot.data()?.status !== "pending") {
+      throw new HttpsError("failed-precondition", "Este ajuste de banco ja foi analisado.");
+    }
+
+    transaction.update(adjustmentRef, {
+      reviewedAt,
+      reviewedBy: request.auth.uid,
+      reviewedByEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      reviewReason,
+      status: decision,
+    });
+    await appendAuditEvent(transaction, companyId, {
+      action: `bank_hours.adjustment_${decision}`,
+      actorEmail: normalizedText(request.auth.token.email).toLowerCase(),
+      actorUserId: request.auth.uid,
+      entityId: adjustmentId,
+      entityType: "bank_hours_adjustment",
+      metadata: { decision, reviewReason },
+      createdAt: reviewedAt,
+    }, auditStateSnapshot);
+    return { adjustmentId, status: decision };
+  });
+
+  return { companyId, ...result };
+});
+
 export const createAttendanceJustification = onCall(callableOptions, async (request) => {
   const companyId = normalizedText(request.data?.companyId);
   const employeeId = normalizedText(request.data?.employeeId);

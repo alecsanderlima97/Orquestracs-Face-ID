@@ -159,6 +159,25 @@ export type PunchAdjustment = {
   status?: "pending" | "approved" | "rejected";
 };
 
+export type BankHoursAdjustment = {
+  id: string;
+  companyId: string;
+  employeeId: string;
+  effectiveDate: string;
+  minutes: number;
+  direction: "add" | "remove";
+  reason: string;
+  responsibleName: string;
+  createdBy?: string;
+  createdByEmail?: string;
+  createdAt?: Date;
+  reviewedBy?: string;
+  reviewedByEmail?: string;
+  reviewedAt?: Date;
+  reviewReason?: string;
+  status: "pending" | "approved" | "rejected";
+};
+
 export type AttendanceJustificationType =
   | "medical_certificate"
   | "external_work"
