@@ -961,6 +961,114 @@ a {
   background: var(--ds-sidebar);
 }
 
+.app-layout {
+  min-width: 0;
+}
+
+.app-sidebar-collapsible {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app-sidebar-heading {
+  min-width: 0;
+}
+
+.app-sidebar-brand-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.app-sidebar-collapse-button {
+  display: grid;
+  height: 28px;
+  width: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 5%);
+  color: rgb(255 255 255 / 78%);
+  font-size: 22px;
+  line-height: 1;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.app-sidebar-collapse-button:hover {
+  border-color: rgb(139 202 185 / 70%);
+  background: rgb(139 202 185 / 15%);
+  color: #fff;
+  transform: translateX(1px);
+}
+
+.app-sidebar-collapsible > div > nav {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 22%) transparent;
+}
+
+.app-sidebar-collapsible > div > nav::-webkit-scrollbar {
+  width: 5px;
+}
+
+.app-sidebar-collapsible > div > nav::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(255 255 255 / 22%);
+}
+
+.app-sidebar-collapsible > div > nav button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.sidebar-nav-glyph {
+  display: none;
+  width: 18px;
+  flex: 0 0 18px;
+  color: currentcolor;
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.app-sidebar-collapsed {
+  padding-inline: 10px;
+}
+
+.app-sidebar-collapsed .app-sidebar-brand-row {
+  justify-content: center;
+}
+
+.app-sidebar-collapsed .app-sidebar-brand-row > div:first-child,
+.app-sidebar-collapsed .app-sidebar-company,
+.app-sidebar-collapsed .app-sidebar-footer,
+.app-sidebar-collapsed .sidebar-nav-label {
+  display: none;
+}
+
+.app-sidebar-collapsed .app-sidebar-collapse-button {
+  margin-inline: auto;
+}
+
+.app-sidebar-collapsed > div > nav {
+  margin-top: 20px;
+}
+
+.app-sidebar-collapsed > div > nav button {
+  justify-content: center;
+  padding-inline: 7px;
+}
+
+.app-sidebar-collapsed .sidebar-nav-glyph {
+  display: block;
+}
+
 .app-mobile-brand {
   display: grid;
   min-width: 0;
@@ -1794,6 +1902,49 @@ button.dashboard-shortcut:hover {
   border-radius: 9px;
   background: #f6fbf9;
   color: var(--ds-text);
+}
+
+/* Em zoom alto ou janelas menores, o menu reduz automaticamente para preservar a área de trabalho. */
+@media (min-width: 901px) and (max-width: 1400px) {
+  .central-admin-table {
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .central-admin-table-scroll {
+    overflow-x: hidden;
+  }
+
+  .central-admin-table th {
+    padding-inline: 7px;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .central-admin-table td {
+    overflow-wrap: anywhere;
+    padding-inline: 7px;
+  }
+
+  .central-admin-client-cell,
+  .central-admin-actions-cell {
+    min-width: 0;
+  }
+
+  .central-admin-actions-cell {
+    white-space: normal;
+  }
+
+  .central-admin-icon-button {
+    height: 25px;
+    width: 25px;
+    margin: 1px;
+  }
+
+  .central-admin-strong {
+    max-width: none;
+    overflow-wrap: anywhere;
+  }
 }
 
 @media (min-width: 1100px) {

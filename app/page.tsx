@@ -858,6 +858,9 @@ export default function Home() {
   const [active, setActive] = useState<Section>("Painel");
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarAutoCompact, setSidebarAutoCompact] = useState(false);
+  const [sidebarAutoOverride, setSidebarAutoOverride] = useState<"collapsed" | "expanded" | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [accessLoading, setAccessLoading] = useState(true);
   const [accessError, setAccessError] = useState("");
@@ -878,6 +881,18 @@ export default function Home() {
   const [pin, setPin] = useState("");
   const [lastPunchReceipt, setLastPunchReceipt] = useState<RepPunchReceipt | null>(null);
   const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 901px) and (max-width: 1400px)");
+    const syncSidebarMode = () => {
+      setSidebarAutoCompact(mediaQuery.matches);
+      setSidebarAutoOverride(null);
+    };
+
+    syncSidebarMode();
+    mediaQuery.addEventListener?.("change", syncSidebarMode);
+    return () => mediaQuery.removeEventListener?.("change", syncSidebarMode);
+  }, []);
 
   async function refreshCompanyProfile(companyId: string) {
     if (!companyId) {
@@ -1710,6 +1725,18 @@ export default function Home() {
   });
   const kioskMode = active === "Sala de ponto";
   const centralAdminMode = active === "Admin" && isDeveloperUser;
+  const sidebarIsCollapsed = sidebarAutoOverride === "expanded"
+    ? false
+    : sidebarAutoOverride === "collapsed"
+      ? true
+      : sidebarCollapsed || sidebarAutoCompact;
+  const toggleSidebar = () => {
+    if (sidebarAutoCompact) {
+      setSidebarAutoOverride(sidebarIsCollapsed ? "expanded" : "collapsed");
+      return;
+    }
+    setSidebarCollapsed((collapsed) => !collapsed);
+  };
   const companyAddress = (companyProfile?.address || {}) as Record<string, string>;
   const kioskLocation = weatherSnapshot?.source === "current"
     ? "Localização atual"
@@ -1821,10 +1848,11 @@ export default function Home() {
         </div>
       )}
 
-      <div className={kioskMode ? "kiosk-content-shell" : "mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:grid-cols-[292px_minmax(0,1fr)] lg:gap-6 lg:px-6"}>
-        <aside className={kioskMode ? "hidden" : "app-sidebar hidden rounded-lg border border-[#d9e0e7] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:block lg:h-[calc(100vh-2rem)]"}>
+      <div className={kioskMode ? "kiosk-content-shell" : `app-layout mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:gap-6 lg:px-6 ${sidebarIsCollapsed ? "app-layout-collapsed lg:grid-cols-[76px_minmax(0,1fr)]" : "lg:grid-cols-[292px_minmax(0,1fr)]"}`}>
+        <aside className={kioskMode ? "hidden" : `app-sidebar app-sidebar-collapsible hidden rounded-lg border border-[#d9e0e7] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:block lg:h-[calc(100vh-2rem)] ${sidebarIsCollapsed ? "app-sidebar-collapsed" : ""}`}>
           <div className="flex h-full flex-col">
-            <div className="border-b border-white/10 pb-5">
+            <div className="app-sidebar-heading border-b border-white/10 pb-5">
+              <div className="app-sidebar-brand-row">
               <div className="min-w-0">
                 <img
                   alt="Orquestracs Face ID"
@@ -1832,7 +1860,17 @@ export default function Home() {
                   src="/orquestracs-face-id-wordmark.svg"
                 />
               </div>
-              <div className="mt-5 rounded-md border border-white/10 bg-white/[0.04] p-3">
+                <button
+                  aria-label={sidebarIsCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
+                  className="app-sidebar-collapse-button"
+                  onClick={toggleSidebar}
+                  title={sidebarIsCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
+                  type="button"
+                >
+                  {sidebarIsCollapsed ? "›" : "‹"}
+                </button>
+              </div>
+              <div className="app-sidebar-company mt-5 rounded-md border border-white/10 bg-white/[0.04] p-3">
                 <p className="text-xs uppercase tracking-[0.12em] text-white/45">Empresa ativa</p>
                 <div className="mt-2 flex items-center gap-3">
                   {companyProfile?.logoUrl ? (
@@ -1867,6 +1905,7 @@ export default function Home() {
             <nav className="mt-5 grid gap-1 text-sm">
               {visibleNavItems.map((item) => (
                 <button
+                  aria-label={item}
                   className={`rounded-md px-3 py-2.5 text-left font-medium transition ${
                     active === item
                       ? "bg-[#dcebe6] text-[#143f37]"
@@ -1874,14 +1913,16 @@ export default function Home() {
                   }`}
                   key={item}
                   onClick={() => go(item)}
+                  title={item}
                   type="button"
                 >
-                  {item}
+                  <span aria-hidden="true" className="sidebar-nav-glyph">{item.slice(0, 1)}</span>
+                  <span className="sidebar-nav-label">{item}</span>
                 </button>
               ))}
             </nav>
 
-            <div className="mt-auto rounded-md border border-[#314450] bg-[#182530] p-3">
+            <div className="app-sidebar-footer mt-auto rounded-md border border-[#314450] bg-[#182530] p-3">
               <p className="text-xs font-semibold text-[#b7d7ce]">Ambiente seguro</p>
               <p className="mt-1 text-xs leading-5 text-white/60">
                 Logs inviolaveis, biometria controlada e trilha de auditoria.
