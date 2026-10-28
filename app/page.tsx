@@ -1336,68 +1336,57 @@ export default function Home() {
     }
 
     if (action === "Geracao de PDF") {
-      downloadTextFile(
-        `relatorio-jornada-${new Date().toISOString().slice(0, 10)}.txt`,
-        `Orquestracs Face ID\nRelatorio de jornada\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\n${JSON.stringify(fields, null, 2)}`,
-      );
-      setNotice("Relatorio gerado localmente com os dados disponiveis.");
+      const printWindow = window.open("", "_blank", "width=1100,height=800");
+      if (!printWindow) {
+        setNotice("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente.");
+        return;
+      }
+      openPrintableDataReport({ company: companyProfile, fields, printWindow, title: "Relatório de jornada" });
+      setNotice("PDF do relatório aberto. Na janela de impressão, escolha Salvar como PDF.");
       return;
     }
 
     if (action === "Exportacao fiscal") {
-      downloadTextFile(
-        `exportacao-fiscal-${new Date().toISOString().slice(0, 10)}.csv`,
-        "campo,valor\n" +
-          Object.entries(fields)
-            .map(([key, value]) => `"${key}","${value}"`)
-            .join("\n"),
-        "text/csv",
-      );
-      setNotice("Exportacao fiscal gerada em CSV.");
+      const printWindow = window.open("", "_blank", "width=1100,height=800");
+      if (!printWindow) {
+        setNotice("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente.");
+        return;
+      }
+      openPrintableDataReport({ company: companyProfile, fields, printWindow, title: "Resumo de exportação fiscal" });
+      setNotice("PDF fiscal aberto. Os arquivos AFD/AEJ técnicos continuam disponíveis na aba Relatórios.");
       return;
     }
 
     if (action === "Folha mensal para contador") {
-      const header = [
-        "funcionario",
-        "cpf",
-        "cargo",
-        "dias_trabalhados",
-        "faltas_manha",
-        "faltas_tarde",
-        "atrasos",
-        "banco_horas",
-        "observacao",
-      ];
-      const csv = [
-        header.join(","),
-        ...monthlyClosingRows.map((row) => row.map((cell) => `"${cell}"`).join(",")),
-      ].join("\n");
-
-      downloadTextFile(
-        `folha-mensal-contador-${new Date().toISOString().slice(0, 10)}.csv`,
-        csv,
-        "text/csv",
-      );
-      setNotice("Folha mensal para contador gerada em CSV.");
+      const printWindow = window.open("", "_blank", "width=1100,height=800");
+      if (!printWindow) {
+        setNotice("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente.");
+        return;
+      }
+      openPrintableDataReport({ company: companyProfile, fields, printWindow, rows: monthlyClosingRows, title: "Folha mensal para contador" });
+      setNotice("PDF da folha mensal aberto. Na janela de impressão, escolha Salvar como PDF.");
       return;
     }
 
     if (action === "Ficha individual de ciencia") {
-      downloadTextFile(
-        `ficha-ciencia-funcionario-${new Date().toISOString().slice(0, 10)}.txt`,
-        `Orquestracs Face ID\nFicha individual de ciencia mensal\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\nFuncionario: preencher apos selecionar colaborador\nPeriodo: preencher periodo\nFaltas manha: 0\nFaltas tarde: 0\nAtrasos: 00:00\nBanco de horas: 00:00\n\nAssinatura do funcionario: ______________________________\nAssinatura do responsavel: ______________________________`,
-      );
-      setNotice("Ficha individual de ciencia gerada.");
+      const printWindow = window.open("", "_blank", "width=1100,height=800");
+      if (!printWindow) {
+        setNotice("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente.");
+        return;
+      }
+      openPrintableDataReport({ company: companyProfile, fields, printWindow, title: "Ficha individual de ciência" });
+      setNotice("PDF da ficha individual aberto.");
       return;
     }
 
     if (action === "Termo LGPD" || action === "Relatorio de impacto") {
-      downloadTextFile(
-        `${action.toLowerCase().replace(/\s+/g, "-")}.txt`,
-        `${action}\nOrquestracs Face ID\nGerado em: ${new Date().toLocaleString("pt-BR")}\n\nDocumento gerado com os dados disponiveis no sistema.`,
-      );
-      setNotice(`${action} gerado localmente.`);
+      const printWindow = window.open("", "_blank", "width=1100,height=800");
+      if (!printWindow) {
+        setNotice("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente.");
+        return;
+      }
+      openPrintableDataReport({ company: companyProfile, fields, printWindow, title: action });
+      setNotice("PDF do documento aberto.");
       return;
     }
 
@@ -1411,7 +1400,7 @@ export default function Home() {
       return;
     }
 
-    setNotice(`${action} salvo localmente neste navegador. Firebase sera conectado depois.`);
+    setNotice(action);
   }
 
   async function registerPunch(
@@ -2014,7 +2003,7 @@ export default function Home() {
           )}
           {active === "Banco de horas" && <HoursBankScreen canEdit={canManage} onAction={demoAction} />}
           {active === "Fechamento mensal" && <MonthlyClosingScreen company={companyProfile} onAction={demoAction} />}
-          {active === "Relatorios" && <ReportsScreen onAction={demoAction} />}
+          {active === "Relatorios" && <ReportsScreen company={companyProfile} onAction={demoAction} />}
           {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
           {active === "Configuracoes" && (
             <AuthenticationSettingsScreen
@@ -5611,10 +5600,10 @@ function MonthlyClosingScreen({
   const selectedAdjustmentEmployeeId = adjustmentEmployeeId || employeesList[0]?.employeeId || "";
   const workPolicy = getCompanyWorkPolicy(company);
 
-  async function generateMonthlyMirror() {
+  async function loadMonthlySummaries() {
     if (!selectedEmployees.length) {
       onAction("Nenhum colaborador selecionado para gerar espelho mensal.");
-      return;
+      return null;
     }
 
     const period = getMonthPeriod(Number(year), Number(month));
@@ -5626,17 +5615,85 @@ function MonthlyClosingScreen({
         return buildMonthlyMirrorSummary(employee, punches, period, workPolicy, attendanceJustifications);
       }),
     );
-
     setLastSummary(summaries);
-    openPrintableMonthlyMirror({
-      company,
-      generatedAt: new Date(),
-      period,
-      responsible,
-      summaries,
-      workPolicy,
-    });
-    onAction("Espelho mensal aberto para impressao. Use Salvar como PDF se quiser arquivar.");
+    return { period, summaries };
+  }
+
+  async function generateMonthlyMirror() {
+    if (!selectedEmployees.length) {
+      onAction("Nenhum colaborador selecionado para gerar espelho mensal.");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1100,height=800");
+    if (!printWindow) {
+      onAction("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente.");
+      return;
+    }
+
+    printWindow.document.write("<p style=\"font-family:Arial,sans-serif;padding:24px\">Gerando o espelho de ponto...</p>");
+    printWindow.document.close();
+
+    try {
+      const result = await loadMonthlySummaries();
+      if (!result) {
+        printWindow.close();
+        return;
+      }
+
+      openPrintableMonthlyMirror({
+        company,
+        generatedAt: new Date(),
+        period: result.period,
+        printWindow,
+        responsible,
+        summaries: result.summaries,
+        workPolicy,
+      });
+      onAction("PDF do fechamento aberto. Na janela de impressão, escolha Salvar como PDF.");
+    } catch (error) {
+      console.error(error);
+      printWindow.close();
+      onAction("Não foi possível gerar o PDF do fechamento. Verifique a conexão e tente novamente.");
+    }
+  }
+
+  async function generateMonthlySummary() {
+    if (!selectedEmployees.length) {
+      onAction("Nenhum colaborador selecionado para gerar o espelho resumido.");
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "width=1100,height=800");
+    if (!printWindow) {
+      onAction("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente.");
+      return;
+    }
+
+    printWindow.document.write("<p style=\"font-family:Arial,sans-serif;padding:24px\">Gerando o espelho resumido mensal...</p>");
+    printWindow.document.close();
+
+    try {
+      const result = await loadMonthlySummaries();
+      if (!result) {
+        printWindow.close();
+        return;
+      }
+
+      openPrintableMonthlySummary({
+        company,
+        generatedAt: new Date(),
+        period: result.period,
+        printWindow,
+        responsible,
+        summaries: result.summaries,
+      });
+      onAction("Espelho de ponto resumido mensal aberto. Na janela de impressão, escolha Salvar como PDF.");
+    } catch (error) {
+      console.error(error);
+      printWindow.close();
+      onAction("Não foi possível gerar o espelho resumido. Verifique a conexão e tente novamente.");
+    }
   }
 
   async function saveManualAdjustment() {
@@ -5776,39 +5833,6 @@ function MonthlyClosingScreen({
     }
   }
 
-  function exportMonthlyCsv() {
-    if (!lastSummary.length) {
-      onAction("Gere o espelho mensal antes de exportar para o contador.");
-      return;
-    }
-
-    const rows = [
-      ["Funcionario", "Matricula", "Periodo", "Dias", "Batidas", "Falta manha", "Falta tarde", "Batida incompleta", "Faltas calculadas", "Atrasos", "Banco", "Pendencias", "Responsavel"],
-      ...lastSummary.map((summary) => [
-        summary.employee.name,
-        summary.employee.registration || "",
-        summary.periodLabel,
-        String(summary.rows.length),
-        String(summary.totalPunches),
-        String(summary.missingMornings),
-        String(summary.missingAfternoons),
-        String(summary.incompleteMornings + summary.incompleteAfternoons),
-        String(summary.absencePoints),
-        formatDurationClock(summary.lateMinutes),
-        formatDurationClock(summary.totalBalanceMinutes),
-        String(summary.pendingDays),
-        responsible,
-      ]),
-    ];
-
-    downloadTextFile(
-      `espelho-ponto-contador-${year}-${month}.csv`,
-      rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n"),
-      "text/csv",
-    );
-    onAction("CSV mensal para contador gerado.");
-  }
-
   return (
     <>
       <Panel title="Fechamento mensal" subtitle="Conferencia antes de enviar para o contador">
@@ -5850,8 +5874,8 @@ function MonthlyClosingScreen({
         </div>
 
         <ActionRow>
-          <button className="primary-button" disabled={loading} onClick={() => void generateMonthlyMirror()} type="button">Imprimir / salvar PDF</button>
-          <button className="secondary-button" onClick={exportMonthlyCsv} type="button">Exportar para contador</button>
+          <button className="primary-button" disabled={loading} onClick={() => void generateMonthlyMirror()} type="button">Gerar PDF para contador</button>
+          <button className="secondary-button" disabled={loading} onClick={() => void generateMonthlySummary()} type="button">Espelho de ponto resumido mensal</button>
           <button className="secondary-button" onClick={() => onAction("Fechamento mensal bloqueado")} type="button">Fechar mes</button>
         </ActionRow>
       </Panel>
@@ -6084,8 +6108,7 @@ function MonthlyClosingScreen({
         <Panel title="Entrega para contador" subtitle="Arquivos previstos">
           <CheckList
             items={[
-              "CSV mensal para importacao/conferencia",
-              "PDF geral da empresa",
+              "PDF mensal para conferencia do contador",
               "Ficha individual para ciencia do funcionario",
               "Historico de ajustes e abonos do periodo",
             ]}
@@ -6096,13 +6119,46 @@ function MonthlyClosingScreen({
   );
 }
 
-function ReportsScreen({ onAction }: { onAction: (action: string) => void }) {
+function ReportsScreen({ company, onAction }: { company: MainCompanyProfile | null; onAction: (action: string) => void }) {
   const companyId = useActiveCompanyId();
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = `${today.slice(0, 8)}01`;
   const [startDate, setStartDate] = useState(monthStart);
   const [endDate, setEndDate] = useState(today);
   const [exporting, setExporting] = useState(false);
+
+  async function exportFiscalPdf() {
+    const printWindow = window.open("", "_blank", "width=1100,height=800");
+    if (!printWindow) {
+      onAction("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente.");
+      return;
+    }
+
+    printWindow.document.write("<p style=\"font-family:Arial,sans-serif;padding:24px\">Gerando o relatório fiscal...</p>");
+    printWindow.document.close();
+    setExporting(true);
+    try {
+      const exported = await generateRepExports(companyId, startDate, endDate);
+      openPrintableDataReport({
+        company,
+        fields: {
+          "Período": `${startDate} a ${endDate}`,
+          "Situação": exported.officialReady ? "Configuração fiscal completa" : "Prévia para conferência",
+          "Assinatura": exported.signatureStatus === "missing_icp_brasil" ? "Pendente - ICP-Brasil" : exported.signatureStatus,
+          "Pendências": exported.missingFields.join(", ") || "Nenhuma",
+        },
+        printWindow,
+        title: "Relatório fiscal e arquivos técnicos",
+      });
+      onAction("PDF fiscal aberto. AFD e AEJ continuam disponíveis separadamente para uso técnico.");
+    } catch (error) {
+      console.error(error);
+      printWindow.close();
+      onAction("Não foi possível gerar o PDF fiscal. Confira o período e as permissões.");
+    } finally {
+      setExporting(false);
+    }
+  }
 
   async function exportFiscalFiles() {
     if (!startDate || !endDate || startDate > endDate) {
@@ -6143,11 +6199,12 @@ function ReportsScreen({ onAction }: { onAction: (action: string) => void }) {
           <Field label="Tipo"><select className="input"><option>Jornada detalhada</option><option>Espelho de ponto</option><option>Banco de horas</option></select></Field>
         </div>
         <ActionRow>
-          <button className="primary-button" onClick={() => onAction("Geracao de PDF")} type="button">Gerar PDF</button>
+          <button className="primary-button" disabled={exporting} onClick={() => void exportFiscalPdf()} type="button">{exporting ? "Gerando PDF..." : "Gerar PDF para contador"}</button>
           <button className="secondary-button" disabled={exporting} onClick={() => void exportFiscalFiles()} type="button">
-            {exporting ? "Gerando..." : "Exportar AFD + AEJ"}
+            {exporting ? "Gerando..." : "Baixar AFD + AEJ técnicos"}
           </button>
         </ActionRow>
+        <p className="mt-3 text-xs leading-5 text-[#667085]">O PDF é o documento de conferência para o escritório contábil. AFD e AEJ permanecem em arquivo técnico próprio, porque sistemas oficiais exigem o formato estruturado original.</p>
       </Panel>
       <ReportPreview />
     </>
@@ -7331,7 +7388,12 @@ function formatPunchStatus(status: PunchStatus) {
 
 function getMonthPeriod(year: number, month: number): MonthPeriod {
   const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 0, 23, 59, 59, 999);
+  const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
+  const today = new Date();
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() + 1 === month;
+  const end = isCurrentMonth
+    ? new Date(Math.min(monthEnd.getTime(), new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999).getTime()))
+    : monthEnd;
   const label = start.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
   return { end, label, month, start, year };
 }
@@ -7574,6 +7636,7 @@ function openPrintableMonthlyMirror({
   company,
   generatedAt,
   period,
+  printWindow: openedWindow,
   responsible,
   summaries,
   workPolicy,
@@ -7581,6 +7644,7 @@ function openPrintableMonthlyMirror({
   company: MainCompanyProfile | null;
   generatedAt: Date;
   period: MonthPeriod;
+  printWindow?: Window | null;
   responsible: string;
   summaries: MonthlyMirrorSummary[];
   workPolicy: WorkPolicy;
@@ -7728,11 +7792,189 @@ function openPrintableMonthlyMirror({
       </body>
     </html>`;
 
-  const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1100,height=800");
-  if (!printWindow) return;
+  const printWindow = openedWindow || window.open("", "_blank", "width=1100,height=800");
+  if (!printWindow) throw new Error("monthly-pdf-popup-blocked");
+  printWindow.document.open();
   printWindow.document.write(html);
   printWindow.document.close();
   printWindow.focus();
+  printWindow.setTimeout(() => printWindow.print(), 350);
+}
+
+function openPrintableMonthlySummary({
+  company,
+  generatedAt,
+  period,
+  printWindow: openedWindow,
+  responsible,
+  summaries,
+}: {
+  company: MainCompanyProfile | null;
+  generatedAt: Date;
+  period: MonthPeriod;
+  printWindow?: Window | null;
+  responsible: string;
+  summaries: MonthlyMirrorSummary[];
+}) {
+  const companyName = String(company?.legalName || company?.tradeName || "Empresa");
+  const companyCnpj = String(company?.cnpj || "CNPJ não informado");
+  const totalAbsences = summaries.reduce((total, summary) => total + summary.absencePoints, 0);
+  const totalExtraMinutes = summaries.reduce((total, summary) => total + Math.max(summary.totalBalanceMinutes, 0), 0);
+  const totalBalanceMinutes = summaries.reduce((total, summary) => total + summary.totalBalanceMinutes, 0);
+  const bankClass = (minutes: number) => minutes > 0 ? "positive" : minutes < 0 ? "negative" : "neutral";
+  const bankLabel = (minutes: number) => minutes > 0 ? "Banco positivo" : minutes < 0 ? "Banco negativo" : "Sem saldo";
+  const formatSignedClock = (minutes: number) => minutes > 0 ? `+${formatDurationClock(minutes)}` : formatDurationClock(minutes);
+  const rows = summaries.map((summary) => {
+    const balanceMinutes = summary.totalBalanceMinutes;
+    return `<tr>
+      <td><strong>${escapeHtml(summary.employee.name)}</strong><span>${escapeHtml(summary.employee.role || "Cargo não informado")}</span></td>
+      <td>${escapeHtml(period.label)}</td>
+      <td class="absence">${escapeHtml(summary.absencePoints)}</td>
+      <td class="extra">${escapeHtml(formatDurationClock(Math.max(balanceMinutes, 0)))}</td>
+      <td><strong>${escapeHtml(formatSignedClock(balanceMinutes))}</strong></td>
+      <td><span class="badge ${bankClass(balanceMinutes)}">${bankLabel(balanceMinutes)}</span></td>
+    </tr>`;
+  }).join("");
+  const html = `<!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>Espelho de ponto resumido mensal - ${escapeHtml(companyName)}</title>
+        <style>
+          @page { size: A4 landscape; margin: 10mm; }
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #eef2f5; color: #142235; font-family: Arial, Helvetica, sans-serif; }
+          .toolbar { position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end; gap: 8px; padding: 12px; background: #0b1722; }
+          button { border: 0; border-radius: 6px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+          .print { background: #16a879; color: #fff; }
+          .close { background: #fff; color: #26323f; }
+          main { width: 297mm; min-height: 190mm; margin: 14px auto; padding: 12mm; background: #fff; }
+          header { display: flex; justify-content: space-between; gap: 20px; border-bottom: 2px solid #087f69; padding-bottom: 14px; }
+          .eyebrow { margin: 0 0 6px; color: #087f69; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+          h1 { margin: 0 0 8px; font-size: 22px; }
+          p { margin: 4px 0; font-size: 12px; line-height: 1.5; }
+          .generated { min-width: 180px; color: #64748b; font-size: 11px; text-align: right; }
+          .totals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 18px 0; }
+          .total { border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; }
+          .total span, td span { display: block; color: #64748b; font-size: 10px; }
+          .total strong { display: block; margin-top: 5px; font-size: 17px; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th { background: #0b1722; color: #fff; text-align: left; }
+          th, td { border: 1px solid #e2e8f0; padding: 8px; vertical-align: middle; }
+          tr:nth-child(even) td { background: #f8fafc; }
+          td strong { display: block; font-size: 12px; }
+          .absence, .extra { font-weight: 700; }
+          .badge { display: inline-block; border-radius: 999px; padding: 5px 9px; font-size: 10px; font-weight: 800; }
+          .positive { background: #d1fae5; color: #047857; }
+          .negative { background: #fee2e2; color: #b91c1c; }
+          .neutral { background: #e2e8f0; color: #475569; }
+          .note { margin-top: 14px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; color: #64748b; font-size: 10px; }
+          footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 24px; border-top: 1px solid #e2e8f0; padding-top: 10px; color: #64748b; font-size: 10px; }
+          @media print { body { background: #fff; } .toolbar { display: none; } main { width: auto; min-height: auto; margin: 0; padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="toolbar"><button class="close" onclick="window.close()">Fechar</button><button class="print" onclick="window.print()">Imprimir / salvar PDF</button></div>
+        <main>
+          <header>
+            <div><p class="eyebrow">Orquestracs Face ID</p><h1>Espelho de ponto resumido mensal</h1><p>${escapeHtml(companyName)}</p><p>CNPJ: ${escapeHtml(companyCnpj)}</p></div>
+            <div class="generated"><strong>${escapeHtml(period.label)}</strong><br>Gerado em ${escapeHtml(generatedAt.toLocaleString("pt-BR"))}<br>Responsável: ${escapeHtml(responsible || "Não informado")}</div>
+          </header>
+          <section class="totals">
+            <div class="total"><span>Funcionários</span><strong>${summaries.length}</strong></div>
+            <div class="total"><span>Total de faltas</span><strong>${totalAbsences}</strong></div>
+            <div class="total"><span>Total de horas extras</span><strong>${escapeHtml(formatDurationClock(totalExtraMinutes))}</strong></div>
+            <div class="total"><span>Saldo geral do banco</span><strong>${escapeHtml(formatSignedClock(totalBalanceMinutes))}</strong></div>
+          </section>
+          <table>
+            <thead><tr><th>Funcionário</th><th>Mês do fechamento</th><th>Faltas</th><th>Horas extras</th><th>Banco de horas</th><th>Situação</th></tr></thead>
+            <tbody>${rows || `<tr><td colspan="6">Nenhum funcionário selecionado para este fechamento.</td></tr>`}</tbody>
+          </table>
+          <div class="note">Horas extras mostram somente o saldo positivo do banco. Saldo negativo aparece em vermelho e saldo positivo aparece em verde para facilitar a conferência do escritório contábil.</div>
+          <footer><span>Documento resumido para conferência mensal.</span><span>Assinatura do responsável: ____________________________________</span></footer>
+        </main>
+      </body>
+    </html>`;
+  const printWindow = openedWindow || window.open("", "_blank", "width=1100,height=800");
+  if (!printWindow) throw new Error("monthly-summary-pdf-popup-blocked");
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.setTimeout(() => printWindow.print(), 350);
+}
+
+function openPrintableDataReport({
+  company,
+  fields,
+  printWindow: openedWindow,
+  rows = [],
+  title,
+}: {
+  company: MainCompanyProfile | null;
+  fields: Record<string, string>;
+  printWindow?: Window | null;
+  rows?: string[][];
+  title: string;
+}) {
+  const companyName = String(company?.legalName || company?.tradeName || "Empresa");
+  const companyCnpj = String(company?.cnpj || "CNPJ não informado");
+  const generatedAt = new Date().toLocaleString("pt-BR");
+  const fieldRows = Object.entries(fields).filter(([, value]) => String(value).trim());
+  const tableRows = rows.length
+    ? `<table><thead><tr>${rows[0].map((cell) => `<th>${escapeHtml(cell)}</th>`).join("")}</tr></thead><tbody>${rows.slice(1).map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+    : `<div class="empty">Os dados detalhados serão preenchidos após a geração do espelho mensal no Fechamento mensal.</div>`;
+  const html = `<!doctype html>
+    <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)} - ${escapeHtml(companyName)}</title>
+        <style>
+          @page { size: A4; margin: 12mm; }
+          * { box-sizing: border-box; }
+          body { margin: 0; background: #eef2f5; color: #142235; font-family: Arial, Helvetica, sans-serif; }
+          .toolbar { position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end; gap: 8px; padding: 12px; background: #0b1722; }
+          button { border: 0; border-radius: 6px; padding: 10px 14px; font-weight: 700; cursor: pointer; }
+          .print { background: #16a879; color: #fff; }
+          .close { background: #fff; color: #26323f; }
+          main { width: 210mm; min-height: 270mm; margin: 14px auto; padding: 14mm; background: #fff; }
+          header { display: flex; justify-content: space-between; gap: 20px; border-bottom: 2px solid #087f69; padding-bottom: 14px; }
+          .eyebrow { margin: 0 0 6px; color: #087f69; font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+          h1 { margin: 0 0 8px; font-size: 22px; }
+          p { margin: 4px 0; font-size: 12px; line-height: 1.5; }
+          .generated { min-width: 145px; color: #64748b; font-size: 11px; text-align: right; }
+          .section { margin-top: 18px; }
+          .section h2 { margin: 0 0 8px; color: #142235; font-size: 14px; }
+          .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+          .field { min-height: 46px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; }
+          .field span { display: block; color: #64748b; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+          .field strong { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 11px; }
+          table { width: 100%; border-collapse: collapse; font-size: 10px; }
+          th { background: #0b1722; color: #fff; text-align: left; }
+          th, td { border: 1px solid #e2e8f0; padding: 6px; vertical-align: top; }
+          tr:nth-child(even) td { background: #f8fafc; }
+          .empty { border: 1px solid #e2e8f0; background: #f8fafc; padding: 14px; color: #64748b; font-size: 12px; }
+          footer { margin-top: 28px; border-top: 1px solid #e2e8f0; padding-top: 10px; color: #64748b; font-size: 10px; }
+          @media print { body { background: #fff; } .toolbar { display: none; } main { width: auto; min-height: auto; margin: 0; padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="toolbar"><button class="close" onclick="window.close()">Fechar</button><button class="print" onclick="window.print()">Imprimir / salvar PDF</button></div>
+        <main>
+          <header><div><p class="eyebrow">Orquestracs Face ID</p><h1>${escapeHtml(title)}</h1><p>${escapeHtml(companyName)}</p><p>CNPJ: ${escapeHtml(companyCnpj)}</p></div><div class="generated">Gerado em<br><strong>${escapeHtml(generatedAt)}</strong></div></header>
+          <section class="section"><h2>Dados do relatório</h2><div class="fields">${fieldRows.length ? fieldRows.map(([label, value]) => `<div class="field"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("") : `<div class="empty">Nenhum filtro foi informado.</div>`}</div></section>
+          <section class="section"><h2>Detalhamento</h2>${tableRows}</section>
+          <footer>Documento para conferência administrativa. Para o fechamento mensal completo com jornadas, faltas, banco de horas e assinaturas, use o PDF gerado na aba Fechamento mensal.</footer>
+        </main>
+      </body>
+    </html>`;
+  const printWindow = openedWindow || window.open("", "_blank", "width=1100,height=800");
+  if (!printWindow) throw new Error("data-report-pdf-popup-blocked");
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.setTimeout(() => printWindow.print(), 350);
 }
 
 function SaveButton({

@@ -953,12 +953,12 @@ export const generateRepExports = onCall(callableOptions, async (request) => {
   if (!normalizedText(company.repP?.developerEmail)) missingFields.push("email do desenvolvedor");
 
   const employees = employeesSnapshot.docs.map((document) => ({ id: document.id, ...document.data() }));
+  const aejEmployees = employees.map((employee, index) => ({ ...employee, aejId: index + 1 }));
   const employeeById = new Map();
-  employees.forEach((employee, index) => {
+  aejEmployees.forEach((employee) => {
     const employeeId = normalizedText(employee.employeeId) || employee.id;
-    const mappedEmployee = { ...employee, aejId: index + 1 };
-    employeeById.set(employee.id, mappedEmployee);
-    employeeById.set(employeeId, mappedEmployee);
+    employeeById.set(employee.id, employee);
+    employeeById.set(employeeId, employee);
     if (digits(employee.cpf).length !== 11) missingFields.push(`CPF de ${normalizedText(employee.name) || employeeId}`);
   });
 
@@ -980,8 +980,8 @@ export const generateRepExports = onCall(callableOptions, async (request) => {
   const aejLines = [
     ["01", employerId.length === 14 ? "1" : "2", employerId, digits(company.caepf), digits(company.cno), normalizedText(company.legalName || company.tradeName), startDate, endDate, asIsoMinute(generatedAt), "002"].join("|"),
     ["02", "1", "3", inpiRegistration].join("|"),
-    ...employees.map((employee) => ["03", employee.aejId, digits(employee.cpf), normalizedText(employee.name)].join("|")),
-    ...employees.map((employee) => {
+    ...aejEmployees.map((employee) => ["03", employee.aejId, digits(employee.cpf), normalizedText(employee.name)].join("|")),
+    ...aejEmployees.map((employee) => {
       const schedule = employee.schedule || {};
       const startMinutes = minutesFromTime(schedule.start);
       const breakStartMinutes = minutesFromTime(schedule.breakStart);
