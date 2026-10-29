@@ -941,14 +941,24 @@ export const listFaceIdSources = onCall(adminCallableOptions, async (request) =>
 
     const photoUrls = (await Promise.all(photoPaths.map(async (photoPath) => {
       try {
-        const [exists] = await storageBucket.file(photoPath).exists();
+        const file = storageBucket.file(photoPath);
+        const [metadata] = await file.getMetadata();
+        const exists = Boolean(metadata?.name);
         if (!exists) return null;
-        const [url] = await storageBucket.file(photoPath).getSignedUrl({
-          action: "read",
-          expires: Date.now() + 10 * 60 * 1000,
-          version: "v4",
-        });
-        return url;
+        let downloadToken = normalizedText(metadata.metadata?.firebaseStorageDownloadTokens)
+          .split(",")
+          .map((token) => token.trim())
+          .find(Boolean);
+        if (!downloadToken) {
+          downloadToken = crypto.randomUUID();
+          await file.setMetadata({
+            metadata: {
+              ...(metadata.metadata || {}),
+              firebaseStorageDownloadTokens: downloadToken,
+            },
+          });
+        }
+        return `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(storageBucket.name)}/o/${encodeURIComponent(photoPath)}?alt=media&token=${encodeURIComponent(downloadToken)}`;
       } catch (error) {
         console.warn(`Não foi possível preparar a foto facial de ${employeeId}.`, error);
         return null;
