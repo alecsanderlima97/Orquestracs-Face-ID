@@ -906,41 +906,35 @@ export const listFaceIdSources = onCall(adminCallableOptions, async (request) =>
   if (!companyId) throw new HttpsError("invalid-argument", "Empresa obrigatoria.");
   await requireTenantMember(request, companyId);
 
-  const [employeesSnapshot, faceRecordsSnapshot] = await Promise.all([
-    db.collection(`companies/${companyId}/employees`).get(),
-    db.collectionGroup("faceId").where("companyId", "==", companyId).get(),
-  ]);
-
-  const recordsByEmployeeKey = new Map();
-  for (const recordSnapshot of faceRecordsSnapshot.docs) {
-    const record = recordSnapshot.data() || {};
-    const pathEmployeeId = recordSnapshot.ref.parent.parent?.id;
-    const keys = [normalizedText(record.employeeId), normalizedText(pathEmployeeId)].filter(Boolean);
-    const normalizedRecord = {
-      createdAt: timestampMillis(record.createdAt),
-      photoPath: normalizedText(record.photoPath),
+  const employeesSnapshot = await db.collection(`companies/${companyId}/employees`).get();
+  const eligibleEmployees = employeesSnapshot.docs.filter((employeeSnapshot) => {
+    const employee = employeeSnapshot.data() || {};
+    return employee.active !== false && employee.faceIdStatus === "registered";
+  });
+  const faceRecordsByEmployee = await Promise.all(eligibleEmployees.map(async (employeeSnapshot) => {
+    const faceRecordsSnapshot = await employeeSnapshot.ref.collection("faceId").get();
+    return {
+      employeeSnapshot,
+      records: faceRecordsSnapshot.docs.map((recordSnapshot) => {
+        const record = recordSnapshot.data() || {};
+        return {
+          createdAt: timestampMillis(record.createdAt),
+          photoPath: normalizedText(record.photoPath),
+        };
+      }).filter((record) => record.photoPath),
     };
-    if (!normalizedRecord.photoPath) continue;
-    for (const key of keys) {
-      const records = recordsByEmployeeKey.get(key) || [];
-      records.push({ ...normalizedRecord, key: recordSnapshot.id });
-      recordsByEmployeeKey.set(key, records);
-    }
-  }
+  }));
 
   const sources = [];
-  for (const employeeSnapshot of employeesSnapshot.docs) {
+  for (const { employeeSnapshot, records } of faceRecordsByEmployee) {
     const employee = employeeSnapshot.data() || {};
-    if (employee.active === false || employee.faceIdStatus !== "registered") continue;
 
     const employeeId = normalizedText(employee.employeeId) || employeeSnapshot.id;
-    const employeeKeys = [...new Set([employeeSnapshot.id, employeeId].filter(Boolean))];
-    const records = employeeKeys
-      .flatMap((key) => recordsByEmployeeKey.get(key) || [])
+    const photoPaths = records
       .sort((left, right) => right.createdAt - left.createdAt)
       .filter((record, index, all) => all.findIndex((item) => item.photoPath === record.photoPath) === index)
-      .slice(0, 3);
-    const photoPaths = records.map((record) => record.photoPath);
+      .slice(0, 3)
+      .map((record) => record.photoPath);
     const profilePhotoPath = normalizedText(employee.profilePhotoPath);
     if (!photoPaths.length && profilePhotoPath) photoPaths.push(profilePhotoPath);
     if (!photoPaths.length) continue;
