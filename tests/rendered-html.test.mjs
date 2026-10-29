@@ -88,14 +88,24 @@ test("mantem batidas originais no fluxo protegido do servidor", async () => {
   assert.match(page, /Entrada antecipada/);
   assert.match(page, /Saída antecipada/);
   assert.match(page, /Banco de horas/);
+  assert.match(page, /scheduledPunchOrder: ScheduledPunch\[\] = Array\.from\(\{ length: 4 \}/);
+  assert.match(page, /const activePeriodIndex = periods\.findIndex/);
+  assert.match(page, /currentMinutes >= start && currentMinutes < nextStart/);
+  assert.match(page, /const dashboardStages = scheduledPunchOrder\.slice/);
+  assert.match(page, /Ativar banco de horas para esta empresa/);
+  assert.doesNotMatch(page, /Defina entrada, saida almoco, volta almoco e fim do dia/);
+  assert.match(functions, /employee\.workPolicy = company\.workPolicy \|\| \{\}/);
+  assert.match(functions, /bankHoursEnabled && stage\?\.\[1\] === "Saída"/);
+  assert.match(page, /differenceMinutes > schedule\.toleranceMinutes/);
 });
 
 test("mantem a Central Admin protegida e operacional", async () => {
-  const [page, central, rules, functions] = await Promise.all([
+  const [page, central, rules, functions, tenantAccess] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/AdminCentral.tsx", import.meta.url), "utf8"),
     readFile(new URL("../firestore.rules", import.meta.url), "utf8"),
     readFile(new URL("../functions/index.js", import.meta.url), "utf8"),
+    readFile(new URL("../lib/services/tenant-access.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /centralAdminMode/);
@@ -113,6 +123,14 @@ test("mantem a Central Admin protegida e operacional", async () => {
   assert.match(functions, /export const adjustAiCredits/);
   assert.match(functions, /export const consumeAiCredit/);
   assert.match(functions, /aiCreditAdjustments/);
+  assert.match(tenantAccess, /email\?: string/);
+  assert.match(tenantAccess, /invite-email-mismatch/);
+  assert.match(page, /Gerar termo do colaborador/);
+  assert.match(page, /Termo de informação e manifestação sobre biometria facial/);
+  assert.match(page, /Convite criado para \$\{email\}/);
+  assert.match(page, /Copiar link/);
+  assert.match(rules, /request\.resource\.data\.role != "owner" \|\| isTenantOwner/);
+  assert.match(rules, /request\.auth\.token\.email == get\(/);
 });
 
 test("mantem navegacao responsiva para celular e tablet", async () => {
@@ -153,7 +171,13 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(page, /speakPunchConfirmation/);
   assert.match(page, /Aguardando o próximo funcionário/);
   assert.match(page, /kiosk-clock-header/);
-  assert.match(page, /onExit=\{\(\) => void handleLogout\(\)\}/);
+  assert.match(page, /onExit=\{handleKioskExit\}/);
+  assert.match(page, /reauthenticateWithCredential/);
+  assert.match(page, /reauthenticateWithPopup/);
+  assert.match(page, /auth\/unauthorized-domain/);
+  assert.match(page, /auth\/popup-blocked/);
+  assert.match(page, /A senha não confere com a conta responsável conectada/);
+  assert.match(page, /Sair da sala de ponto/);
   assert.match(page, /!kioskMode/);
   assert.match(camera, /profileSources\?: FaceProfileSource\[\]/);
   assert.match(camera, /autoRecognize\?: boolean/);
@@ -162,6 +186,10 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(camera, /lastRecognitionDescriptorRef/);
   assert.match(camera, /loadRemoteProfiles/);
   assert.match(camera, /fetchImage\(source\.photoUrl\)/);
+  assert.match(camera, /profileSources\.slice\(index, index \+ 4\)\.map/);
+  assert.match(camera, /remoteProfilesPromiseRef/);
+  assert.match(camera, /onProfileUpdated\?\.\(descriptors\.length, await captureFrame\(\)\)/);
+  assert.match(camera, /não foi sincronizada com o sistema/);
   assert.match(page, /listFaceIdRecords\(companyId, employee\.employeeId\)/);
   assert.match(page, /faceRecords\.slice\(0, 3\)/);
   assert.match(page, /if \(!photoPaths\.length && employee\.profilePhotoPath\)/);
@@ -178,6 +206,8 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(page, /setShowFaceCamera\(false\)/);
   assert.match(page, /replaceProfile=\{replaceFaceProfile\}/);
   assert.match(page, /biometricConsentAccepted/);
+  assert.match(page, /captura .*sincronizada no Firebase/);
+  assert.match(page, /A captura foi feita neste aparelho, mas não foi salva no Firebase/);
   assert.match(camera, /registrationAllowed\?: boolean/);
   assert.doesNotMatch(page, /updateEmployeeProfilePhoto\(current, photoPath/);
   assert.match(camera, /replacementStartedRef/);

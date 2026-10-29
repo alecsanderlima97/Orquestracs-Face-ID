@@ -300,18 +300,34 @@ function minutesFromTime(value) {
 function classifyPunchStatus({ employee, occurredAt, origin, scheduledPunch }) {
   if (origin === "external") return "external_work";
 
+  const configuredPeriods = Array.isArray(employee.schedule?.periods)
+    ? employee.schedule.periods.filter((period) => period?.start && period?.end).slice(0, 4)
+    : [];
+  const legacyPeriods = [
+    { start: employee.schedule?.start, end: employee.schedule?.breakStart },
+    { start: employee.schedule?.breakEnd, end: employee.schedule?.end },
+  ].filter((period) => period.start && period.end);
+  const periods = configuredPeriods.length ? configuredPeriods : legacyPeriods;
+  const stage = /^(Entrada|Saída) ([1-4])$/.exec(scheduledPunch || "");
+  if (stage && Number(stage[2]) > periods.length) {
+    throw new HttpsError("failed-precondition", "Esta etapa nao existe na escala configurada para o colaborador.");
+  }
+  const stagePeriod = stage ? periods[Number(stage[2]) - 1] : null;
   const expectedByPunch = {
     "Entrada 1": employee.schedule?.start,
     "Saída 1": employee.schedule?.breakStart,
     "Entrada 2": employee.schedule?.breakEnd,
     "Saída 2": employee.schedule?.end,
   };
-  const expectedMinutes = minutesFromTime(expectedByPunch[scheduledPunch]);
+  const expectedMinutes = minutesFromTime(stagePeriod
+    ? stage[1] === "Entrada" ? stagePeriod.start : stagePeriod.end
+    : expectedByPunch[scheduledPunch]);
   const currentMinutes = occurredAt.getHours() * 60 + occurredAt.getMinutes();
   const toleranceMinutes = Number(employee.schedule?.toleranceMinutes || 10);
+  const bankHoursEnabled = employee.workPolicy?.bankHoursEnabled !== false;
 
   if (expectedMinutes === null) return "on_time";
-  if (scheduledPunch === "Saída 2" && currentMinutes > expectedMinutes) return "bank_hours";
+  if (bankHoursEnabled && stage?.[1] === "Saída" && currentMinutes > expectedMinutes + toleranceMinutes) return "bank_hours";
   if (Math.abs(currentMinutes - expectedMinutes) <= toleranceMinutes) return "on_time";
   return currentMinutes < expectedMinutes ? "early" : "late";
 }
@@ -423,7 +439,10 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
   const validTypes = ["entry", "lunch_out", "lunch_back", "exit"];
   const validSources = ["face_id", "pin_photo", "external_face_id", "external_pin_photo", "manager"];
   const validOrigins = ["kiosk", "external", "manager_adjustment"];
-  const validScheduledPunches = ["Entrada 1", "Saída 1", "Entrada 2", "Saída 2"];
+  const validScheduledPunches = Array.from({ length: 4 }, (_, index) => [
+    `Entrada ${index + 1}`,
+    `Saída ${index + 1}`,
+  ]).flat();
 
   if (!companyId || !requestedEmployeeId || !validTypes.includes(type)) {
     throw new HttpsError("invalid-argument", "Empresa, colaborador e tipo de marcacao sao obrigatorios.");
@@ -445,6 +464,13 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
 
   const company = companySnapshot.data();
   const employee = employeeSnapshot.data();
+  employee.workPolicy = company.workPolicy || {};
+  const configuredPeriods = Array.isArray(employee.schedule?.periods)
+    ? employee.schedule.periods.filter((period) => period?.start && period?.end).slice(0, 4)
+    : [];
+  if (scheduledPunch && configuredPeriods.length && Number(scheduledPunch.match(/[1-4]$/)?.[0]) > configuredPeriods.length) {
+    throw new HttpsError("failed-precondition", "Esta etapa nao existe na escala configurada para o colaborador.");
+  }
   const companyCnpj = digits(company.cnpj);
   const employeeCpf = digits(employee.cpf);
   const inpiRegistration = digits(company.repP?.inpiRegistration || company.inpiRegistration);
@@ -486,7 +512,7 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       recordedAt: repDateTime,
     });
     const hash = afdRecord.hash;
-    const status = classifyPunchStatus({ employee, occurredAt: now.toDate(), origin, scheduledPunch });
+  const status = classifyPunchStatus({ employee, occurredAt: now.toDate(), origin, scheduledPunch });
     const punch = {
       companyId,
       deviceId,

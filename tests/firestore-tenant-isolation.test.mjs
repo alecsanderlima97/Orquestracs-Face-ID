@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, Timestamp, updateDoc } from "firebase/firestore";
 import {
   assertFails,
   assertSucceeds,
@@ -23,7 +23,15 @@ try {
       setDoc(doc(db, "companies/tenant-a/employees/employee-a"), { name: "Colaborador A" }),
       setDoc(doc(db, "companies/tenant-b/employees/employee-b"), { name: "Colaborador B" }),
       setDoc(doc(db, "tenants/tenant-a/users/user-a"), { role: "owner" }),
+      setDoc(doc(db, "tenants/tenant-a/users/admin-a"), { role: "admin" }),
       setDoc(doc(db, "tenants/tenant-b/users/user-b"), { role: "owner" }),
+      setDoc(doc(db, "invites/EMAIL1234"), {
+        email: "invitee@example.com",
+        expiresAt: Timestamp.fromDate(new Date(Date.now() + 60 * 60 * 1000)),
+        role: "admin",
+        status: "Ativo",
+        tenantId: "tenant-a",
+      }),
     ]);
   });
 
@@ -38,6 +46,32 @@ try {
   await assertFails(getDoc(doc(dbA, "companies/tenant-b/employees/employee-b")));
   await assertFails(updateDoc(doc(dbA, "companies/tenant-b"), { name: "Acesso indevido" }));
   await assertFails(setDoc(doc(dbA, "tenants/tenant-b/users/user-a"), { role: "admin" }));
+
+  const adminDb = testEnv.authenticatedContext("admin-a", { email: "admin-a@example.com" }).firestore();
+  const inviteDoc = (role) => ({
+    email: "new-user@example.com",
+    expiresAt: Timestamp.fromDate(new Date(Date.now() + 60 * 60 * 1000)),
+    role,
+    status: "Ativo",
+    tenantId: "tenant-a",
+  });
+  await assertSucceeds(setDoc(doc(adminDb, "invites/ADMIN1234"), inviteDoc("reader")));
+  await assertFails(setDoc(doc(adminDb, "invites/OWNER123"), inviteDoc("owner")));
+
+  const invitedUserDb = testEnv.authenticatedContext("invited-user", { email: "invitee@example.com" }).firestore();
+  const wrongUserDb = testEnv.authenticatedContext("wrong-user", { email: "other@example.com" }).firestore();
+  const acceptedInviteUser = {
+    email: "invitee@example.com",
+    inviteCode: "EMAIL1234",
+    role: "admin",
+    userId: "invited-user",
+  };
+  await assertSucceeds(setDoc(doc(invitedUserDb, "tenants/tenant-a/users/invited-user"), acceptedInviteUser));
+  await assertFails(setDoc(doc(wrongUserDb, "tenants/tenant-a/users/wrong-user"), {
+    ...acceptedInviteUser,
+    email: "other@example.com",
+    userId: "wrong-user",
+  }));
 } finally {
   await testEnv.cleanup();
 }

@@ -34,7 +34,7 @@ type RegisterRepPunchInput = {
   origin: "kiosk" | "external" | "manager_adjustment";
   photoPath: string;
   source: "face_id" | "pin_photo" | "external_face_id" | "external_pin_photo" | "manager";
-  scheduledPunch?: "Entrada 1" | "Saída 1" | "Entrada 2" | "Saída 2";
+  scheduledPunch?: `Entrada ${1 | 2 | 3 | 4}` | `Saída ${1 | 2 | 3 | 4}`;
   type: PunchType;
 };
 

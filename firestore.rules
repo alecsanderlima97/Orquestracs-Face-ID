@@ -152,6 +152,8 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.status == "Ativo"
             && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.expiresAt > request.time
             && request.resource.data.role == get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.role
+            && (!get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.keys().hasAny(["email"])
+              || request.auth.token.email == get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.email)
             && request.resource.data.role in ["owner", "admin", "reader"]
           );
         allow update: if isTenantOwner(tenantId)
@@ -187,12 +189,14 @@ service cloud.firestore {
     }
 
     match /invites/{code} {
-      allow read: if signedIn() && (
+      allow get: if signedIn() && (
         isPlatformOwner()
         || resource.data.status == "Ativo"
-        || isTenantOwner(resource.data.tenantId)
+        || canReadTenant(resource.data.tenantId)
       );
-      allow create: if isPlatformOwner() || isTenantOwner(request.resource.data.tenantId);
+      allow list: if isPlatformOwner() || canReadTenant(resource.data.tenantId);
+      allow create: if canWriteTenant(request.resource.data.tenantId)
+        && (request.resource.data.role != "owner" || isTenantOwner(request.resource.data.tenantId));
       allow update: if signedIn() && (
         isPlatformOwner()
         || isTenantOwner(resource.data.tenantId)

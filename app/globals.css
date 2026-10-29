@@ -1160,6 +1160,17 @@ a {
   text-align: right;
 }
 
+.dashboard-live-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.dashboard-logout-button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
 .dashboard-live-meta span,
 .dashboard-live-meta small {
   display: block;
@@ -1953,8 +1964,10 @@ button.dashboard-shortcut:hover {
 
 @media (max-width: 900px) {
   .dashboard-overview-header { flex-direction: column; gap: 16px; }
+  .dashboard-live-actions { width: 100%; align-items: stretch; }
   .dashboard-live-meta { width: 100%; border-left: 0; border-top: 2px solid var(--ds-confirm); padding: 10px 0 0; text-align: left; }
   .dashboard-live-meta strong { font-size: 20px; }
+  .dashboard-logout-button { align-self: flex-end; }
   .dashboard-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-content-grid { grid-template-columns: 1fr; }
   .app-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2254,6 +2267,93 @@ button.dashboard-shortcut:hover {
 
 .kiosk-exit-button:active {
   transform: translateY(1px);
+}
+
+.kiosk-exit-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(2 11 18 / 78%);
+  backdrop-filter: blur(8px);
+}
+
+.kiosk-exit-dialog {
+  width: min(100%, 460px);
+  border: 1px solid #315061;
+  border-radius: 12px;
+  background: #f8fafc;
+  padding: 24px;
+  color: #142235;
+  box-shadow: 0 24px 70px rgb(0 0 0 / 38%);
+}
+
+.kiosk-exit-dialog h2 {
+  margin: 5px 0 0;
+  font-size: 23px;
+}
+
+.kiosk-exit-dialog > p:not(.kiosk-card-label, .kiosk-exit-error, .kiosk-exit-warning) {
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.kiosk-exit-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.kiosk-exit-form label {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.kiosk-exit-form input {
+  min-height: 46px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: white;
+  padding: 0 12px;
+  color: #142235;
+  outline: none;
+}
+
+.kiosk-exit-form input:focus {
+  border-color: #087f69;
+  box-shadow: 0 0 0 3px rgb(8 127 105 / 14%);
+}
+
+.kiosk-google-exit {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.kiosk-exit-error,
+.kiosk-exit-warning {
+  margin-top: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 7px;
+  background: #fff1f2;
+  padding: 10px;
+  color: #a62929;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.kiosk-exit-cancel {
+  width: 100%;
+  margin-top: 12px;
+  border: 0;
+  background: transparent;
+  padding: 9px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .kiosk-workspace {

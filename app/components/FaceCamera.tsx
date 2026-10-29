@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const FACE_PROFILES_KEY = "orquestracs-face-id-local-profiles";
+const REMOTE_FACE_CACHE_KEY = "orquestracs-face-id-remote-descriptors-v1";
 const MATCH_THRESHOLD = 0.5;
 const MAX_CAPTURES_PER_EMPLOYEE = 5;
 const AUTO_RECOGNITION_INTERVAL_MS = 500;
@@ -18,6 +19,7 @@ export type RecognizedFace = {
     breakEnd: string;
     breakStart: string;
     end: string;
+    periods?: Array<{ start: string; end: string }>;
     start: string;
     toleranceMinutes: number;
   };
@@ -30,7 +32,26 @@ export type FaceProfileSource = RecognizedFace & {
 type StoredFaceProfile = RecognizedFace & {
   descriptors: number[][];
   updatedAt: string;
+  sourceKey?: string;
 };
+
+let faceApiPromise: Promise<FaceApiModule> | null = null;
+
+function loadCachedRemoteProfiles() {
+  try {
+    return JSON.parse(window.localStorage.getItem(REMOTE_FACE_CACHE_KEY) || "[]") as StoredFaceProfile[];
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedRemoteProfiles(profiles: StoredFaceProfile[]) {
+  try {
+    window.localStorage.setItem(REMOTE_FACE_CACHE_KEY, JSON.stringify(profiles));
+  } catch (error) {
+    console.warn("Não foi possível manter o cache facial neste aparelho.", error);
+  }
+}
 
 type FaceCameraProps = {
   autoRecognize?: boolean;
@@ -40,7 +61,7 @@ type FaceCameraProps = {
   recognitionPaused?: boolean;
   registrationAllowed?: boolean;
   onCameraState?: (state: "idle" | "loading" | "ready" | "error") => void;
-  onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void;
+  onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void | Promise<void>;
   onRecognized?: (employee: RecognizedFace, photoBlob?: Blob) => void;
   onStatus?: (message: string) => void;
   profileSources?: FaceProfileSource[];
@@ -81,6 +102,7 @@ export function FaceCamera({
   const [processing, setProcessing] = useState(false);
   const [message, setMessage] = useState("Ative a câmera para começar.");
   const remoteProfilesRef = useRef<StoredFaceProfile[] | null>(null);
+  const remoteProfilesPromiseRef = useRef<Promise<StoredFaceProfile[]> | null>(null);
   const replacementStartedRef = useRef(false);
   const startInFlightRef = useRef(false);
   const processingRef = useRef(false);
@@ -117,14 +139,22 @@ export function FaceCamera({
   }
 
   async function loadFaceApi() {
-    if (faceApiRef.current) return faceApiRef.current;
+    if (!faceApiPromise) {
+      faceApiPromise = (async () => {
+        const faceApi = await import("@vladmandic/face-api");
+        await Promise.all([
+          faceApi.nets.tinyFaceDetector.loadFromUri("/models/face-api"),
+          faceApi.nets.faceLandmark68Net.loadFromUri("/models/face-api"),
+          faceApi.nets.faceRecognitionNet.loadFromUri("/models/face-api"),
+        ]);
+        return faceApi;
+      })().catch((error) => {
+        faceApiPromise = null;
+        throw error;
+      });
+    }
 
-    const faceApi = await import("@vladmandic/face-api");
-    await Promise.all([
-      faceApi.nets.tinyFaceDetector.loadFromUri("/models/face-api"),
-      faceApi.nets.faceLandmark68Net.loadFromUri("/models/face-api"),
-      faceApi.nets.faceRecognitionNet.loadFromUri("/models/face-api"),
-    ]);
+    const faceApi = await faceApiPromise;
     faceApiRef.current = faceApi;
     return faceApi;
   }
@@ -230,38 +260,60 @@ export function FaceCamera({
 
   async function loadRemoteProfiles(faceApi: FaceApiModule) {
     if (remoteProfilesRef.current) return remoteProfilesRef.current;
+    if (remoteProfilesPromiseRef.current) return remoteProfilesPromiseRef.current;
 
     if (!profileSources.length) {
       remoteProfilesRef.current = [];
       return [];
     }
 
-    const syncedProfiles: StoredFaceProfile[] = [];
-    for (const source of profileSources) {
-      try {
-        const image = await faceApi.fetchImage(source.photoUrl);
-        const detection = await faceApi
-          .detectSingleFace(
-            image,
-            new faceApi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.55 }),
-          )
-          .withFaceLandmarks()
-          .withFaceDescriptor();
+    const loadPromise = (async () => {
+      const cachedProfiles = new Map(
+        loadCachedRemoteProfiles().map((profile) => [profile.sourceKey, profile]),
+      );
+      const syncedProfiles: StoredFaceProfile[] = [];
 
-        if (detection) {
-          syncedProfiles.push({
-            ...source,
-            descriptors: [Array.from(detection.descriptor)],
-            updatedAt: new Date().toISOString(),
-          });
-        }
-      } catch (error) {
-        console.warn(`Não foi possível sincronizar o rosto de ${source.name}.`, error);
+      for (let index = 0; index < profileSources.length; index += 4) {
+        const batch = await Promise.all(profileSources.slice(index, index + 4).map(async (source) => {
+          const sourceKey = `${source.employeeId}|${source.photoUrl}`;
+          const cached = cachedProfiles.get(sourceKey);
+          if (cached) return { ...cached, ...source, sourceKey };
+
+          try {
+            const image = await faceApi.fetchImage(source.photoUrl);
+            const detection = await faceApi
+              .detectSingleFace(
+                image,
+                new faceApi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.55 }),
+              )
+              .withFaceLandmarks()
+              .withFaceDescriptor();
+            if (!detection) return null;
+
+            return {
+              ...source,
+              descriptors: [Array.from(detection.descriptor)],
+              updatedAt: new Date().toISOString(),
+              sourceKey,
+            };
+          } catch (error) {
+            console.warn(`Não foi possível sincronizar o rosto de ${source.name}.`, error);
+            return null;
+          }
+        }));
+        syncedProfiles.push(...batch.filter((profile) => profile !== null) as StoredFaceProfile[]);
       }
-    }
 
-    remoteProfilesRef.current = syncedProfiles;
-    return syncedProfiles;
+      saveCachedRemoteProfiles(syncedProfiles);
+      remoteProfilesRef.current = syncedProfiles;
+      return syncedProfiles;
+    })();
+    remoteProfilesPromiseRef.current = loadPromise;
+    try {
+      return await loadPromise;
+    } finally {
+      if (remoteProfilesPromiseRef.current === loadPromise) remoteProfilesPromiseRef.current = null;
+    }
   }
 
   async function registerFace() {
@@ -310,7 +362,13 @@ export function FaceCamera({
 
       replacementStartedRef.current = true;
       window.localStorage.setItem(FACE_PROFILES_KEY, JSON.stringify(nextProfiles));
-      onProfileUpdated?.(descriptors.length, await captureFrame());
+      try {
+        await onProfileUpdated?.(descriptors.length, await captureFrame());
+      } catch (error) {
+        console.error("Não foi possível sincronizar a captura facial.", error);
+        updateMessage("A captura foi feita, mas não foi sincronizada com o sistema. Tente novamente.");
+        return;
+      }
       updateMessage(
         `${employee.name}: captura ${descriptors.length}/${MAX_CAPTURES_PER_EMPLOYEE} salva neste aparelho.`,
       );

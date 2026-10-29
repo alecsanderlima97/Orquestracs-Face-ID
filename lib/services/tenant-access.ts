@@ -15,6 +15,7 @@ export type TenantInvite = {
   code: string;
   companyName: string;
   createdAt?: Timestamp;
+  email?: string;
   expiresAt?: Timestamp;
   role: Exclude<TenantRole, "developer">;
   status: "Ativo" | "Usado" | "Cancelado" | "Expirado";
@@ -110,10 +111,12 @@ export async function getUserTenantAccess(user: User): Promise<TenantAccess | nu
 
 export async function createTenantInvite({
   companyName,
+  email,
   role,
   tenantId,
 }: {
   companyName: string;
+  email?: string;
   role: Exclude<TenantRole, "developer">;
   tenantId: string;
 }) {
@@ -121,6 +124,7 @@ export async function createTenantInvite({
   const invite: TenantInvite = {
     code,
     companyName: companyName.trim() || "Empresa convidada",
+    ...(email?.trim() ? { email: email.trim().toLowerCase() } : {}),
     expiresAt: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
     role,
     status: "Ativo",
@@ -365,6 +369,9 @@ export async function acceptTenantInvite(code: string, user: User) {
   const expired = invite.expiresAt && invite.expiresAt.toMillis() < Date.now();
 
   if (invite.status !== "Ativo" || expired) throw new Error("invite-unavailable");
+  if (invite.email && invite.email !== user.email?.trim().toLowerCase()) {
+    throw new Error("invite-email-mismatch");
+  }
 
   await setDoc(
     doc(db, `tenants/${invite.tenantId}/users/${user.uid}`),

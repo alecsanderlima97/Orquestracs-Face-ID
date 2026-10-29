@@ -437,7 +437,7 @@ export default function AdminCentral({ company, config, invites, onAction }: Cen
           tradeName: newClientForm.tradeName || newClientForm.companyName,
         }),
       ]);
-      const invite = await createTenantInvite({ companyName: newClientForm.companyName, role: "owner", tenantId });
+      const invite = await createTenantInvite({ companyName: newClientForm.companyName, email: newClientForm.email, role: "owner", tenantId });
       const createdClient: TenantAdminClient = {
         company: { cnpj: newClientForm.document, contactEmail: newClientForm.email, contactName: newClientForm.responsibleName, contactPhone: newClientForm.phone, legalName: newClientForm.legalName, registrationDate: newClientForm.registrationDate, tradeName: newClientForm.tradeName || newClientForm.companyName },
         config: { ...newConfig, tenantId },

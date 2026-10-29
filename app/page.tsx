@@ -2,10 +2,13 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
+  EmailAuthProvider,
   GoogleAuthProvider,
   browserLocalPersistence,
   getRedirectResult,
   onAuthStateChanged,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
   setPersistence,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -77,7 +80,6 @@ type Section =
   | "Painel"
   | "Empresa"
   | "Colaboradores"
-  | "Escalas"
   | "Sala de ponto"
   | "Ponto externo"
   | "Batidas"
@@ -133,6 +135,7 @@ type LocalEmployee = EmployeeRow & {
     breakEnd: string;
     breakStart: string;
     end: string;
+    periods?: Array<{ start: string; end: string }>;
     start: string;
     toleranceMinutes: number;
   };
@@ -205,6 +208,9 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
       breakEnd: schedule.breakEnd || "13:00",
       breakStart: schedule.breakStart || "11:30",
       end: schedule.end || "17:15",
+      periods: Array.isArray(schedule.periods)
+        ? schedule.periods.filter((period) => period?.start && period?.end).slice(0, 4)
+        : undefined,
       start: schedule.start || "07:00",
       toleranceMinutes: Number(schedule.toleranceMinutes || 10),
     },
@@ -224,8 +230,6 @@ function employeeDocumentId(employee: Pick<LocalEmployee, "employeeId" | "name" 
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "") || employee.employeeId}`;
 }
-
-const journeyRows: string[][] = [];
 
 const navItems: Section[] = [
   "Painel",
@@ -338,7 +342,7 @@ type MonthlyMirrorRow = {
   lateMinutes: number;
   missingAfternoon: boolean;
   missingMorning: boolean;
-  punches: Partial<Record<PunchType, Punch>>;
+  scheduledPunches: Partial<Record<ScheduledPunch, Punch>>;
   status: string;
   workedMinutes: number;
 };
@@ -633,14 +637,21 @@ type PunchContext = {
   origin?: "kiosk" | "external";
 };
 
-type ScheduledPunch = NonNullable<Punch["scheduledPunch"]>;
+type ScheduledPunch = `Entrada ${1 | 2 | 3 | 4}` | `Saída ${1 | 2 | 3 | 4}`;
 
-const scheduledPunchOrder: ScheduledPunch[] = [
-  "Entrada 1",
-  "Saída 1",
-  "Entrada 2",
-  "Saída 2",
-];
+const scheduledPunchOrder: ScheduledPunch[] = Array.from({ length: 4 }, (_, index) => [
+  `Entrada ${index + 1}` as ScheduledPunch,
+  `Saída ${index + 1}` as ScheduledPunch,
+]).flat();
+
+function getSchedulePeriods(schedule?: LocalEmployee["schedule"]) {
+  const configured = schedule?.periods?.filter((period) => period.start && period.end) || [];
+  if (configured.length) return configured.slice(0, 4);
+  return [
+    { start: schedule?.start || "07:00", end: schedule?.breakStart || "11:30" },
+    { start: schedule?.breakEnd || "13:00", end: schedule?.end || "17:15" },
+  ];
+}
 
 function getPunchDeviceId() {
   const storageKey = "orquestracs-face-id-device-id";
@@ -701,35 +712,43 @@ function inferNextPunchFromHistory(
 
     // Registros antigos não tinham a etapa da jornada. Recuperamos a etapa
     // pelo tipo e pelo horário para manter a sequência entre máquinas.
-    const breakStart = minutesFromTime(schedule?.breakStart || "11:30");
-    const breakEnd = minutesFromTime(schedule?.breakEnd || "13:00");
     const punchMinutes = date.getHours() * 60 + date.getMinutes();
-    const previousEntries = orderedPunches
-      .slice(0, index)
-      .filter((item) => item.punch.type === "entry").length;
-    const fallback: ScheduledPunch = punch.type === "lunch_out"
-      ? "Saída 1"
-      : punch.type === "lunch_back"
-        ? "Entrada 2"
-        : punch.type === "exit"
-          ? punchMinutes <= breakStart ? "Saída 1" : "Saída 2"
-          : punchMinutes >= breakEnd || previousEntries > 0 ? "Entrada 2" : "Entrada 1";
-    completed.add(fallback);
+    const periods = getSchedulePeriods(schedule);
+    const isEntry = punch.type === "entry" || punch.type === "lunch_back";
+    const periodIndex = periods.findIndex((period, periodNumber) => {
+      const start = minutesFromTime(period.start);
+      const end = minutesFromTime(period.end);
+      const nextStart = periods[periodNumber + 1]
+        ? minutesFromTime(periods[periodNumber + 1].start)
+        : Number.POSITIVE_INFINITY;
+      return isEntry
+        ? punchMinutes >= start && punchMinutes < nextStart
+        : punchMinutes > start && punchMinutes <= end;
+    });
+    const inferredIndex = periodIndex >= 0 ? periodIndex : Math.min(index, periods.length - 1);
+    completed.add(`${isEntry ? "Entrada" : "Saída"} ${inferredIndex + 1}` as ScheduledPunch);
   });
 
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
-  const breakEnd = minutesFromTime(schedule?.breakEnd || "13:00");
+  const periods = getSchedulePeriods(schedule);
+  const stageOrder = scheduledPunchOrder.slice(0, periods.length * 2);
+  const completedIndex = stageOrder.reduce(
+    (highest, stage, index) => completed.has(stage) ? Math.max(highest, index) : highest,
+    -1,
+  );
+  if (completedIndex >= stageOrder.length - 1) return null;
+  if (completedIndex >= 0) return stageOrder[completedIndex + 1];
 
-  // Avança sempre pelo estágio mais alto já registrado. Assim, uma entrada
-  // da tarde nunca faz a próxima marcação voltar para a entrada da manhã.
-  if (completed.has("Saída 2")) return null;
-  if (completed.has("Entrada 2")) return "Saída 2";
-  if (completed.has("Saída 1")) return "Entrada 2";
-  if (completed.has("Entrada 1")) return "Saída 1";
-
-  // Sem marcações anteriores, uma chegada depois do início do segundo período
-  // é tratada como Entrada 2; antes disso, permanece Entrada 1.
-  return currentMinutes >= breakEnd ? "Entrada 2" : "Entrada 1";
+  const activePeriodIndex = periods.findIndex((period, index) => {
+    const start = minutesFromTime(period.start);
+    const nextStart = periods[index + 1]
+      ? minutesFromTime(periods[index + 1].start)
+      : Number.POSITIVE_INFINITY;
+    return currentMinutes >= start && currentMinutes < nextStart;
+  });
+  if (activePeriodIndex >= 0) return `Entrada ${activePeriodIndex + 1}` as ScheduledPunch;
+  if (currentMinutes < minutesFromTime(periods[0]?.start || "07:00")) return "Entrada 1";
+  return null;
 }
 
 function inferNextPunch(employeeId: string, schedule?: LocalEmployee["schedule"]) {
@@ -805,7 +824,7 @@ function formatDurationSpeech(totalMinutes: number) {
   return parts.join(" e ") || "0 minuto";
 }
 
-function getPunchTiming(employee: RecognizedFace, punchType: string) {
+function getPunchTiming(employee: RecognizedFace, punchType: string, bankHoursEnabled = true) {
   const schedule = employee.schedule || {
     breakEnd: "13:00",
     breakStart: "11:30",
@@ -813,6 +832,12 @@ function getPunchTiming(employee: RecognizedFace, punchType: string) {
     start: "07:00",
     toleranceMinutes: 10,
   };
+  const periods = getSchedulePeriods(schedule);
+  const stage = scheduledPunchOrder.includes(punchType as ScheduledPunch)
+    ? punchType as ScheduledPunch
+    : "Entrada 1";
+  const stageMatch = /^(Entrada|Saída) ([1-4])$/.exec(stage);
+  const stagePeriod = stageMatch ? periods[Number(stageMatch[2]) - 1] : undefined;
   const expectedByPunch: Record<string, string> = {
     Entrada: schedule.start,
     "Entrada 1": schedule.start,
@@ -822,24 +847,29 @@ function getPunchTiming(employee: RecognizedFace, punchType: string) {
     "Entrada 2": schedule.breakEnd,
     "Fim do dia": schedule.end,
     "Saída 2": schedule.end,
+    ...Object.fromEntries(periods.flatMap((period, index) => [
+      [`Entrada ${index + 1}`, period.start],
+      [`Saída ${index + 1}`, period.end],
+    ])),
   };
-  const expectedTime = expectedByPunch[punchType];
+  const expectedTime = stagePeriod ? (stageMatch?.[1] === "Entrada" ? stagePeriod.start : stagePeriod.end) : expectedByPunch[punchType];
   const now = new Date();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const differenceMinutes = currentMinutes - minutesFromTime(expectedTime);
-  const isExitPunch = ["Saída almoço", "Saída 1", "Fim do dia", "Saída 2"].includes(punchType);
-  const isFinalExit = punchType === "Saída 2" || punchType === "Fim do dia";
-  const hasBankHours = isFinalExit && differenceMinutes > 0;
+  const isExitPunch = punchType.startsWith("Saída") || punchType === "Fim do dia";
+  const hasBankHours = bankHoursEnabled
+    && isExitPunch
+    && differenceMinutes > schedule.toleranceMinutes;
   const timingLabel = hasBankHours
     ? "Banco de horas"
     : Math.abs(differenceMinutes) <= schedule.toleranceMinutes
     ? "No horário"
-    : differenceMinutes < 0
+      : differenceMinutes < 0
       ? isExitPunch
         ? "Saída antecipada"
         : "Entrada antecipada"
       : isExitPunch
-        ? "Intervalo iniciado após o horário"
+        ? "Saída após o horário"
         : "Entrada atrasada";
 
   return {
@@ -890,7 +920,12 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(min-width: 901px) and (max-width: 1400px)");
+    const code = new URLSearchParams(window.location.search).get("convite");
+    if (code) setInviteCode(code.trim().toUpperCase());
+  }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 901px) and (max-width: 1180px)");
     const syncSidebarMode = () => {
       setSidebarAutoCompact(mediaQuery.matches);
       setSidebarAutoOverride(null);
@@ -940,13 +975,14 @@ export default function Home() {
       } else {
         setCompanyProfile(null);
       }
-      if (selectedAccess?.role === "developer") {
-        const [invites, config] = await Promise.all([
-          listTenantInvites(selectedAccess.tenantId),
-          getTenantSaasConfig(selectedAccess.tenantId),
-        ]);
+      if (selectedAccess) {
+        const invitesPromise = listTenantInvites(selectedAccess.tenantId);
+        const configPromise = selectedAccess.role === "developer"
+          ? getTenantSaasConfig(selectedAccess.tenantId)
+          : Promise.resolve(null);
+        const [invites, config] = await Promise.all([invitesPromise, configPromise]);
         setTenantInvites(invites);
-        setSaasConfig(config);
+        if (config) setSaasConfig(config);
       }
     } catch (error) {
       console.error(error);
@@ -1128,6 +1164,47 @@ export default function Home() {
     await signOut(auth);
   }
 
+  async function handleKioskExit(method: "google" | "password", password = "") {
+    if (!user) return "Sessão do responsável não encontrada.";
+
+    try {
+      if (method === "google") {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
+        await reauthenticateWithPopup(user, provider);
+      } else {
+        if (!user.email || !password.trim()) return "Informe a senha da conta responsável.";
+        const credential = EmailAuthProvider.credential(user.email, password);
+        await reauthenticateWithCredential(user, credential);
+      }
+
+      setActive("Painel");
+      setNotice("Sala de ponto encerrada pelo responsável autenticado.");
+      return "";
+    } catch (error) {
+      console.error(error);
+      const authError = error as { code?: string };
+      switch (authError.code) {
+        case "auth/unauthorized-domain":
+          return "Este endereço não está autorizado no Firebase Authentication. Adicione localhost aos domínios autorizados e tente novamente.";
+        case "auth/popup-blocked":
+          return "O navegador bloqueou a janela do Google. Permita pop-ups para este endereço e tente novamente.";
+        case "auth/popup-closed-by-user":
+        case "auth/cancelled-popup-request":
+          return "A confirmação do Google foi cancelada. Tente novamente e conclua a seleção da conta.";
+        case "auth/wrong-password":
+        case "auth/invalid-credential":
+          return "A senha não confere com a conta responsável conectada.";
+        case "auth/requires-recent-login":
+          return "Por segurança, entre novamente na conta responsável e depois saia do modo quiosque.";
+        case "auth/network-request-failed":
+          return "A confirmação falhou por instabilidade de rede. Confira a conexão e tente novamente.";
+        default:
+          return `Não foi possível confirmar a conta responsável${authError.code ? ` (${authError.code})` : ""}. Confira o método de acesso e tente novamente.`;
+      }
+    }
+  }
+
   async function saveAuthenticationPreferences(preferences: AuthenticationPreference) {
     const payload = { authenticationPreferences: preferences };
     if (activeCompanyId === "main") await saveMainCompany(payload);
@@ -1146,11 +1223,17 @@ export default function Home() {
       setCompanyProfile(null);
       window.localStorage.setItem(`orquestracs-active-tenant:${user.uid}`, access.tenantId);
       void refreshCompanyProfile(access.tenantId);
+      void listTenantInvites(access.tenantId).then(setTenantInvites);
       setLoginMessage("");
       setNotice(`Acesso liberado para ${access.companyName}.`);
     } catch (error) {
       console.error(error);
-      setLoginMessage("Convite invalido, expirado ou ja utilizado.");
+      const inviteError = error as { code?: string; message?: string };
+      setLoginMessage(inviteError.message === "invite-email-mismatch"
+        ? "Este convite foi emitido para outro e-mail. Entre com a conta convidada e tente novamente."
+        : inviteError.code === "permission-denied"
+          ? "Não foi possível validar o convite para esta conta. Confira o e-mail convidado e as permissões da empresa."
+          : "Convite inválido, expirado ou já utilizado.");
     }
   }
 
@@ -1168,23 +1251,15 @@ export default function Home() {
     setMobileMenuOpen(false);
     if (user) window.localStorage.setItem(`orquestracs-active-tenant:${user.uid}`, nextAccess.tenantId);
     void refreshCompanyProfile(nextAccess.tenantId);
-    if (nextAccess.role === "developer") {
-      void Promise.all([
-        listTenantInvites(nextAccess.tenantId),
-        getTenantSaasConfig(nextAccess.tenantId),
-      ]).then(([invites, config]) => {
-        setTenantInvites(invites);
-        setSaasConfig(config);
-      });
-    }
+    void listTenantInvites(nextAccess.tenantId).then(setTenantInvites);
+    if (nextAccess.role === "developer") void getTenantSaasConfig(nextAccess.tenantId).then(setSaasConfig);
   }
 
   const title = useMemo(() => {
     const subtitles: Record<Section, string> = {
       Painel: "Visao geral da operacao",
       Empresa: "Cadastro e configuracao do CNPJ do sistema",
-      Colaboradores: "Equipe, documentos, turnos e biometria",
-      Escalas: "Jornadas, tolerancias e banco de horas",
+      Colaboradores: "Equipe, documentos, jornadas e biometria",
       "Sala de ponto": "Tablet de reconhecimento facial",
       "Ponto externo": "Registro autorizado pelo celular",
       Batidas: "Registro por PIN, foto e evidencias",
@@ -1205,8 +1280,8 @@ export default function Home() {
     setNotice(`Tela "${section}" aberta.`);
   }
 
-  async function demoAction(action: string) {
-    const fields = collectVisibleFormData();
+  async function demoAction(action: string, overrideFields: Record<string, string> = {}) {
+    const fields = { ...collectVisibleFormData(), ...overrideFields };
     appendLocalRecord(action, active, fields);
 
     if (action === "Cadastro da empresa principal") {
@@ -1272,19 +1347,89 @@ export default function Home() {
       return;
     }
 
-    if (action === "Convite por e-mail") {
-      const roleByLabel: Record<string, "owner" | "admin" | "reader"> = {
-        Administrador: "admin",
-        Leitor: "reader",
-        Proprietario: "owner",
+    if (action === "Escala coletiva da empresa") {
+      const defaultSchedule = {
+        breakEnd: fields["Entrada 2"] || "13:00",
+        breakStart: fields["Saída 1"] || "11:30",
+        end: fields["Saída 2"] || "17:15",
+        name: fields["Nome da escala"] || "Jornada padrão da empresa",
+        periods: Array.from({ length: 4 }, (_, index) => ({
+          start: fields[`Entrada ${index + 1}`] || "",
+          end: fields[`Saída ${index + 1}`] || "",
+        })).filter((period) => period.start && period.end),
+        start: fields["Entrada 1"] || "07:00",
+        bankHoursEnabled: fields["Banco de horas"] !== "Inativo",
+        workDaysPerWeek: Number(fields["Dias por semana"] || 5),
       };
-      const invite = await createTenantInvite({
-        companyName: fields.Cliente || fields.Empresa || String(companyProfile?.tradeName || companyProfile?.legalName || "Empresa convidada"),
-        role: roleByLabel[fields.Perfil || fields.Permissao || "Proprietario"] || "owner",
-        tenantId: activeCompanyId,
-      });
-      setTenantInvites((items) => [invite, ...items]);
-      setNotice(`Convite criado: ${invite.code}. Envie esse codigo para o cliente.`);
+      const invalidPeriods = defaultSchedule.periods.some((period) =>
+        !/^\d{2}:\d{2}$/.test(period.start)
+        || !/^\d{2}:\d{2}$/.test(period.end)
+        || timeToMinutes(period.end) <= timeToMinutes(period.start),
+      );
+      if (invalidPeriods || defaultSchedule.periods.length === 0) {
+        setNotice("Configure pelo menos um período completo, com a saída depois da entrada.");
+        return;
+      }
+      try {
+          const payload = {
+            defaultSchedule,
+            workPolicy: {
+              ...getCompanyWorkPolicy(companyProfile),
+              bankHoursEnabled: defaultSchedule.bankHoursEnabled,
+              scheduledDays: defaultSchedule.workDaysPerWeek,
+              toleranceMinutes: Number.parseInt(fields["Tolerancia padrao"] || "", 10) || DEFAULT_WORK_POLICY.toleranceMinutes,
+            },
+          };
+        if (activeCompanyId === "main") await saveMainCompany(payload);
+        else await saveTenantCompany(activeCompanyId, payload);
+        await refreshCompanyProfile(activeCompanyId);
+        setNotice("Escala coletiva salva e definida como padrão para novos colaboradores.");
+      } catch (error) {
+        console.error(error);
+        setNotice("Não foi possível salvar a escala coletiva. Verifique as permissões da empresa.");
+      }
+      return;
+    }
+
+    if (action === "Previa da jornada coletiva") {
+      const periods = Array.from({ length: 4 }, (_, index) => ({
+        start: fields[`Entrada ${index + 1}`] || "",
+        end: fields[`Saída ${index + 1}`] || "",
+      })).filter((period) => period.start && period.end);
+      setNotice(`Prévia: ${periods.map((period, index) => `Entrada ${index + 1} ${period.start} / Saída ${index + 1} ${period.end}`).join(" · ")}. Jornada de ${fields["Dias por semana"] || "5"} dias.`);
+      return;
+    }
+
+    if (action === "Convite por e-mail") {
+      try {
+        const email = String(fields.Email || "").trim().toLowerCase();
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          setNotice("Informe um e-mail válido para vincular o convite à pessoa certa.");
+          return;
+        }
+        const roleByLabel: Record<string, "owner" | "admin" | "reader"> = {
+          Administrador: "admin",
+          Leitor: "reader",
+          Proprietario: "owner",
+        };
+        const invite = await createTenantInvite({
+          companyName: fields.Cliente || fields.Empresa || String(companyProfile?.tradeName || companyProfile?.legalName || "Empresa convidada"),
+          email,
+          role: roleByLabel[fields.Perfil || fields.Permissao || "Proprietario"] || "owner",
+          tenantId: activeCompanyId,
+        });
+        const invites = await listTenantInvites(activeCompanyId);
+        setTenantInvites(invites);
+        const inviteUrl = new URL(window.location.origin);
+        inviteUrl.searchParams.set("convite", invite.code);
+        setNotice(`Convite criado para ${email}: ${invite.code}. Envie também o link ${inviteUrl.toString()}`);
+      } catch (error) {
+        console.error(error);
+        const code = (error as { code?: string }).code || "";
+        setNotice(code.includes("permission-denied")
+          ? "Seu perfil não tem permissão para convidar usuários nesta empresa. Peça ao proprietário para verificar seu acesso."
+          : "Não foi possível criar o convite. Confira o e-mail e tente novamente.");
+      }
       return;
     }
 
@@ -1466,7 +1611,7 @@ export default function Home() {
       source: employee
         ? external ? "external_face_id" as const : "face_id" as const
         : external ? "external_pin_photo" as const : "pin_photo" as const,
-      scheduledPunch: kind as "Entrada 1" | "Saída 1" | "Entrada 2" | "Saída 2",
+      scheduledPunch: kind as ScheduledPunch,
       type: mapPunchType(kind),
     };
 
@@ -1540,7 +1685,7 @@ export default function Home() {
             <p className="login-visual-kicker">CONTROLE DE JORNADA</p>
             <h1>Reconhecimento que acompanha a sua operação.</h1>
             <p className="login-visual-description">
-              Registre entradas, intervalos e saídas com mais agilidade, segurança e rastreabilidade.
+              Registre cada período da jornada com agilidade, segurança e rastreabilidade.
             </p>
             <div className="login-visual-methods" aria-label="Formas de identificação e controle">
               <div className="login-visual-method">
@@ -1737,6 +1882,8 @@ export default function Home() {
   const kioskLocation = weatherSnapshot?.source === "current"
     ? "Localização atual"
     : [companyAddress.city, companyAddress.state].filter(Boolean).join(" - ") || "Local da empresa";
+  const canExitKioskWithPassword = Boolean(user.providerData.some((provider) => provider.providerId === "password"));
+  const canExitKioskWithGoogle = Boolean(user.providerData.some((provider) => provider.providerId === "google.com"));
 
   return (
     <TenantIdContext.Provider value={activeCompanyId}>
@@ -1968,26 +2115,30 @@ export default function Home() {
 
           {active === "Painel" && (
             <>
-              <DailyOperationsPanel scheduledDays={getCompanyWorkPolicy(companyProfile).scheduledDays} />
+              <DailyOperationsPanel onLogout={handleLogout} scheduledDays={getCompanyWorkPolicy(companyProfile).scheduledDays} />
             </>
           )}
 
           {active === "Empresa" && (
             <CompaniesScreen
               canEdit={isPlatformOwnerEmail(user.email) || appAccess?.role !== "reader"}
+              canInviteOwner={isPlatformOwnerEmail(user.email) || appAccess?.role === "owner"}
               company={companyProfile}
+              invites={tenantInvites}
               key={String(companyProfile?.updatedAt || companyProfile?.logoUrl || "empty-company")}
               onAction={demoAction}
             />
           )}
-          {active === "Colaboradores" && <EmployeesScreen canEdit={canManage} onAction={demoAction} />}
-          {active === "Escalas" && <ShiftsScreen canEdit={canManage} onAction={demoAction} />}
+          {active === "Colaboradores" && <EmployeesScreen canEdit={canManage} company={companyProfile} onAction={demoAction} />}
           {active === "Sala de ponto" && (
             <KioskScreen
+              bankHoursEnabled={getCompanyWorkPolicy(companyProfile).bankHoursEnabled}
               dateLabel={headerDate}
+              canExitWithGoogle={canExitKioskWithGoogle}
+              canExitWithPassword={canExitKioskWithPassword}
               locationLabel={kioskLocation}
               onAction={demoAction}
-              onExit={() => void handleLogout()}
+              onExit={handleKioskExit}
               onRegister={registerPunch}
               pin={pin}
               setPin={setPin}
@@ -2011,7 +2162,7 @@ export default function Home() {
           {active === "Banco de horas" && <HoursBankScreen canEdit={canManage} company={companyProfile} onAction={demoAction} />}
           {active === "Fechamento mensal" && <MonthlyClosingScreen company={companyProfile} onAction={demoAction} />}
           {active === "Relatorios" && <ReportsScreen company={companyProfile} onAction={demoAction} />}
-          {active === "LGPD e auditoria" && <AuditScreen onAction={demoAction} />}
+          {active === "LGPD e auditoria" && <AuditScreen company={companyProfile} onAction={demoAction} />}
           {active === "Configuracoes" && (
             <AuthenticationSettingsScreen
               canEdit={canManage}
@@ -2113,6 +2264,7 @@ type DailyStatusKey =
   | "absence_full_day"
   | "absence_morning"
   | "break"
+  | "between_periods"
   | "done"
   | "off"
   | "pending"
@@ -2121,7 +2273,7 @@ type DailyStatusKey =
 
 type DailyEmployeeRow = {
   employee: LocalEmployee;
-  pendingPunches: PunchType[];
+  pendingPunches: ScheduledPunch[];
   punches: Punch[];
   statusKey: DailyStatusKey;
   statusLabel: string;
@@ -2158,7 +2310,7 @@ function getDaypart(date: Date): Daypart {
   if (minutes < 6 * 60) return { detail: "A operação ainda não começou.", icon: "🌙", label: "Madrugada" };
   if (minutes < 9 * 60) return { detail: "Início da jornada e conferência de entradas.", icon: "🌅", label: "Bom dia" };
   if (minutes < 12 * 60) return { detail: "Jornada da manhã em andamento.", icon: "☀️", label: "Manhã" };
-  if (minutes < 14 * 60) return { detail: "Janela de almoço e intervalo.", icon: "🍽️", label: "Intervalo" };
+  if (minutes < 14 * 60) return { detail: "Pausa entre períodos da jornada.", icon: "☀️", label: "Tarde" };
   if (minutes < 18 * 60) return { detail: "Jornada da tarde em andamento.", icon: "☀️", label: "Tarde" };
   if (minutes < 20 * 60) return { detail: "Conferência do encerramento da jornada.", icon: "🌇", label: "Entardecer" };
   return { detail: "A jornada do dia foi encerrada.", icon: "🌙", label: "Noite" };
@@ -2219,33 +2371,49 @@ function getWeatherVisual(daypart: Daypart, weather: WeatherSnapshot | null, loa
   };
 }
 
+function scheduledStageForPunch(punch: Punch, schedule: LocalEmployee["schedule"]): ScheduledPunch | null {
+  if (punch.scheduledPunch && scheduledPunchOrder.includes(punch.scheduledPunch)) return punch.scheduledPunch;
+  const date = punchDate(punch);
+  const currentMinutes = date.getHours() * 60 + date.getMinutes();
+  const periods = getSchedulePeriods(schedule);
+  const entryLike = punch.type === "entry" || punch.type === "lunch_back";
+  const nearest = periods.reduce<{ stage: ScheduledPunch; distance: number } | null>((best, period, index) => {
+    const expected = getTimeMinutes(entryLike ? period.start : period.end);
+    const distance = Math.abs(currentMinutes - expected);
+    const stage = `${entryLike ? "Entrada" : "Saída"} ${index + 1}` as ScheduledPunch;
+    return !best || distance < best.distance ? { distance, stage } : best;
+  }, null);
+  return nearest?.stage || null;
+}
+
 function getDailyPendingPunches(
   employee: LocalEmployee,
   punches: Punch[],
   now: Date,
   scheduledDays: number,
   justifications: AttendanceJustification[] = [],
-): PunchType[] {
+): ScheduledPunch[] {
   if (!isScheduledWorkday(now, scheduledDays)) return [];
 
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const schedule = employee.schedule;
   const todayPunches = punches.filter((punch) => isSameCalendarDay(punchDate(punch), now));
-  const hasPunch = (type: PunchType) => todayPunches.some((punch) => punch.type === type);
-  const start = getTimeMinutes(schedule.start);
-  const lunchOut = getTimeMinutes(schedule.breakStart);
-  const lunchBack = getTimeMinutes(schedule.breakEnd);
-  const end = getTimeMinutes(schedule.end);
-  const morningJustified = hasApprovedAbsenceJustification(justifications, employee.employeeId, now, "morning");
-  const afternoonJustified = hasApprovedAbsenceJustification(justifications, employee.employeeId, now, "afternoon");
-
-  if (currentMinutes < start) return [];
-
-  const pending: PunchType[] = [];
-  if (!hasPunch("entry") && !morningJustified) pending.push("entry");
-  if (currentMinutes >= lunchOut && !hasPunch("lunch_out") && !morningJustified) pending.push("lunch_out");
-  if (currentMinutes >= lunchBack && !hasPunch("lunch_back") && !afternoonJustified) pending.push("lunch_back");
-  if (currentMinutes >= end && !hasPunch("exit") && !afternoonJustified) pending.push("exit");
+  const periods = getSchedulePeriods(schedule);
+  const completed = new Set(todayPunches.map((punch) => scheduledStageForPunch(punch, schedule)).filter(Boolean));
+  const pending: ScheduledPunch[] = [];
+  periods.forEach((period, index) => {
+    const stagePair = [
+      [`Entrada ${index + 1}`, period.start],
+      [`Saída ${index + 1}`, period.end],
+    ] as const;
+    stagePair.forEach(([stage, expected]) => {
+      if (currentMinutes < getTimeMinutes(expected) + schedule.toleranceMinutes) return;
+      if (completed.has(stage as ScheduledPunch)) return;
+      const justificationPeriod = index === 0 ? "morning" : "afternoon";
+      if (hasApprovedAbsenceJustification(justifications, employee.employeeId, now, justificationPeriod)) return;
+      pending.push(stage as ScheduledPunch);
+    });
+  });
   return pending;
 }
 
@@ -2263,17 +2431,24 @@ function getDailyAbsencePeriods(
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const schedule = employee.schedule;
   const todayPunches = punches.filter((punch) => isSameCalendarDay(punchDate(punch), now));
-  const hasPunch = (type: PunchType) => todayPunches.some((punch) => punch.type === type);
-  const morningClosed = currentMinutes >= getTimeMinutes(schedule.breakEnd);
-  const afternoonClosed = currentMinutes >= getTimeMinutes(schedule.end);
+  const periods = getSchedulePeriods(schedule);
+  const completed = new Set(todayPunches.map((punch) => scheduledStageForPunch(punch, schedule)).filter(Boolean));
   const morningJustified = hasApprovedAbsenceJustification(justifications, employee.employeeId, now, "morning");
   const afternoonJustified = hasApprovedAbsenceJustification(justifications, employee.employeeId, now, "afternoon");
-  const morningMissing = morningClosed && !morningJustified && !hasPunch("entry") && !hasPunch("lunch_out");
-  const afternoonMissing = afternoonClosed && !afternoonJustified && !hasPunch("lunch_back") && !hasPunch("exit");
+  const closedPeriods = periods.map((period, index) => ({
+    index,
+    closed: currentMinutes >= getTimeMinutes(period.end) + schedule.toleranceMinutes,
+    missed: !completed.has(`Entrada ${index + 1}` as ScheduledPunch)
+      && !completed.has(`Saída ${index + 1}` as ScheduledPunch),
+  }));
+  const morningMissing = closedPeriods.some(({ index, closed, missed }) => index === 0 && closed && missed) && !morningJustified;
+  const afternoonMissing = closedPeriods.some(({ index, closed, missed }) => index > 0 && closed && missed) && !afternoonJustified;
+  const dayClosed = currentMinutes >= getTimeMinutes(periods.at(-1)?.end || schedule.end) + schedule.toleranceMinutes;
+  const fullDayMissing = dayClosed && !completed.size && !morningJustified && !afternoonJustified;
 
   return {
     afternoon: afternoonMissing && !morningMissing,
-    fullDay: morningMissing && afternoonMissing,
+    fullDay: fullDayMissing || (morningMissing && afternoonMissing),
     morning: morningMissing && !afternoonMissing,
   };
 }
@@ -2289,20 +2464,22 @@ function getDailyEmployeeStatus(
 
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const schedule = employee.schedule;
-  const start = getTimeMinutes(schedule.start);
-  const lunchOut = getTimeMinutes(schedule.breakStart);
-  const lunchBack = getTimeMinutes(schedule.breakEnd);
-  const end = getTimeMinutes(schedule.end);
-
-  if (currentMinutes < start) return "waiting";
+  const periods = getSchedulePeriods(schedule);
+  if (currentMinutes < getTimeMinutes(periods[0]?.start || schedule.start)) return "waiting";
   const absencePeriods = getDailyAbsencePeriods(employee, punches, now, scheduledDays, justifications);
   if (absencePeriods.fullDay) return "absence_full_day";
   if (absencePeriods.morning) return "absence_morning";
   if (absencePeriods.afternoon) return "absence_afternoon";
   if (getDailyPendingPunches(employee, punches, now, scheduledDays, justifications).length > 0) return "pending";
-  if (currentMinutes < lunchOut) return "working";
-  if (currentMinutes < lunchBack) return "break";
-  if (currentMinutes < end) return "working";
+  if (currentMinutes < getTimeMinutes(periods.at(-1)?.end || schedule.end)) {
+    const betweenPeriods = periods.some((period, index) => {
+      const nextPeriod = periods[index + 1];
+      return nextPeriod
+        && currentMinutes > getTimeMinutes(period.end)
+        && currentMinutes < getTimeMinutes(nextPeriod.start);
+    });
+    return betweenPeriods ? "between_periods" : "working";
+  }
   return "done";
 }
 
@@ -2311,7 +2488,8 @@ function dailyStatusLabel(statusKey: DailyStatusKey) {
     absence_afternoon: "Falta tarde - justificar",
     absence_full_day: "Falta dia inteiro - justificar",
     absence_morning: "Falta manhã - justificar",
-    break: "Intervalo",
+    break: "Entre períodos",
+    between_periods: "Entre períodos",
     done: "Jornada concluída",
     off: "Fora da escala",
     pending: "Batida pendente",
@@ -2327,6 +2505,7 @@ function dailyStatusClass(statusKey: DailyStatusKey) {
     absence_full_day: "border-[#d0443e] bg-[#fff0ef] text-[#a33a3a]",
     absence_morning: "border-[#d0443e] bg-[#fff0ef] text-[#a33a3a]",
     break: "border-[#efd9a8] bg-[#fff8e9] text-[#8a5a00]",
+    between_periods: "border-[#d9e0e7] bg-[#f8fafb] text-[#667085]",
     done: "border-[#b9ddd3] bg-[#f1faf7] text-[#18594c]",
     off: "border-[#d9e0e7] bg-[#f8fafb] text-[#667085]",
     pending: "border-[#f2b8b5] bg-[#fff0ef] text-[#a33a3a]",
@@ -2392,7 +2571,13 @@ function DashboardSystemItem({
   );
 }
 
-function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
+function DailyOperationsPanel({
+  onLogout,
+  scheduledDays,
+}: {
+  onLogout: () => Promise<void>;
+  scheduledDays: number;
+}) {
   const companyId = useActiveCompanyId();
   const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
   const [punches, setPunches] = useState<Punch[]>([]);
@@ -2482,6 +2667,10 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
   }, [attendanceJustifications, employeesList, now, punches, scheduledDays, search, statusFilter]);
 
   const todayPunches = punches.filter((punch) => isSameCalendarDay(punchDate(punch), now));
+  const dashboardStages = scheduledPunchOrder.slice(
+    0,
+    Math.max(2, ...employeesList.map((employee) => getSchedulePeriods(employee.schedule).length)) * 2,
+  );
   const pendingCount = employeesList.filter((employee) => {
     const employeePunches = punches.filter((punch) => punch.employeeId === employee.employeeId);
     return isDailyAttentionStatus(getDailyEmployeeStatus(employee, employeePunches, now, scheduledDays, attendanceJustifications));
@@ -2496,12 +2685,13 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
   const currentDate = now.toLocaleDateString("pt-BR", { day: "2-digit", month: "long", weekday: "long" });
   const currentTime = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-  function renderPunchCell(row: DailyEmployeeRow, type: PunchType, expected: string) {
-    const punch = row.punches.find(
-      (punch) => punch.type === type && isSameCalendarDay(punchDate(punch), now),
+  function renderPunchCell(row: DailyEmployeeRow, stage: ScheduledPunch, expected: string) {
+    const punch = row.punches.find((item) =>
+      isSameCalendarDay(punchDate(item), now)
+      && scheduledStageForPunch(item, row.employee.schedule) === stage,
     );
     const confirmed = Boolean(punch);
-    const pending = row.pendingPunches.includes(type);
+    const pending = row.pendingPunches.includes(stage);
     return (
       <span
         className={`dashboard-punch-time ${
@@ -2527,10 +2717,15 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
             <h2>Visão geral da operação</h2>
             <p>Acompanhe as marcações do dia e identifique pendências antes do fechamento.</p>
           </div>
-          <div className="dashboard-live-meta">
-            <span>{period.icon} {period.label} · ao vivo</span>
-            <strong>{currentTime}</strong>
-            <small>{currentDate}</small>
+          <div className="dashboard-live-actions">
+            <div className="dashboard-live-meta">
+              <span>{period.icon} {period.label} · ao vivo</span>
+              <strong>{currentTime}</strong>
+              <small>{currentDate}</small>
+            </div>
+            <button className="secondary-button dashboard-logout-button" onClick={() => void onLogout()} type="button">
+              Sair da conta
+            </button>
           </div>
         </header>
         <div className="dashboard-metric-grid">
@@ -2602,7 +2797,7 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
               <option value="absence_afternoon">Falta tarde</option>
               <option value="absence_full_day">Falta dia inteiro</option>
               <option value="working">Em jornada</option>
-              <option value="break">Intervalo</option>
+              <option value="between_periods">Entre períodos</option>
               <option value="done">Jornada concluída</option>
               <option value="waiting">Aguardando entrada</option>
               <option value="off">Fora da escala</option>
@@ -2614,16 +2809,16 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
           <table className="dashboard-table">
             <thead>
               <tr>
-                {["Funcionário", "Escala", "Entrada", "Intervalo", "Retorno", "Saída", "Última batida", "Status"].map((head) => (
+                {["Funcionário", "Escala", ...dashboardStages, "Última batida", "Status"].map((head) => (
                   <th key={head}>{head}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8}><div className="dashboard-empty-state">Carregando colaboradores...</div></td></tr>
+                <tr><td colSpan={dashboardStages.length + 4}><div className="dashboard-empty-state">Carregando colaboradores...</div></td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8}><div className="dashboard-empty-state">{employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}</div></td></tr>
+                <tr><td colSpan={dashboardStages.length + 4}><div className="dashboard-empty-state">{employeesList.length ? "Nenhum colaborador corresponde ao filtro." : "Nenhum colaborador cadastrado."}</div></td></tr>
               ) : rows.map((row) => (
                 <tr className={isDailyAttentionStatus(row.statusKey) ? "dashboard-row-attention" : ""} key={row.employee.employeeId}>
                   <td>
@@ -2635,10 +2830,11 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
                     </div>
                   </td>
                   <td className="text-[#64748b]">{row.employee.shift}</td>
-                  <td>{renderPunchCell(row, "entry", row.employee.schedule.start)}</td>
-                  <td>{renderPunchCell(row, "lunch_out", row.employee.schedule.breakStart)}</td>
-                  <td>{renderPunchCell(row, "lunch_back", row.employee.schedule.breakEnd)}</td>
-                  <td>{renderPunchCell(row, "exit", row.employee.schedule.end)}</td>
+                  {dashboardStages.map((stage, index) => {
+                    const period = getSchedulePeriods(row.employee.schedule)[Math.floor(index / 2)];
+                    const expected = stage.startsWith("Entrada") ? period?.start : period?.end;
+                    return <td key={stage}>{renderPunchCell(row, stage, expected || "--:--")}</td>;
+                  })}
                   <td className="text-[#64748b]">{row.latestPunch ? formatPunchDateTime(row.latestPunch) : "Sem batida hoje"}</td>
                   <td><span className={`dashboard-status-pill ${dailyStatusClass(row.statusKey)}`}>{row.statusLabel}</span></td>
                 </tr>
@@ -2666,12 +2862,11 @@ function DailyOperationsPanel({ scheduledDays }: { scheduledDays: number }) {
                 </div>
               </div>
               <div className="dashboard-mobile-punch-grid">
-                {[
-                  { label: "Entrada", value: renderPunchCell(row, "entry", row.employee.schedule.start) },
-                  { label: "Intervalo", value: renderPunchCell(row, "lunch_out", row.employee.schedule.breakStart) },
-                  { label: "Retorno", value: renderPunchCell(row, "lunch_back", row.employee.schedule.breakEnd) },
-                  { label: "Saída", value: renderPunchCell(row, "exit", row.employee.schedule.end) },
-                ].map(({ label, value }) => (
+                {dashboardStages.map((stage, index) => {
+                  const period = getSchedulePeriods(row.employee.schedule)[Math.floor(index / 2)];
+                  const expected = stage.startsWith("Entrada") ? period?.start : period?.end;
+                  return { label: stage, value: renderPunchCell(row, stage, expected || "--:--") };
+                }).map(({ label, value }) => (
                   <div className="dashboard-mobile-punch" key={label}>
                     <p>{label}</p>
                     <div>{value}</div>
@@ -2802,9 +2997,9 @@ function OwnReceiptLookupCard() {
 
   const typeLabels: Record<string, string> = {
     entry: "Entrada",
-    exit: "Saida",
-    lunch_back: "Retorno do intervalo",
-    lunch_out: "Saida para intervalo",
+    exit: "Saída",
+    lunch_back: "Entrada",
+    lunch_out: "Saída",
   };
 
   return (
@@ -2886,7 +3081,7 @@ function PunchCard({
           </Field>
 
           <div className="punch-actions">
-            {["Entrada", "Intervalo", "Retorno", "Saida"].map((label) => (
+            {scheduledPunchOrder.map((label) => (
               <button className="secondary-button punch-action-button" key={label} onClick={() => void onRegister(label)} type="button">
                 {label}
               </button>
@@ -3137,12 +3332,16 @@ function AuthenticationSettingsScreen({
 
 function CompaniesScreen({
   canEdit,
+  canInviteOwner,
   company,
+  invites,
   onAction,
 }: {
   canEdit: boolean;
+  canInviteOwner: boolean;
   company: MainCompanyProfile | null;
-  onAction: (action: string) => void;
+  invites: TenantInvite[];
+  onAction: (action: string, overrideFields?: Record<string, string>) => Promise<void> | void;
 }) {
   const [openCompanySections, setOpenCompanySections] = useState({
     adjustments: false,
@@ -3153,13 +3352,25 @@ function CompaniesScreen({
     shifts: false,
     users: false,
   });
+  const savedCompanySchedule = (company?.defaultSchedule || {}) as Record<string, unknown>;
+  const savedCompanyPeriods = Array.isArray(savedCompanySchedule.periods)
+    ? savedCompanySchedule.periods as Array<{ start?: string; end?: string }>
+    : [];
   const [companyJourney, setCompanyJourney] = useState({
-    start: "07:00",
-    lunchOut: "11:30",
-    lunchBack: "13:00",
-    end: "17:15",
-    days: "5",
+    days: String(savedCompanySchedule.workDaysPerWeek || getCompanyWorkPolicy(company).scheduledDays),
   });
+  const [companyPeriods, setCompanyPeriods] = useState(() => Array.from({ length: 4 }, (_, index) => ({
+    start: String(savedCompanyPeriods[index]?.start || (savedCompanyPeriods.length ? "" : index === 0 ? "07:00" : index === 1 ? "13:00" : "")),
+    end: String(savedCompanyPeriods[index]?.end || (savedCompanyPeriods.length ? "" : index === 0 ? "11:30" : index === 1 ? "17:15" : "")),
+  })));
+  const [companyBankHours, setCompanyBankHours] = useState(
+    savedCompanySchedule.bankHoursEnabled !== false && getCompanyWorkPolicy(company).bankHoursEnabled,
+  );
+  const [companyScheduleName, setCompanyScheduleName] = useState(
+    String(savedCompanySchedule.name || "Jornada padrão da empresa"),
+  );
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"Proprietario" | "Administrador" | "Leitor">("Administrador");
 
   function updateCompanyJourney(field: keyof typeof companyJourney, value: string) {
     setCompanyJourney((current) => ({ ...current, [field]: value }));
@@ -3167,6 +3378,28 @@ function CompaniesScreen({
 
   function setCompanySection(section: keyof typeof openCompanySections, open: boolean) {
     setOpenCompanySections((current) => ({ ...current, [section]: open }));
+  }
+
+  async function copyInviteLink(code: string) {
+    const query = new URLSearchParams({ convite: code });
+    const link = `${window.location.origin}/?${query.toString()}`;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+      } else {
+        const input = document.createElement("textarea");
+        input.value = link;
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.append(input);
+        input.select();
+        document.execCommand("copy");
+        input.remove();
+      }
+      onAction("Link do convite copiado. Envie-o manualmente para o e-mail convidado.");
+    } catch {
+      onAction(`Copie e envie este link para o e-mail convidado: ${link}`);
+    }
   }
 
   const address = (company?.address || {}) as Record<string, string>;
@@ -3264,15 +3497,20 @@ function CompaniesScreen({
         isOpen={openCompanySections.shifts}
         onToggle={() => setCompanySection("shifts", !openCompanySections.shifts)}
         title="Escalas da empresa"
-        subtitle="Jornadas coletivas usadas pelos colaboradores"
+        subtitle="Até quatro pares de entrada e saída, configuráveis por empresa"
       >
         <fieldset disabled={!canEdit}>
-        <div className="grid gap-3 md:grid-cols-4">
-          <Field label="Nome da escala"><input className="input" placeholder="Operacional 07h as 17h15" /></Field>
-          <TimeStepper label="Entrada" onChange={(value) => updateCompanyJourney("start", value)} value={companyJourney.start} />
-          <TimeStepper label="Saida almoco" onChange={(value) => updateCompanyJourney("lunchOut", value)} value={companyJourney.lunchOut} />
-          <TimeStepper label="Volta almoco" onChange={(value) => updateCompanyJourney("lunchBack", value)} value={companyJourney.lunchBack} />
-          <TimeStepper label="Fim do dia" onChange={(value) => updateCompanyJourney("end", value)} value={companyJourney.end} />
+        <div className="grid gap-3 md:grid-cols-2">
+          <Field label="Nome da escala"><input className="input" onChange={(event) => setCompanyScheduleName(event.target.value)} value={companyScheduleName} /></Field>
+          {companyPeriods.map((period, index) => (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={index}>
+              <p className="mb-3 text-sm font-semibold text-[#26323f]">Período {index + 1}</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <TimeStepper label={`Entrada ${index + 1}`} onChange={(value) => setCompanyPeriods((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, start: value } : item))} value={period.start} />
+                <TimeStepper label={`Saída ${index + 1}`} onChange={(value) => setCompanyPeriods((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, end: value } : item))} value={period.end} />
+              </div>
+            </div>
+          ))}
           <Field label="Dias por semana">
             <select className="input" onChange={(event) => updateCompanyJourney("days", event.target.value)} value={companyJourney.days}>
               <option value="5">5 dias</option>
@@ -3280,26 +3518,28 @@ function CompaniesScreen({
               <option value="7">7 dias</option>
             </select>
           </Field>
-          <JourneySummary
-            breakEnd={companyJourney.lunchBack}
-            breakStart={companyJourney.lunchOut}
-            days={Number(companyJourney.days)}
-            end={companyJourney.end}
-            start={companyJourney.start}
-          />
+          <label className="flex items-center gap-3 rounded-md border border-[#e3e8ee] bg-white p-3 text-sm font-semibold text-[#26323f]">
+            <input checked={companyBankHours} onChange={(event) => setCompanyBankHours(event.target.checked)} type="checkbox" />
+            Ativar banco de horas para esta empresa
+          </label>
         </div>
         </fieldset>
         <ActionRow>
-          <SaveButton disabled={!canEdit} onClick={() => onAction("Escala coletiva da empresa")}>Salvar escala</SaveButton>
+          <SaveButton disabled={!canEdit} onClick={() => onAction("Escala coletiva da empresa", {
+            "Dias por semana": companyJourney.days,
+            "Banco de horas": companyBankHours ? "Ativo" : "Inativo",
+            ...Object.fromEntries(companyPeriods.flatMap((period, index) => [
+              [`Entrada ${index + 1}`, period.start],
+              [`Saída ${index + 1}`, period.end],
+            ])),
+          })}>Salvar escala</SaveButton>
           <button className="secondary-button" onClick={() => onAction("Previa da jornada coletiva")} type="button">Ver previa</button>
         </ActionRow>
         <div className="mt-5 grid gap-3 md:grid-cols-2">
-          {initialShifts.map((shift) => (
-            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={shift.name}>
-              <p className="text-sm font-semibold text-[#26323f]">{shift.name}</p>
-              <p className="mt-1 text-xs text-[#667085]">
-                {shift.start} - {shift.breakStart} / {shift.breakEnd} - {shift.end}
-              </p>
+          {companyPeriods.map((period, index) => (
+            <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={`${period.start}-${period.end}-${index}`}>
+              <p className="text-sm font-semibold text-[#26323f]">Período {index + 1}</p>
+              <p className="mt-1 text-xs text-[#667085]">Entrada {index + 1}: {period.start} · Saída {index + 1}: {period.end}</p>
             </div>
           ))}
         </div>
@@ -3408,17 +3648,43 @@ function CompaniesScreen({
         title="Usuarios da empresa"
         subtitle="Login por convite"
       >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="E-mail do usuário">
+              <input className="input" autoComplete="email" onChange={(event) => setInviteEmail(event.target.value)} placeholder="usuario@empresa.com" type="email" value={inviteEmail} />
+            </Field>
+            <Field label="Perfil de acesso">
+              <select className="input" onChange={(event) => setInviteRole(event.target.value as typeof inviteRole)} value={inviteRole}>
+                <option>Administrador</option>
+                <option>Leitor</option>
+                {canInviteOwner && <option>Proprietario</option>}
+              </select>
+            </Field>
+          </div>
           <CheckList
             items={[
               "Proprietario tem acesso total",
               "Administrador gerencia operacao",
               "Leitor apenas visualiza relatorios",
-              "Convites pendentes podem ser reenviados",
+              "Convites ativos exibem link para compartilhamento",
             ]}
           />
         <ActionRow>
-            <SaveButton disabled={!canEdit} onClick={() => onAction("Convidar usuario da empresa")}>Convidar usuario</SaveButton>
+            <SaveButton disabled={!canEdit || !inviteEmail.trim()} onClick={() => onAction("Convite por e-mail", { Email: inviteEmail, Perfil: inviteRole })}>Convidar usuario</SaveButton>
         </ActionRow>
+        <div className="mt-4 grid gap-2">
+          {invites.length ? invites.map((invite) => (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#d9e0e7] bg-[#fbfcfd] p-3" key={invite.code}>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-[#142235]">{invite.email || "Convite sem e-mail vinculado"}</p>
+                  <p className="mt-1 text-xs text-[#64748b]">{invite.role} · {invite.status} · código {invite.code}</p>
+                </div>
+                {invite.status === "Ativo" && (
+                  <button className="secondary-button" onClick={() => void copyInviteLink(invite.code)} type="button">Copiar link</button>
+                )}
+              </div>
+          )) : <p className="text-sm text-[#64748b]">Nenhum convite criado para esta empresa.</p>}
+        </div>
+        <p className="mt-2 text-xs text-[#64748b]">O sistema gera código e link; o envio por e-mail é manual, pois não há serviço de envio configurado.</p>
       </CollapsiblePanel>
 
       <CollapsiblePanel
@@ -3440,7 +3706,7 @@ function CompaniesScreen({
   );
 }
 
-function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (action: string) => void }) {
+function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; company: MainCompanyProfile | null; onAction: (action: string) => void }) {
   const companyId = useActiveCompanyId();
   const [journeyMode, setJourneyMode] = useState<"coletiva" | "individual">("coletiva");
   const emptyEmployeeForm = {
@@ -3475,17 +3741,24 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
   const [showFaceCamera, setShowFaceCamera] = useState(false);
   const [replaceFaceProfile, setReplaceFaceProfile] = useState(false);
   const [biometricConsentAccepted, setBiometricConsentAccepted] = useState(false);
+  const [faceSaving, setFaceSaving] = useState(false);
   const [faceCompletion, setFaceCompletion] = useState<{
     employee: LocalEmployee;
     nextPending: LocalEmployee | null;
   } | null>(null);
-  const [employeeJourney, setEmployeeJourney] = useState({
-    start: "07:00",
-    lunchOut: "11:30",
-    lunchBack: "13:00",
-    end: "17:15",
-    days: "5",
-  });
+  const [employeeJourney, setEmployeeJourney] = useState({ days: "5" });
+  const [employeePeriods, setEmployeePeriods] = useState([
+    { start: "07:00", end: "11:30" },
+    { start: "13:00", end: "17:15" },
+    { start: "", end: "" },
+    { start: "", end: "" },
+  ]);
+  const companyPeriods = Array.isArray((company?.defaultSchedule as Record<string, unknown> | undefined)?.periods)
+    ? (company?.defaultSchedule as { periods: Array<{ start: string; end: string }> }).periods.slice(0, 4)
+    : [
+        { start: "07:00", end: "11:30" },
+        { start: "13:00", end: "17:15" },
+      ];
 
   function updateEmployeeJourney(field: keyof typeof employeeJourney, value: string) {
     setEmployeeJourney((current) => ({ ...current, [field]: value }));
@@ -3598,6 +3871,10 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     setEmployeeSource("manual");
     setEditingEmployeeId(null);
     setSelectedEmployee(null);
+    setEmployeePeriods(Array.from({ length: 4 }, (_, index) => ({
+      start: companyPeriods[index]?.start || "",
+      end: companyPeriods[index]?.end || "",
+    })));
     setShowFaceCamera(false);
     setBiometricConsentAccepted(false);
     setReplaceFaceProfile(false);
@@ -3667,6 +3944,10 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     if (!canEdit) return;
     const selected = toLocalEmployee(employee as unknown as Record<string, unknown>, employee.employeeId || employee.name);
     setSelectedEmployee(selected);
+    setEmployeePeriods(Array.from({ length: 4 }, (_, index) => ({
+      start: selected.schedule.periods?.[index]?.start || "",
+      end: selected.schedule.periods?.[index]?.end || "",
+    })));
     setHoleriteImportDraft(null);
     setEmployeeSource("manual");
     setEditingEmployeeId(employeeDocumentId(selected));
@@ -3868,20 +4149,32 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     }
 
     const companyShift = initialShifts[0];
+    const completedEmployeePeriods = employeePeriods.filter((period) => period.start && period.end);
+    const invalidEmployeePeriods = completedEmployeePeriods.some((period) =>
+      !/^\d{2}:\d{2}$/.test(period.start)
+      || !/^\d{2}:\d{2}$/.test(period.end)
+      || timeToMinutes(period.end) <= timeToMinutes(period.start),
+    );
+    if (journeyMode === "individual" && (!completedEmployeePeriods.length || invalidEmployeePeriods)) {
+      onAction("A jornada individual precisa de pelo menos um par válido de entrada e saída.");
+      return;
+    }
     const schedule =
       journeyMode === "individual"
         ? {
-            breakEnd: employeeJourney.lunchBack,
-            breakStart: employeeJourney.lunchOut,
-            end: employeeJourney.end,
-            start: employeeJourney.start,
+            breakEnd: completedEmployeePeriods[1]?.start || "",
+            breakStart: completedEmployeePeriods[0]?.end || "",
+            end: completedEmployeePeriods[completedEmployeePeriods.length - 1]?.end || "",
+            periods: completedEmployeePeriods,
+            start: completedEmployeePeriods[0]?.start || "",
             toleranceMinutes: 10,
           }
         : {
-            breakEnd: companyShift.breakEnd,
-            breakStart: companyShift.breakStart,
-            end: companyShift.end,
-            start: companyShift.start,
+            breakEnd: companyPeriods[1]?.start || companyShift.breakEnd,
+            breakStart: companyPeriods[0]?.end || companyShift.breakStart,
+            end: companyPeriods[companyPeriods.length - 1]?.end || companyShift.end,
+            periods: companyPeriods,
+            start: companyPeriods[0]?.start || companyShift.start,
             toleranceMinutes: Number.parseInt(companyShift.tolerance, 10) || 10,
           };
     const employee: LocalEmployee = {
@@ -4045,71 +4338,86 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
     }
   }
 
-  function markFaceRegistered(captureCount: number, photoBlob?: Blob) {
+  async function markFaceRegistered(captureCount: number, photoBlob?: Blob) {
     if (!selectedEmployee) return;
     if (!biometricConsentAccepted) {
       onAction("Confirme o aceite biometrico antes de salvar o cadastro facial.");
-      return;
+      throw new Error("Aceite biométrico não confirmado.");
     }
-    const completed = captureCount >= REQUIRED_FACE_CAPTURES;
+    if (!photoBlob) {
+      onAction("A câmera não conseguiu gerar a foto da captura. Tente novamente com o rosto centralizado.");
+      throw new Error("Foto da captura facial indisponível.");
+    }
+
+    const employeeAtStart = selectedEmployee;
     const captureId = crypto.randomUUID();
 
-    const updated = localEmployees.map((employee) =>
-      employee.employeeId === selectedEmployee.employeeId
-        ? {
-            ...employee,
-            faceIdStatus: completed ? "registered" as const : employee.faceIdStatus,
-            status: completed ? "Face ID cadastrado" : `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}`,
-          }
-        : employee,
-    );
-    const current = updated.find((employee) => employee.employeeId === selectedEmployee.employeeId) || null;
-    const nextPending = updated.find(
-      (employee) => employee.employeeId !== selectedEmployee.employeeId && employee.faceIdStatus !== "registered",
-    );
-
-    window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
-    setLocalEmployees(updated);
-    setSelectedEmployee(current);
-    if (current) {
-      void upsertEmployee(companyId, employeeDocumentId(current), {
-        faceCaptureCount: captureCount,
-        faceIdStatus: completed ? "registered" : current.faceIdStatus,
-        ...(completed ? { faceRegisteredAt: new Date().toISOString(), status: "Face ID cadastrado" } : { status: `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}` }),
+    setFaceSaving(true);
+    try {
+      const photoPath = await uploadFacePhoto({
+        blob: photoBlob,
+        companyId,
+        employeeId: employeeAtStart.employeeId,
+        photoId: captureId,
+      });
+      await createFaceIdRecord({
+        capturedBy: "server-authenticated",
+        companyId,
+        consentAcceptedAt: new Date(),
+        createdAt: new Date(),
+        employeeId: employeeAtStart.employeeId,
+        photoPath,
       });
 
-      if (photoBlob) {
-        void uploadFacePhoto({
-          blob: photoBlob,
-          companyId,
-          employeeId: current.employeeId,
-          photoId: captureId,
-        }).then((photoPath) => {
-          void createFaceIdRecord({
-            capturedBy: "server-authenticated",
-            companyId,
-            consentAcceptedAt: new Date(),
-            createdAt: new Date(),
-            employeeId: current.employeeId,
-            photoPath,
-          });
+      const completed = captureCount >= REQUIRED_FACE_CAPTURES;
+      const updated = localEmployees.map((employee) =>
+        employee.employeeId === employeeAtStart.employeeId
+          ? {
+              ...employee,
+              faceIdStatus: completed ? "registered" as const : employee.faceIdStatus,
+              status: completed ? "Face ID cadastrado" : `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}`,
+            }
+          : employee,
+      );
+      const current = updated.find((employee) => employee.employeeId === employeeAtStart.employeeId) || null;
+      const nextPending = updated.find(
+        (employee) => employee.employeeId !== employeeAtStart.employeeId && employee.faceIdStatus !== "registered",
+      );
+
+      if (current) {
+        await upsertEmployee(companyId, employeeDocumentId(current), {
+          faceCaptureCount: captureCount,
+          faceIdStatus: completed ? "registered" : current.faceIdStatus,
+          ...(completed
+            ? { faceRegisteredAt: new Date().toISOString(), status: "Face ID cadastrado" }
+            : { status: `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}` }),
         });
       }
-    }
 
-    if (completed) {
-      setReplaceFaceProfile(false);
-      setShowFaceCamera(false);
-      if (current) {
-        setFaceCompletion({ employee: current, nextPending: nextPending || null });
+      window.localStorage.setItem(LOCAL_EMPLOYEES_KEY, JSON.stringify(updated));
+      setLocalEmployees(updated);
+      setSelectedEmployee(current);
+
+      if (completed) {
+        setReplaceFaceProfile(false);
+        setShowFaceCamera(false);
+        if (current) {
+          setFaceCompletion({ employee: current, nextPending: nextPending || null });
+        }
+        onAction(
+          `${employeeAtStart.name}: Face ID concluído e sincronizado. Confira o nome antes de cadastrar outro colaborador.`,
+        );
+        return;
       }
-      onAction(
-        `${selectedEmployee.name}: Face ID concluído. Confira o nome antes de cadastrar outro colaborador.`,
-      );
-      return;
-    }
 
-    onAction(`${selectedEmployee.name}: captura ${captureCount}/${REQUIRED_FACE_CAPTURES} salva.`);
+      onAction(`${employeeAtStart.name}: captura ${captureCount}/${REQUIRED_FACE_CAPTURES} sincronizada no Firebase.`);
+    } catch (error) {
+      console.error("Não foi possível sincronizar o cadastro facial.", error);
+      onAction("A captura foi feita neste aparelho, mas não foi salva no Firebase. Verifique sua sessão e tente novamente.");
+      throw error;
+    } finally {
+      setFaceSaving(false);
+    }
   }
 
   return (
@@ -4200,11 +4508,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
             <div className="mt-4 grid gap-3 md:grid-cols-2">
               <Field label="Jornada coletiva da empresa">
                 <select className="input">
-                  {initialShifts.map((shift) => (
-                    <option key={shift.name}>
-                      {shift.name} - {shift.start} as {shift.breakStart} / {shift.breakEnd} as {shift.end}
-                    </option>
-                  ))}
+                  <option>{String((company?.defaultSchedule as Record<string, unknown> | undefined)?.name || "Jornada padrão da empresa")}</option>
                 </select>
               </Field>
               <div className="rounded-md border border-[#cfe3dc] bg-[#f1faf7] p-3 text-sm text-[#24594d]">
@@ -4213,11 +4517,16 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
               </div>
             </div>
           ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
-              <TimeStepper label="Entrada" onChange={(value) => updateEmployeeJourney("start", value)} value={employeeJourney.start} />
-              <TimeStepper label="Saida almoco" onChange={(value) => updateEmployeeJourney("lunchOut", value)} value={employeeJourney.lunchOut} />
-              <TimeStepper label="Volta almoco" onChange={(value) => updateEmployeeJourney("lunchBack", value)} value={employeeJourney.lunchBack} />
-              <TimeStepper label="Fim do dia" onChange={(value) => updateEmployeeJourney("end", value)} value={employeeJourney.end} />
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {employeePeriods.map((period, index) => (
+                <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={index}>
+                  <p className="mb-3 text-sm font-semibold text-[#26323f]">Período {index + 1}</p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <TimeStepper label={`Entrada ${index + 1}`} onChange={(value) => setEmployeePeriods((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, start: value } : item))} value={period.start} />
+                    <TimeStepper label={`Saída ${index + 1}`} onChange={(value) => setEmployeePeriods((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, end: value } : item))} value={period.end} />
+                  </div>
+                </div>
+              ))}
               <Field label="Dias por semana">
                 <select className="input" onChange={(event) => updateEmployeeJourney("days", event.target.value)} value={employeeJourney.days}>
                   <option value="5">5 dias</option>
@@ -4226,11 +4535,11 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
                 </select>
               </Field>
               <JourneySummary
-                breakEnd={employeeJourney.lunchBack}
-                breakStart={employeeJourney.lunchOut}
+                breakEnd={employeePeriods[1]?.start || "13:00"}
+                breakStart={employeePeriods[0]?.end || "11:30"}
                 days={Number(employeeJourney.days)}
-                end={employeeJourney.end}
-                start={employeeJourney.start}
+                end={employeePeriods.filter((item) => item.start && item.end).slice(-1)[0]?.end || "17:15"}
+                start={employeePeriods.find((item) => item.start && item.end)?.start || "07:00"}
               />
             </div>
           )}
@@ -4328,7 +4637,7 @@ function EmployeesScreen({ canEdit, onAction }: { canEdit: boolean; onAction: (a
                 Isso melhora o reconhecimento neste aparelho.
               </p>
               <p className="mt-3 text-xs font-semibold text-white">
-                Status: {selectedEmployee!.faceIdStatus === "registered" ? "Face ID cadastrado" : "Aguardando captura"}
+                Status: {faceSaving ? "Salvando no Firebase..." : selectedEmployee!.faceIdStatus === "registered" ? "Face ID cadastrado" : "Aguardando captura"}
               </p>
             </div>
           </div>
@@ -4908,10 +5217,9 @@ function ExternalPunchScreen({
           </Field>
           <Field label="Marcacao">
             <select className="input" onChange={(event) => setSelectedPunch(event.target.value)} value={selectedPunch}>
-              <option value="Entrada 1">Entrada</option>
-              <option value="Saida 1">Inicio do intervalo</option>
-              <option value="Entrada 2">Retorno do intervalo</option>
-              <option value="Saida 2">Saida</option>
+              {scheduledPunchOrder.slice(0, getSchedulePeriods(recognizedEmployee?.schedule).length * 2).map((stage) => (
+                <option key={stage} value={stage}>{stage}</option>
+              ))}
             </select>
           </Field>
 
@@ -4947,6 +5255,9 @@ function ExternalPunchScreen({
 }
 
 function KioskScreen({
+  bankHoursEnabled,
+  canExitWithGoogle,
+  canExitWithPassword,
   dateLabel,
   locationLabel,
   onAction,
@@ -4959,10 +5270,13 @@ function KioskScreen({
   weatherIcon,
   weatherLabel,
 }: {
+  bankHoursEnabled: boolean;
+  canExitWithGoogle: boolean;
+  canExitWithPassword: boolean;
   dateLabel: string;
   locationLabel: string;
   onAction: (action: string) => void;
-  onExit: () => void;
+  onExit: (method: "google" | "password", password?: string) => Promise<string>;
   onRegister: (kind: string, employee?: RecognizedFace, exception?: PunchException, photoBlob?: Blob, context?: PunchContext) => Promise<boolean>;
   pin: string;
   setPin: (value: string) => void;
@@ -4982,6 +5296,10 @@ function KioskScreen({
   const [blockingMessage, setBlockingMessage] = useState("");
   const [kioskDetailsOpen, setKioskDetailsOpen] = useState(false);
   const [pinFallbackOpen, setPinFallbackOpen] = useState(false);
+  const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const [exitPassword, setExitPassword] = useState("");
+  const [exitError, setExitError] = useState("");
+  const [exitLoading, setExitLoading] = useState(false);
   const [confirmation, setConfirmation] = useState<{
     employeeName: string;
     time: string;
@@ -4990,6 +5308,20 @@ function KioskScreen({
   const [faceProfileSources, setFaceProfileSources] = useState<FaceProfileSource[]>([]);
   const confirmPanelRef = useRef<HTMLDivElement>(null);
   const resetTimerRef = useRef<number | null>(null);
+
+  async function confirmKioskExit(method: "google" | "password") {
+    setExitLoading(true);
+    setExitError("");
+    const errorMessage = await onExit(method, exitPassword);
+    setExitLoading(false);
+    if (errorMessage) {
+      setExitError(errorMessage);
+      return;
+    }
+
+    setExitPassword("");
+    setExitDialogOpen(false);
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -5083,11 +5415,9 @@ function KioskScreen({
 
   function speakPunchConfirmation(type: string, name: string) {
     const firstName = voiceName(name);
-    const message = type === "Saída 1"
-      ? `Ponto registrado, ${firstName}. Intervalo.`
-      : type === "Saída 2"
-        ? `Ponto registrado, ${firstName}. Jornada encerrada.`
-        : `Ponto registrado, ${firstName}.`;
+    const message = type === "Saída 2"
+      ? `Ponto registrado, ${firstName}. Jornada encerrada.`
+      : `Ponto registrado, ${firstName}.`;
     speak(message);
   }
 
@@ -5150,7 +5480,7 @@ function KioskScreen({
       return;
     }
 
-    const timing = getPunchTiming(recognizedEmployee, selectedPunch);
+    const timing = getPunchTiming(recognizedEmployee, selectedPunch, bankHoursEnabled);
     if (!timingWarning && timing.outsideTolerance) {
       const warning = {
         currentTime: timing.currentTime,
@@ -5188,12 +5518,13 @@ function KioskScreen({
     }, 1800);
   }
 
-  const punchOptions = [
-    { description: "Início da jornada", icon: "👋", label: "Entrada 1", value: "Entrada 1" },
-    { description: "Início do intervalo", icon: "🍽️", label: "Saída 1", value: "Saída 1" },
-    { description: "Retorno ao trabalho", icon: "↩️", label: "Entrada 2", value: "Entrada 2" },
-    { description: "Fim da jornada", icon: "🏠", label: "Saída 2", value: "Saída 2" },
-  ];
+  const configuredPunchOrder = scheduledPunchOrder.slice(0, getSchedulePeriods(recognizedEmployee?.schedule).length * 2);
+  const punchOptions = configuredPunchOrder.map((value, index) => ({
+    description: value.startsWith("Entrada") ? `Início do período ${Math.floor(index / 2) + 1}` : `Fim do período ${Math.floor(index / 2) + 1}`,
+    icon: value.startsWith("Entrada") ? "◉" : "✓",
+    label: value,
+    value,
+  }));
   const selectedPresentation =
     punchOptions.find((option) => option.value === selectedPunch) || punchOptions[0];
   const manualSelection = recognizedEmployee?.punchMode === "manual";
@@ -5242,7 +5573,17 @@ function KioskScreen({
               <span>Reconhecimento automático</span>
             </div>
           </div>
-          <button className="kiosk-exit-button" onClick={onExit} type="button">Sair</button>
+          <button
+            className="kiosk-exit-button"
+            onClick={() => {
+              setExitError("");
+              setExitPassword("");
+              setExitDialogOpen(true);
+            }}
+            type="button"
+          >
+            Sair
+          </button>
         </div>
       </header>
 
@@ -5451,10 +5792,15 @@ function KioskScreen({
                   try {
                     setSequenceLoading(true);
                     const verified = await verifyEmployeePin(companyId, pin.trim());
-                    nextPunch = await resolveNextPunch(verified.employeeId, companyId);
+                    const savedEmployees = await listEmployees(companyId);
+                    const registered = savedEmployees.find((employee) => employee.id === verified.employeeId);
+                    const employeeSchedule = registered
+                      ? toLocalEmployee(registered as unknown as Record<string, unknown>, registered.id).schedule
+                      : undefined;
+                    nextPunch = await resolveNextPunch(verified.employeeId, companyId, employeeSchedule);
                     setSequenceLoading(false);
                     if (!nextPunch) {
-                      setBlockingMessage("As quatro marcações de hoje já foram registradas.");
+                      setBlockingMessage("Todas as marcações previstas para hoje já foram registradas.");
                       speak("A jornada de hoje já foi encerrada.");
                       return;
                     }
@@ -5518,6 +5864,65 @@ function KioskScreen({
           </div>
         </aside>
       </div>
+      {exitDialogOpen && (
+        <div className="kiosk-exit-backdrop" role="presentation">
+          <section aria-labelledby="kiosk-exit-title" aria-modal="true" className="kiosk-exit-dialog" role="dialog">
+            <p className="kiosk-card-label">Acesso do responsável</p>
+            <h2 id="kiosk-exit-title">Sair da sala de ponto</h2>
+            <p>Confirme a conta administrativa para voltar ao painel. Os funcionários não conseguem encerrar o modo quiosque sem essa confirmação.</p>
+
+            {canExitWithPassword && (
+              <form
+                className="kiosk-exit-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void confirmKioskExit("password");
+                }}
+              >
+                <label htmlFor="kiosk-exit-password">Senha da conta responsável</label>
+                <input
+                  autoComplete="current-password"
+                  autoFocus
+                  disabled={exitLoading}
+                  id="kiosk-exit-password"
+                  onChange={(event) => setExitPassword(event.target.value)}
+                  placeholder="Digite a senha"
+                  type="password"
+                  value={exitPassword}
+                />
+                <button className="primary-button" disabled={exitLoading || !exitPassword.trim()} type="submit">
+                  {exitLoading ? "Confirmando..." : "Confirmar com senha"}
+                </button>
+              </form>
+            )}
+
+            {canExitWithGoogle && (
+              <button
+                className="secondary-button kiosk-google-exit"
+                disabled={exitLoading}
+                onClick={() => void confirmKioskExit("google")}
+                type="button"
+              >
+                {exitLoading ? "Confirmando..." : "Confirmar com Google"}
+              </button>
+            )}
+
+            {!canExitWithPassword && !canExitWithGoogle && (
+              <p className="kiosk-exit-warning">Esta conta não possui um método de confirmação compatível. Entre novamente com Google ou e-mail e senha.</p>
+            )}
+
+            {exitError && <p aria-live="assertive" className="kiosk-exit-error">{exitError}</p>}
+            <button
+              className="kiosk-exit-cancel"
+              disabled={exitLoading}
+              onClick={() => setExitDialogOpen(false)}
+              type="button"
+            >
+              Continuar na sala de ponto
+            </button>
+          </section>
+        </div>
+      )}
     </section>
   );
 }
@@ -5539,6 +5944,8 @@ function HoursBankScreen({ canEdit, company, onAction }: { canEdit: boolean; com
   const [reason, setReason] = useState("");
   const [responsibleName, setResponsibleName] = useState("");
   const [loading, setLoading] = useState(true);
+  const adjustmentPanelRef = useRef<HTMLDivElement | null>(null);
+  const adjustmentEmployeeRef = useRef<HTMLSelectElement | null>(null);
 
   async function loadData() {
     try {
@@ -5584,7 +5991,9 @@ function HoursBankScreen({ canEdit, company, onAction }: { canEdit: boolean; com
   const period = getMonthPeriod(selectedYear, selectedMonth);
   const summaries = useMemo(
     () => {
-      const selectedPeriod = getMonthPeriod(selectedYear, selectedMonth);
+      const summaryYear = Number(year) || new Date().getFullYear();
+      const summaryMonth = Number(month) || new Date().getMonth() + 1;
+      const selectedPeriod = getMonthPeriod(summaryYear, summaryMonth);
       const workPolicy = getCompanyWorkPolicy(company);
       return employeesList.map((employee) => buildMonthlyMirrorSummary(
         employee,
@@ -5595,7 +6004,7 @@ function HoursBankScreen({ canEdit, company, onAction }: { canEdit: boolean; com
         bankAdjustments,
       ));
     },
-    [attendanceJustifications, bankAdjustments, company, employeesList, punches, selectedMonth, selectedYear],
+    [attendanceJustifications, bankAdjustments, company, employeesList, month, punches, year],
   );
   const pendingAdjustments = bankAdjustments.filter((adjustment) => adjustment.status === "pending");
   const historicAdjustments = bankAdjustments
@@ -5649,6 +6058,15 @@ function HoursBankScreen({ canEdit, company, onAction }: { canEdit: boolean; com
 
   function employeeName(employeeId: string) {
     return employeesList.find((employee) => employee.employeeId === employeeId)?.name || "Colaborador não encontrado";
+  }
+
+  function prepareAdjustment(employeeId: string) {
+    setSelectedEmployeeId(employeeId);
+    onAction(`Ajuste preparado para ${employeeName(employeeId)}. Confira os campos antes de registrar.`);
+    window.setTimeout(() => {
+      adjustmentPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      adjustmentEmployeeRef.current?.focus();
+    }, 0);
   }
 
   function balanceTone(minutes: number) {
@@ -5716,7 +6134,7 @@ function HoursBankScreen({ canEdit, company, onAction }: { canEdit: boolean; com
                     <td className="px-3 py-3 font-semibold text-[#0d7a58]">{formatDurationClock(Math.max(balance, 0))}</td>
                     <td className="px-3 py-3 font-semibold">{formatDurationClock(balance)}</td>
                     <td className="px-3 py-3"><span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${balanceTone(balance)}`}>{balance > 0 ? "Positivo" : balance < 0 ? "Negativo" : "Zerado"}</span></td>
-                    <td className="px-3 py-3">{canEdit ? <button className="secondary-button px-3 py-2 text-xs" onClick={() => setSelectedEmployeeId(summary.employee.employeeId)} type="button">Ajustar</button> : <span className="text-xs text-[#667085]">Somente consulta</span>}</td>
+                    <td className="px-3 py-3">{canEdit ? <button className="secondary-button px-3 py-2 text-xs" onClick={() => prepareAdjustment(summary.employee.employeeId)} type="button">Ajustar</button> : <span className="text-xs text-[#667085]">Somente consulta</span>}</td>
                   </tr>
                 );
               })}
@@ -5726,10 +6144,11 @@ function HoursBankScreen({ canEdit, company, onAction }: { canEdit: boolean; com
       </Panel>
 
       {canEdit && (
-        <Panel title="Ajuste manual do banco" subtitle="Adicione ou desconte horas somente com motivo e responsável">
+        <div className="scroll-mt-6" ref={adjustmentPanelRef}>
+          <Panel title="Ajuste manual do banco" subtitle="Adicione ou desconte horas somente com motivo e responsável">
           <div className="grid gap-3 md:grid-cols-4">
             <Field label="Colaborador">
-              <select className="input" disabled={loading} onChange={(event) => setSelectedEmployeeId(event.target.value)} value={selectedEmployeeId}>
+              <select className="input" disabled={loading} onChange={(event) => setSelectedEmployeeId(event.target.value)} ref={adjustmentEmployeeRef} value={selectedEmployeeId}>
                 {employeesList.map((employee) => <option key={employee.employeeId} value={employee.employeeId}>{employee.name}</option>)}
               </select>
             </Field>
@@ -5761,7 +6180,8 @@ function HoursBankScreen({ canEdit, company, onAction }: { canEdit: boolean; com
             <SaveButton disabled={loading || !employeesList.length} onClick={saveBankAdjustment}>Registrar ajuste</SaveButton>
           </ActionRow>
           <p className="mt-3 text-xs leading-5 text-[#667085]">O lançamento fica pendente. Depois da aprovação, ele entra no saldo do funcionário e no histórico de auditoria. A batida original nunca é alterada.</p>
-        </Panel>
+          </Panel>
+        </div>
       )}
 
       <Panel title="Ajustes do banco" subtitle="Pendentes e lançamentos já analisados">
@@ -6387,36 +6807,140 @@ function ReportsScreen({ company, onAction }: { company: MainCompanyProfile | nu
   const monthStart = `${today.slice(0, 8)}01`;
   const [startDate, setStartDate] = useState(monthStart);
   const [endDate, setEndDate] = useState(today);
+  const [employeesList, setEmployeesList] = useState<LocalEmployee[]>([]);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("all");
+  const [reportType, setReportType] = useState<"bank" | "journey" | "mirror">("journey");
+  const [reportPunches, setReportPunches] = useState<Punch[]>([]);
+  const [reportLoading, setReportLoading] = useState(true);
+  const [reportError, setReportError] = useState("");
   const [exporting, setExporting] = useState(false);
 
-  async function exportFiscalPdf() {
+  useEffect(() => {
+    let mounted = true;
+    listEmployees(companyId)
+      .then((saved) => {
+        if (!mounted) return;
+        setEmployeesList(saved
+          .map((employee) => toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id))
+          .filter((employee) => employee.active !== false));
+      })
+      .catch((error) => {
+        console.error(error);
+        if (mounted) setReportError("Não foi possível carregar os colaboradores desta empresa.");
+      })
+      .finally(() => {
+        if (mounted) setReportLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [companyId]);
+
+  async function loadReportData() {
+    if (!startDate || !endDate || startDate > endDate) {
+      setReportError("Informe um período válido.");
+      return [] as Punch[];
+    }
+
+    const selectedIds = selectedEmployeeId === "all"
+      ? employeesList.map((employee) => employee.employeeId)
+      : [selectedEmployeeId];
+    if (!selectedIds.length) {
+      setReportPunches([]);
+      setReportError("Cadastre um colaborador antes de gerar o relatório.");
+      return [] as Punch[];
+    }
+
+    setReportLoading(true);
+    setReportError("");
+    try {
+      const loaded = await listEmployeePunchesByIds(companyId, selectedIds);
+      const start = new Date(`${startDate}T00:00:00`).getTime();
+      const end = new Date(`${endDate}T23:59:59.999`).getTime();
+      const filtered = loaded
+        .filter((punch) => {
+          const occurredAt = punchDate(punch).getTime();
+          return occurredAt >= start && occurredAt <= end;
+        })
+        .sort((first, second) => punchDate(first).getTime() - punchDate(second).getTime());
+      setReportPunches(filtered);
+      return filtered;
+    } catch (error) {
+      console.error(error);
+      setReportPunches([]);
+      setReportError("Não foi possível carregar as batidas do período.");
+      return [] as Punch[];
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!employeesList.length) return;
+    const timer = window.setTimeout(() => void loadReportData(), 0);
+    // A prévia acompanha os filtros atuais; a função mantém a validação em um único ponto.
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeesList, endDate, selectedEmployeeId, startDate]);
+
+  function employeeName(employeeId: string) {
+    return employeesList.find((employee) => employee.employeeId === employeeId)?.name || "Colaborador não encontrado";
+  }
+
+  function reportRows(punches: Punch[]) {
+    const sourceLabels: Record<Punch["source"], string> = {
+      external_face_id: "Ponto externo - Face ID",
+      external_pin_photo: "Ponto externo - PIN + foto",
+      face_id: "Sala de ponto - Face ID",
+      manager: "Ajuste do responsável",
+      pin_photo: "Sala de ponto - PIN + foto",
+    };
+    return [
+      ["Colaborador", "Data e hora", "Marcação", "Situação", "Origem"],
+      ...punches.map((punch) => [
+        employeeName(punch.employeeId),
+        formatPunchDateTime(punch),
+        punch.scheduledPunch || formatPunchType(punch.type),
+        formatPunchStatus(punch.status),
+        sourceLabels[punch.source],
+      ]),
+    ];
+  }
+
+  async function exportReportPdf() {
     const printWindow = window.open("", "_blank", "width=1100,height=800");
     if (!printWindow) {
       onAction("O navegador bloqueou a janela do PDF. Permita pop-ups para este site e tente novamente.");
       return;
     }
 
-    printWindow.document.write("<p style=\"font-family:Arial,sans-serif;padding:24px\">Gerando o relatório fiscal...</p>");
+    printWindow.document.write("<p style=\"font-family:Arial,sans-serif;padding:24px\">Gerando o relatório de jornada...</p>");
     printWindow.document.close();
     setExporting(true);
     try {
-      const exported = await generateRepExports(companyId, startDate, endDate);
+      const punches = await loadReportData();
+      const selectedEmployee = selectedEmployeeId === "all" ? "Todos os colaboradores" : employeeName(selectedEmployeeId);
+      const reportTitles = {
+        bank: "Relatório de banco de horas",
+        journey: "Relatório de jornada detalhada",
+        mirror: "Espelho de ponto",
+      };
       openPrintableDataReport({
         company,
         fields: {
           "Período": `${startDate} a ${endDate}`,
-          "Situação": exported.officialReady ? "Configuração fiscal completa" : "Prévia para conferência",
-          "Assinatura": exported.signatureStatus === "missing_icp_brasil" ? "Pendente - ICP-Brasil" : exported.signatureStatus,
-          "Pendências": exported.missingFields.join(", ") || "Nenhuma",
+          "Colaborador": selectedEmployee,
+          "Registros encontrados": String(punches.length),
         },
         printWindow,
-        title: "Relatório fiscal e arquivos técnicos",
+        rows: reportRows(punches),
+        title: reportTitles[reportType],
       });
-      onAction("PDF fiscal aberto. AFD e AEJ continuam disponíveis separadamente para uso técnico.");
+      onAction("Relatório aberto para impressão ou salvamento em PDF.");
     } catch (error) {
       console.error(error);
       printWindow.close();
-      onAction("Não foi possível gerar o PDF fiscal. Confira o período e as permissões.");
+      onAction("Não foi possível gerar o PDF. Confira o período e as permissões.");
     } finally {
       setExporting(false);
     }
@@ -6452,37 +6976,130 @@ function ReportsScreen({ company, onAction }: { company: MainCompanyProfile | nu
       <Panel title="Gerar relatorio" subtitle="Espelho de ponto e jornada detalhada">
         <div className="grid gap-3 md:grid-cols-4">
           <Field label="Colaborador">
-            <select className="input">
-              <option>Nenhum colaborador cadastrado</option>
+            <select className="input" onChange={(event) => setSelectedEmployeeId(event.target.value)} value={selectedEmployeeId}>
+              <option value="all">Todos os colaboradores</option>
+              {employeesList.map((employee) => <option key={employee.employeeId} value={employee.employeeId}>{employee.name}</option>)}
             </select>
           </Field>
           <Field label="Inicio"><input className="input" onChange={(event) => setStartDate(event.target.value)} type="date" value={startDate} /></Field>
           <Field label="Fim"><input className="input" onChange={(event) => setEndDate(event.target.value)} type="date" value={endDate} /></Field>
-          <Field label="Tipo"><select className="input"><option>Jornada detalhada</option><option>Espelho de ponto</option><option>Banco de horas</option></select></Field>
+          <Field label="Tipo">
+            <select className="input" onChange={(event) => setReportType(event.target.value as typeof reportType)} value={reportType}>
+              <option value="journey">Jornada detalhada</option>
+              <option value="mirror">Espelho de ponto</option>
+              <option value="bank">Banco de horas</option>
+            </select>
+          </Field>
         </div>
         <ActionRow>
-          <button className="primary-button" disabled={exporting} onClick={() => void exportFiscalPdf()} type="button">{exporting ? "Gerando PDF..." : "Gerar PDF para contador"}</button>
+          <button className="primary-button" disabled={exporting || reportLoading || !employeesList.length} onClick={() => void exportReportPdf()} type="button">{exporting ? "Gerando PDF..." : "Gerar PDF para contador"}</button>
           <button className="secondary-button" disabled={exporting} onClick={() => void exportFiscalFiles()} type="button">
             {exporting ? "Gerando..." : "Baixar AFD + AEJ técnicos"}
           </button>
         </ActionRow>
+        {reportError && <p className="mt-3 rounded-md border border-[#fecaca] bg-[#fff1f2] p-3 text-sm font-semibold text-[#a62929]">{reportError}</p>}
         <p className="mt-3 text-xs leading-5 text-[#667085]">O PDF é o documento de conferência para o escritório contábil. AFD e AEJ permanecem em arquivo técnico próprio, porque sistemas oficiais exigem o formato estruturado original.</p>
       </Panel>
-      <ReportPreview />
+      <ReportPreview
+        employees={employeesList}
+        endDate={endDate}
+        loading={reportLoading}
+        punches={reportPunches}
+        selectedEmployeeId={selectedEmployeeId}
+        startDate={startDate}
+      />
     </>
   );
 }
 
-function AuditScreen({ onAction }: { onAction: (action: string) => void }) {
+function openBiometricConsentTerm({
+  company,
+  employee,
+  retentionPeriod,
+}: {
+  company: MainCompanyProfile | null;
+  employee: LocalEmployee;
+  retentionPeriod: string;
+}) {
+  const printWindow = window.open("", "_blank", "width=1000,height=800");
+  if (!printWindow) throw new Error("biometric-consent-popup-blocked");
+
+  const companyName = String(company?.legalName || company?.tradeName || "Empresa");
+  const cnpj = String(company?.cnpj || "Não informado");
+  const identifier = employee.registration ? `Matrícula: ${employee.registration}` : "";
+  const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Termo de biometria facial - ${escapeHtml(employee.name)}</title>
+    <style>
+      @page{size:A4;margin:16mm}*{box-sizing:border-box}body{margin:0;color:#142235;font:12px/1.55 Arial,sans-serif;background:#eef2f5}.toolbar{position:sticky;top:0;display:flex;justify-content:flex-end;padding:12px;background:#0b1722;gap:8px}.toolbar button{border:0;border-radius:6px;padding:10px 14px;font-weight:700;cursor:pointer}.print{background:#087f69;color:#fff}.close{background:#fff;color:#142235}main{width:210mm;min-height:270mm;margin:14px auto;padding:14mm;background:#fff}header{border-bottom:2px solid #087f69;padding-bottom:12px}h1{font-size:20px;line-height:1.25;margin:4px 0 8px}.eyebrow{font-size:9px;font-weight:800;letter-spacing:.14em;color:#087f69;text-transform:uppercase}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}.meta div{border:1px solid #d9e0e7;border-radius:5px;padding:8px}.meta strong{display:block;font-size:9px;color:#64748b;text-transform:uppercase}.meta span{display:block;margin-top:3px;font-weight:700}.section{margin-top:14px}.section h2{font-size:12px;margin:0 0 5px}.section p{margin:4px 0}.choice{border:1px solid #cbd5e1;border-radius:5px;padding:10px;margin-top:8px}.signature{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:48px;text-align:center}.line{border-top:1px solid #142235;padding-top:6px}.notice{margin-top:18px;border:1px solid #ead6a8;background:#fff9e9;border-radius:5px;padding:9px;font-size:10px;color:#6f4c0a}.footer{margin-top:16px;color:#64748b;font-size:9px}@media print{body{background:#fff}.toolbar{display:none}main{width:auto;min-height:auto;margin:0;padding:0}}
+    </style></head><body><div class="toolbar"><button class="close" onclick="window.close()">Fechar</button><button class="print" onclick="window.print()">Imprimir / salvar PDF</button></div><main>
+      <header><p class="eyebrow">Orquestracs Face ID · Proteção de dados</p><h1>Termo de informação e manifestação sobre biometria facial</h1><p>Controle de jornada e autenticação de marcações de ponto</p></header>
+      <div class="meta"><div><strong>Empresa controladora</strong><span>${escapeHtml(companyName)}</span></div><div><strong>CNPJ</strong><span>${escapeHtml(cnpj)}</span></div><div><strong>Colaborador(a)</strong><span>${escapeHtml(employee.name)}</span></div><div><strong>Identificação</strong><span>${escapeHtml(identifier || employee.employeeId)}</span></div></div>
+      <section class="section"><h2>1. Finalidade e dados tratados</h2><p>A empresa informa que poderá tratar uma imagem facial e características biométricas dela derivadas para identificar e autenticar este(a) colaborador(a) no registro de jornada. A finalidade é restrita ao controle de ponto. A imagem e a biometria não devem ser usadas para publicidade, avaliação de desempenho ou finalidade incompatível.</p></section>
+      <section class="section"><h2>2. Armazenamento, acesso e prazo</h2><p>Os dados serão mantidos em ambiente digital com acesso restrito às pessoas autorizadas e aos prestadores de infraestrutura necessários à operação do sistema, observadas as medidas de segurança e as instruções da empresa.</p><p><strong>Prazo informado pela empresa:</strong> ${escapeHtml(retentionPeriod)}. Ao fim da finalidade, os dados serão eliminados ou anonimizados, ressalvadas hipóteses legais de conservação.</p></section>
+      <section class="section"><h2>3. Alternativa e direitos</h2><p>Há alternativa de registro por PIN + foto na sala de ponto. O(a) titular pode solicitar informações, acesso, correção e demais direitos aplicáveis, inclusive revogação quando o tratamento estiver baseado em consentimento, pelo canal de privacidade indicado pela empresa: <strong>${escapeHtml(String(company?.contactEmail || "________________________________________"))}</strong>.</p></section>
+      <section class="section"><h2>4. Manifestação do(a) titular</h2><p>Declaro que recebi informações sobre a finalidade, os dados tratados, o prazo e o canal para exercício dos meus direitos. A manifestação abaixo é específica para o uso de biometria facial descrito neste documento.</p><div class="choice">☐ <strong>Autorizo</strong> o tratamento da minha biometria facial para a finalidade de identificação e autenticação de marcações de ponto descrita acima.</div><div class="choice">☐ <strong>Não autorizo</strong> o uso da biometria facial e solicito orientação sobre o método alternativo disponibilizado pela empresa.</div></section>
+      <div class="signature"><div class="line">Assinatura do(a) colaborador(a)</div><div class="line">Responsável pela empresa</div></div><p style="margin-top:18px">Local e data: ______________________________________________</p>
+      <div class="notice"><strong>Importante:</strong> este modelo documenta informação e manifestação do titular, mas não define por si só a base legal adequada nem garante conformidade. A empresa deve validar o texto, a base legal, a retenção e a alternativa com sua assessoria jurídica ou encarregado de dados antes de coletar assinaturas.</div>
+      <p class="footer">Documento individual para assinatura física. A geração deste arquivo não registra assinatura nem altera o cadastro biométrico do colaborador.</p>
+    </main></body></html>`;
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.setTimeout(() => printWindow.print(), 350);
+}
+
+function AuditScreen({ company, onAction }: { company: MainCompanyProfile | null; onAction: (action: string) => void }) {
+  const companyId = useActiveCompanyId();
+  const [employees, setEmployees] = useState<LocalEmployee[]>([]);
+  const [employeeId, setEmployeeId] = useState("");
+  const [retentionPeriod, setRetentionPeriod] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    void listEmployees(companyId).then((saved) => {
+      if (!mounted) return;
+      const mapped = saved.map((employee) => toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id));
+      setEmployees(mapped);
+      setEmployeeId((current) => current || mapped[0]?.employeeId || "");
+    }).catch((error) => console.error("Falha ao carregar colaboradores para o termo biométrico.", error));
+    return () => { mounted = false; };
+  }, [companyId]);
+
+  const selectedEmployee = employees.find((employee) => employee.employeeId === employeeId);
+
+  function generateConsentTerm() {
+    if (!selectedEmployee || !retentionPeriod.trim()) {
+      onAction("Selecione o colaborador e informe o prazo de retenção definido pela empresa.");
+      return;
+    }
+    try {
+      openBiometricConsentTerm({ company, employee: selectedEmployee, retentionPeriod: retentionPeriod.trim() });
+      onAction("Termo individual aberto para imprimir ou salvar em PDF. A assinatura deve ser coletada fisicamente.");
+    } catch {
+      onAction("O navegador bloqueou a janela do termo. Permita pop-ups para este endereço e tente novamente.");
+    }
+  }
+
   return (
     <TwoColumn>
       <ComplianceCard />
       <Panel title="LGPD e consentimento" subtitle="Cuidados antes da biometria real">
-        <CheckList items={["Consentimento destacado", "Base legal revisada", "Alternativa em caso de falha facial", "Retencao e descarte configuraveis", "Direitos do titular documentados"]} />
+        <CheckList items={["Informação específica sobre biometria facial", "Base legal e texto ainda exigem validação jurídica", "Alternativa disponível: PIN + foto", "Prazo de retenção informado pela empresa", "Canal para solicitações do titular"]} />
+        <div className="mt-4 grid gap-3">
+          <Field label="Colaborador do termo">
+            <select className="input" onChange={(event) => setEmployeeId(event.target.value)} value={employeeId}>
+              {employees.length ? employees.map((employee) => <option key={employee.employeeId} value={employee.employeeId}>{employee.name}</option>) : <option value="">Nenhum colaborador cadastrado</option>}
+            </select>
+          </Field>
+          <Field label="Prazo de retenção informado pela empresa">
+            <input className="input" onChange={(event) => setRetentionPeriod(event.target.value)} placeholder="Ex.: enquanto durar a finalidade, conforme política validada" value={retentionPeriod} />
+          </Field>
+        </div>
         <ActionRow>
-          <button className="primary-button" onClick={() => onAction("Termo LGPD")} type="button">Gerar termo</button>
+          <button className="primary-button" disabled={!selectedEmployee} onClick={generateConsentTerm} type="button">Gerar termo do colaborador</button>
           <button className="secondary-button" onClick={() => onAction("Relatorio de impacto")} type="button">Relatorio de impacto</button>
         </ActionRow>
+        <p className="mt-3 text-xs leading-5 text-[#64748b]">O termo abre para impressão ou salvamento em PDF. A assinatura não é registrada no sistema; valide o conteúdo jurídico antes de usar.</p>
       </Panel>
     </TwoColumn>
   );
@@ -6922,15 +7539,6 @@ function AssistantPanel({
       ],
       questions: ["Quando usar jornada individual?", "Como cadastrar Face ID?", "Para que serve o PIN?"],
     },
-    Escalas: {
-      title: "Jornadas e turnos",
-      steps: [
-        "Crie ou edite a jornada coletiva da empresa.",
-        "Defina entrada, saida almoco, volta almoco e fim do dia.",
-        "Configure tolerancia e percentual de hora extra.",
-      ],
-      questions: ["Como editar turno?", "Como funciona tolerancia?", "Qual regra vale para feriado?"],
-    },
     "Sala de ponto": {
       title: "Tablet da sala de ponto",
       steps: [
@@ -7319,42 +7927,108 @@ function EmployeesTable({
   );
 }
 
-function ReportPreview() {
-  const journeyLabels = ["Data", "Dia", "Entrada", "Saída intervalo", "Retorno", "Saída final", "Trabalhadas", "Banco/Falta", "Ocorrência"];
+function ReportPreview({
+  employees,
+  endDate,
+  loading,
+  punches,
+  selectedEmployeeId,
+  startDate,
+}: {
+  employees: LocalEmployee[];
+  endDate: string;
+  loading: boolean;
+  punches: Punch[];
+  selectedEmployeeId: string;
+  startDate: string;
+}) {
+  const reportEmployees = selectedEmployeeId === "all"
+    ? employees
+    : employees.filter((employee) => employee.employeeId === selectedEmployeeId);
+  const reportPeriodCount = Math.max(2, ...reportEmployees.map((employee) => getSchedulePeriods(employee.schedule).length));
+  const reportStages = scheduledPunchOrder.slice(0, reportPeriodCount * 2);
+  const journeyLabels = ["Data", "Dia", ...reportStages, "Trabalhadas", "Banco/Falta", "Ocorrência"];
+  const selectedEmployeeName = selectedEmployeeId === "all"
+    ? "Todos os colaboradores"
+    : employees.find((employee) => employee.employeeId === selectedEmployeeId)?.name || "Colaborador não encontrado";
+  const employeeNames = useMemo(
+    () => new Map(employees.map((employee) => [employee.employeeId, employee.name])),
+    [employees],
+  );
+  const localDateKey = (date: Date) => [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+  const journeyRows = useMemo(() => {
+    const grouped = new Map<string, Punch[]>();
+    punches.forEach((punch) => {
+      const dateKey = localDateKey(punchDate(punch));
+      const key = `${punch.employeeId}|${dateKey}`;
+      grouped.set(key, [...(grouped.get(key) || []), punch]);
+    });
+
+    return [...grouped.entries()]
+      .sort(([first], [second]) => first.localeCompare(second))
+      .map(([key, dayPunches]) => {
+        const [employeeId, dateKey] = key.split("|");
+        const date = new Date(`${dateKey}T12:00:00`);
+        const ordered = dayPunches.sort((first, second) => punchDate(first).getTime() - punchDate(second).getTime());
+        const employee = employees.find((item) => item.employeeId === employeeId);
+        const periods = getSchedulePeriods(employee?.schedule);
+        const matchedStages = reportStages.map((stage) => ordered.find((punch) =>
+          scheduledStageForPunch(punch, employee?.schedule || { start: "07:00", breakStart: "11:30", breakEnd: "13:00", end: "17:15", toleranceMinutes: 10 }) === stage,
+        ));
+        const workedMinutes = periods.reduce((total, _period, index) => {
+          const entry = matchedStages[index * 2];
+          const exit = matchedStages[index * 2 + 1];
+          return total + (entry && exit
+            ? Math.max(0, Math.round((punchDate(exit).getTime() - punchDate(entry).getTime()) / 60000))
+            : 0);
+        }, 0);
+        const workedLabel = workedMinutes ? `${String(Math.floor(workedMinutes / 60)).padStart(2, "0")}:${String(workedMinutes % 60).padStart(2, "0")}` : "--";
+        const statuses = [...new Set(ordered.map((punch) => formatPunchStatus(punch.status)))];
+        const bankOrMissing = ordered.some((punch) => punch.status === "bank_hours")
+          ? "Hora extra"
+          : matchedStages.filter(Boolean).length < periods.length * 2
+            ? `${periods.length * 2 - matchedStages.filter(Boolean).length} pendente(s)`
+            : "Regular";
+        return [
+          date.toLocaleDateString("pt-BR"),
+          `${employeeNames.get(employeeId) || "Colaborador"} · ${date.toLocaleDateString("pt-BR", { weekday: "short" })}`,
+          ...matchedStages.map((punch) => punch ? formatPunchTime(punch) : "--"),
+          workedLabel,
+          bankOrMissing,
+          statuses.join(", ") || "Sem ocorrência",
+        ];
+      });
+  }, [employeeNames, employees, punches, reportStages]);
+  const attentionCount = punches.filter((punch) => punch.status !== "on_time").length;
+  const employeeCount = new Set(punches.map((punch) => punch.employeeId)).size;
+  const formatReportDate = (value: string) => value
+    ? new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR")
+    : "data não informada";
+  const displayPeriod = `${formatReportDate(startDate)} - ${formatReportDate(endDate)}`;
 
   return (
     <section className="app-table-shell min-w-0">
       <div className="grid gap-3 border-b border-[#e3e8ee] p-5 lg:grid-cols-[1fr_auto] lg:items-end">
         <div>
-          <p className="text-sm font-medium text-[#667085]">Relatorio de jornada detalhada</p>
-          <h2 className="mt-1 text-xl font-semibold text-[#101923]">Periodo 01/06/2026 - 30/06/2026</h2>
+          <p className="text-sm font-medium text-[#667085]">Relatório de jornada detalhada</p>
+          <h2 className="mt-1 text-xl font-semibold text-[#101923]">Período {displayPeriod}</h2>
         </div>
         <div className="grid gap-1 text-sm text-[#667085] lg:text-right">
-          <span>Colaborador: selecione um colaborador</span>
-          <span>Emitido por: usuario logado</span>
+          <span>Colaborador: {selectedEmployeeName}</span>
+          <span>{loading ? "Atualizando dados..." : `${punches.length} registro(s) encontrado(s)`}</span>
         </div>
       </div>
 
       <div className="grid gap-3 p-5 md:grid-cols-4">
         {[
-          ["Horas previstas", "00:00"],
-          ["Horas abonadas", "00:00"],
-          ["Faltantes", "00:00"],
-          ["Saldo final", "00:00"],
-        ].map(([label, value]) => (
-          <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
-            <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
-            <strong className="mt-2 block text-lg text-[#101923]">{value}</strong>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-3 px-5 pb-5 md:grid-cols-4">
-        {[
-          ["Faltas manha", "0"],
-          ["Faltas tarde", "0"],
-          ["Esquecimentos", "0"],
-          ["Trabalho externo", "0"],
+          ["Registros", String(punches.length)],
+          ["Jornadas", String(journeyRows.length)],
+          ["Colaboradores", String(employeeCount)],
+          ["Ocorrências", String(attentionCount)],
         ].map(([label, value]) => (
           <div className="rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3" key={label}>
             <p className="text-xs font-semibold uppercase text-[#667085]">{label}</p>
@@ -7367,7 +8041,7 @@ function ReportPreview() {
         <table className="w-full min-w-[840px] border-collapse text-left text-sm">
           <thead className="bg-[#101923] text-xs uppercase text-white">
             <tr>
-              {["Data", "Dia", "Entrada", "Saida", "Retorno", "Saida", "Trabalhadas", "Banco/Falta", "Ocorrencia"].map((head, index) => (
+              {journeyLabels.map((head, index) => (
                 <th className="px-3 py-3 font-semibold" key={`${head}-${index}`}>{head}</th>
               ))}
             </tr>
@@ -7375,7 +8049,7 @@ function ReportPreview() {
           <tbody>
             {journeyRows.length === 0 ? (
               <tr>
-                <td className="px-3 py-8 text-center text-[#667085]" colSpan={9}>
+                <td className="px-3 py-8 text-center text-[#667085]" colSpan={journeyLabels.length}>
                   Nenhuma jornada registrada para o periodo.
                 </td>
               </tr>
@@ -7583,6 +8257,14 @@ function TimeStepper({
 
 function mapPunchType(kind: string): PunchType {
   const normalized = kind.toLowerCase();
+  const scheduledStage = /^(entrada|sa[ií]da)\s+([1-4])$/i.exec(kind.trim());
+  if (scheduledStage) {
+    const [, direction, stageNumber] = scheduledStage;
+    if (direction.toLowerCase() === "entrada") {
+      return stageNumber === "2" ? "lunch_back" : "entry";
+    }
+    return stageNumber === "1" ? "lunch_out" : "exit";
+  }
   if (normalized.includes("intervalo") || normalized.includes("almoco") || normalized.includes("almoço")) return "lunch_out";
   if (normalized.includes("retorno") || normalized.includes("volta")) return "lunch_back";
   if (normalized.includes("saida") || normalized.includes("saída")) return "exit";
@@ -7629,8 +8311,8 @@ function formatPunchType(type: PunchType) {
   const labels: Record<PunchType, string> = {
     entry: "Entrada",
     exit: "Saida",
-    lunch_back: "Retorno",
-    lunch_out: "Intervalo",
+    lunch_back: "Entrada",
+    lunch_out: "Saida",
   };
   return labels[type];
 }
@@ -7713,9 +8395,10 @@ function workedPeriodMinutes(start?: Punch, end?: Punch) {
 }
 
 function expectedDailyMinutes(employee: LocalEmployee) {
-  const schedule = employee.schedule;
-  return Math.max(0, minutesFromTime(schedule.breakStart) - minutesFromTime(schedule.start))
-    + Math.max(0, minutesFromTime(schedule.end) - minutesFromTime(schedule.breakEnd));
+  return getSchedulePeriods(employee.schedule).reduce(
+    (total, period) => total + Math.max(0, minutesFromTime(period.end) - minutesFromTime(period.start)),
+    0,
+  );
 }
 
 function localDateKey(date: Date) {
@@ -7773,35 +8456,42 @@ function buildMonthlyMirrorSummary(
   for (let day = 1; day <= period.end.getDate(); day += 1) {
     const date = new Date(period.year, period.month - 1, day);
     const dayPunches = validPunches.filter((punch) => sameDay(punchDate(punch), date));
-    const punchesByType: Partial<Record<PunchType, Punch>> = {};
+    const periods = getSchedulePeriods(employee.schedule);
+    const scheduledPunches: Partial<Record<ScheduledPunch, Punch>> = {};
     dayPunches.forEach((punch) => {
-      punchesByType[punch.type] = punch;
+      const stage = scheduledStageForPunch(punch, employee.schedule);
+      if (stage) scheduledPunches[stage] = punch;
     });
+    const periodPunchCounts = periods.map((_, index) => [
+      scheduledPunches[`Entrada ${index + 1}` as ScheduledPunch],
+      scheduledPunches[`Saída ${index + 1}` as ScheduledPunch],
+    ].filter(Boolean).length);
 
     const isWorkday = date.getDay() !== 0 && date.getDay() <= scheduledWorkdays;
-    const morningPunches = [punchesByType.entry, punchesByType.lunch_out].filter(Boolean).length;
-    const afternoonPunches = [punchesByType.lunch_back, punchesByType.exit].filter(Boolean).length;
+    const morningPunches = periodPunchCounts[0] || 0;
+    const afternoonPunches = periodPunchCounts.slice(1).reduce((total, count) => total + count, 0);
     const justifiedMorning = hasApprovedAbsenceJustification(justifications, employee.employeeId, date, "morning");
     const justifiedAfternoon = hasApprovedAbsenceJustification(justifications, employee.employeeId, date, "afternoon");
     const rawMissingMorning = isWorkday && morningPunches === 0;
-    const rawMissingAfternoon = isWorkday && afternoonPunches === 0;
+    const rawMissingAfternoon = isWorkday && periods.length > 1 && afternoonPunches === 0;
     const missingMorning = rawMissingMorning && !justifiedMorning;
     const missingAfternoon = rawMissingAfternoon && !justifiedAfternoon;
     const incompleteMorning = isWorkday && morningPunches === 1 && !justifiedMorning;
-    const incompleteAfternoon = isWorkday && afternoonPunches === 1 && !justifiedAfternoon;
-    const workedMinutes =
-      workedPeriodMinutes(punchesByType.entry, punchesByType.lunch_out)
-      + workedPeriodMinutes(punchesByType.lunch_back, punchesByType.exit);
-    const lateMinutes =
-      (hasApprovedLateJustification(justifications, employee.employeeId, date, "morning")
-        ? 0
-        : positiveDifference(punchesByType.entry, employee.schedule.start, workPolicy.toleranceMinutes))
-      + (hasApprovedLateJustification(justifications, employee.employeeId, date, "afternoon")
-        ? 0
-        : positiveDifference(punchesByType.lunch_back, employee.schedule.breakEnd, workPolicy.toleranceMinutes));
-    const earlyLeaveMinutes =
-      earlyDifference(punchesByType.lunch_out, employee.schedule.breakStart, workPolicy.toleranceMinutes)
-      + earlyDifference(punchesByType.exit, employee.schedule.end, workPolicy.toleranceMinutes);
+    const incompleteAfternoon = isWorkday && periodPunchCounts.slice(1).some((count) => count === 1) && !justifiedAfternoon;
+    const workedMinutes = periods.reduce((total, _period, index) => total + workedPeriodMinutes(
+      scheduledPunches[`Entrada ${index + 1}` as ScheduledPunch],
+      scheduledPunches[`Saída ${index + 1}` as ScheduledPunch],
+    ), 0);
+    const lateMinutes = periods.reduce((total, period, index) => {
+      const justified = hasApprovedLateJustification(justifications, employee.employeeId, date, index === 0 ? "morning" : "afternoon");
+      const entryPunch = scheduledPunches[`Entrada ${index + 1}` as ScheduledPunch];
+      return total + (justified ? 0 : positiveDifference(entryPunch, period.start, workPolicy.toleranceMinutes));
+    }, 0);
+    const earlyLeaveMinutes = periods.reduce((total, period, index) => total + earlyDifference(
+      scheduledPunches[`Saída ${index + 1}` as ScheduledPunch],
+      period.end,
+      workPolicy.toleranceMinutes,
+    ), 0);
     const balanceMinutes = workPolicy.bankHoursEnabled
       ? isWorkday ? workedMinutes - expectedMinutes : workedMinutes
       : 0;
@@ -7837,7 +8527,7 @@ function buildMonthlyMirrorSummary(
       lateMinutes,
       missingAfternoon,
       missingMorning,
-      punches: punchesByType,
+      scheduledPunches,
       status,
       workedMinutes,
     });
@@ -7957,10 +8647,7 @@ function openPrintableMonthlyMirror({
         <thead>
           <tr>
             <th>Dia</th>
-            <th>Entrada</th>
-            <th>Saida almoco</th>
-            <th>Retorno</th>
-            <th>Saida</th>
+            ${getSchedulePeriods(summary.employee.schedule).map((_, index) => `<th>Entrada ${index + 1}</th><th>Saída ${index + 1}</th>`).join("")}
             <th>Trabalhadas</th>
             <th>Banco</th>
             <th>Status</th>
@@ -7970,10 +8657,7 @@ function openPrintableMonthlyMirror({
           ${summary.rows.map((row) => `
             <tr>
               <td>${escapeHtml(row.label)}</td>
-              <td>${escapeHtml(punchTime(row.punches.entry))}</td>
-              <td>${escapeHtml(punchTime(row.punches.lunch_out))}</td>
-              <td>${escapeHtml(punchTime(row.punches.lunch_back))}</td>
-              <td>${escapeHtml(punchTime(row.punches.exit))}</td>
+              ${getSchedulePeriods(summary.employee.schedule).map((_, index) => `<td>${escapeHtml(punchTime(row.scheduledPunches[`Entrada ${index + 1}` as ScheduledPunch]))}</td><td>${escapeHtml(punchTime(row.scheduledPunches[`Saída ${index + 1}` as ScheduledPunch]))}</td>`).join("")}
               <td>${escapeHtml(formatDurationClock(row.workedMinutes))}</td>
               <td>${escapeHtml(formatDurationClock(row.balanceMinutes))}</td>
               <td>${escapeHtml(row.status)}</td>

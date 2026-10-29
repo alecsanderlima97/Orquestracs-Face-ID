@@ -29,10 +29,14 @@ export async function uploadFacePhoto({
 
 export async function createFaceIdRecord(record: Omit<FaceIdRecord, "id">) {
   const callable = httpsCallable<
-    Omit<FaceIdRecord, "id"> & { consentVersion: string },
+    Omit<FaceIdRecord, "id"> & { consentAccepted: boolean; consentVersion: string },
     { faceId: string }
   >(functions, "registerFaceIdCapture");
-  const result = await callable({ ...record, consentVersion: "biometria-v1" });
+  const result = await callable({
+    ...record,
+    consentAccepted: true,
+    consentVersion: "biometria-v1",
+  });
   return { id: result.data.faceId };
 }
 
