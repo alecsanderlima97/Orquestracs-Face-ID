@@ -108,6 +108,7 @@ export function FaceCamera({
   const processingRef = useRef(false);
   const lastRecognitionDescriptorRef = useRef<Float32Array | null>(null);
   const faceAwayFramesRef = useRef(0);
+  const lastAutomaticMessageRef = useRef("");
 
   useEffect(() => {
     remoteProfilesRef.current = null;
@@ -136,6 +137,12 @@ export function FaceCamera({
   function updateMessage(value: string) {
     setMessage(value);
     onStatus?.(value);
+  }
+
+  function updateAutomaticMessage(value: string) {
+    if (lastAutomaticMessageRef.current === value) return;
+    lastAutomaticMessageRef.current = value;
+    updateMessage(value);
   }
 
   async function loadFaceApi() {
@@ -205,11 +212,11 @@ export function FaceCamera({
         const syncedProfiles = await loadRemoteProfiles(faceApi);
         updateMessage(
           syncedProfiles.length
-            ? `${syncedProfiles.length} referência(s) facial(is) sincronizada(s). Mantenha apenas um rosto centralizado.`
-            : "Nenhuma referência facial válida foi encontrada no cadastro da empresa.",
+            ? `${syncedProfiles.length} referência(s) facial(is) sincronizada(s). Reconhecimento ativo: fique em frente à câmera.`
+            : "Nenhuma referência facial válida foi sincronizada. Verifique o cadastro ou use PIN + foto.",
         );
       } else {
-        updateMessage("Câmera ativa. Cadastre os rostos dos colaboradores antes de reconhecer.");
+        updateMessage("Câmera ativa, mas nenhum perfil facial foi carregado. Confira empresa e cadastro; use PIN + foto enquanto isso.");
       }
     } catch (error) {
       console.error(error);
@@ -389,13 +396,16 @@ export function FaceCamera({
         ? [...getProfiles(), ...(await loadRemoteProfiles(faceApi))]
         : getProfiles();
       if (!profiles.length) {
-        if (!automatic) updateMessage("Nenhum rosto cadastrado foi sincronizado para este aparelho. Cadastre o Face ID dos colaboradores.");
+        const status = "Nenhum perfil facial sincronizado. Verifique o cadastro do Face ID ou use PIN + foto.";
+        if (automatic) updateAutomaticMessage(status);
+        else updateMessage(status);
         return;
       }
 
       const detection = await readDescriptor();
       if (!detection) {
         if (automatic) {
+          updateAutomaticMessage("Reconhecimento ativo. Aguardando um rosto em frente à câmera...");
           faceAwayFramesRef.current += 1;
           if (faceAwayFramesRef.current >= 2) {
             lastRecognitionDescriptorRef.current = null;
@@ -442,6 +452,7 @@ export function FaceCamera({
         const match = bestMatch as { distance: number; profile: StoredFaceProfile };
         lastRecognitionDescriptorRef.current = detection.descriptor;
         faceAwayFramesRef.current = 0;
+        lastAutomaticMessageRef.current = "";
         updateMessage(
           `${match.profile.name} reconhecido (similaridade técnica: ${Math.round((1 - match.distance) * 100)}%).`,
         );
@@ -454,12 +465,18 @@ export function FaceCamera({
           },
           await captureFrame(),
         );
-      } else if (!automatic) {
-        updateMessage("Rosto não reconhecido. Use o PIN ou tente novamente.");
+      } else {
+        const status = "Rosto detectado, mas não reconhecido. Ajuste a posição ou use PIN + foto.";
+        if (automatic) updateAutomaticMessage(status);
+        else updateMessage(status);
       }
     } catch (error) {
       console.error(error);
-      updateMessage("O cadastro facial local está inválido. Cadastre o rosto novamente.");
+      const status = automatic
+        ? "Falha ao carregar ou comparar os perfis faciais. Verifique a conexão ou use PIN + foto."
+        : "O cadastro facial está inválido. Cadastre o rosto novamente.";
+      if (automatic) updateAutomaticMessage(status);
+      else updateMessage(status);
     } finally {
       processingRef.current = false;
       setProcessing(false);

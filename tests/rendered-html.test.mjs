@@ -188,6 +188,10 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(camera, /fetchImage\(source\.photoUrl\)/);
   assert.match(camera, /profileSources\.slice\(index, index \+ 4\)\.map/);
   assert.match(camera, /remoteProfilesPromiseRef/);
+  assert.match(camera, /Reconhecimento ativo\. Aguardando um rosto em frente à câmera/);
+  assert.match(camera, /Rosto detectado, mas não reconhecido/);
+  assert.match(camera, /Nenhum perfil facial sincronizado/);
+  assert.match(camera, /Falha ao carregar ou comparar os perfis faciais/);
   assert.match(camera, /onProfileUpdated\?\.\(descriptors\.length, await captureFrame\(\)\)/);
   assert.match(camera, /não foi sincronizada com o sistema/);
   assert.match(page, /listFaceIdRecords\(companyId, employee\.employeeId\)/);
