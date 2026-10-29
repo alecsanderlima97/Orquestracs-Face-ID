@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -9,6 +10,7 @@ import { defineSecret } from "firebase-functions/params";
 initializeApp();
 
 const db = getFirestore();
+const storageBucket = getStorage().bucket();
 const pinPepper = defineSecret("PIN_PEPPER");
 const portalConnectorUrl = defineSecret("ORQUESTRA_PORTAL_CONNECTOR_URL");
 const portalConnectorSecret = defineSecret("ORQUESTRA_CONNECTOR_SHARED_SECRET");
@@ -943,10 +945,27 @@ export const listFaceIdSources = onCall(adminCallableOptions, async (request) =>
     if (!photoPaths.length && profilePhotoPath) photoPaths.push(profilePhotoPath);
     if (!photoPaths.length) continue;
 
+    const photoUrls = (await Promise.all(photoPaths.map(async (photoPath) => {
+      try {
+        const [exists] = await storageBucket.file(photoPath).exists();
+        if (!exists) return null;
+        const [url] = await storageBucket.file(photoPath).getSignedUrl({
+          action: "read",
+          expires: Date.now() + 10 * 60 * 1000,
+          version: "v4",
+        });
+        return url;
+      } catch (error) {
+        console.warn(`Não foi possível preparar a foto facial de ${employeeId}.`, error);
+        return null;
+      }
+    }))).filter(Boolean);
+    if (!photoUrls.length) continue;
+
     sources.push({
       employeeId,
       name: normalizedText(employee.name) || "Colaborador",
-      photoPaths,
+      photoUrls,
       punchMode: normalizedText(employee.punchMode) || "automatic",
       schedule: employee.schedule || undefined,
     });

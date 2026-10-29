@@ -204,8 +204,8 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(page, /if \(employee\.documentId\) return employee\.documentId/);
   assert.match(page, /employeeId: selectedEmployee\?\.employeeId \|\| crypto\.randomUUID\(\)/);
   assert.match(page, /listFaceIdSources\(companyId\)/);
-  assert.match(page, /employee\.photoPaths\.slice\(0, 3\)/);
-  assert.match(page, /getStorageFileUrl\(photoPath\)/);
+  assert.match(page, /employee\.photoUrls\.slice\(0, 3\)/);
+  assert.match(page, /photoUrl/);
   assert.match(camera, /O cadastro aparece como ativo, mas não há fotos faciais vinculadas/);
   assert.match(camera, /Não foi possível baixar as fotos faciais neste aparelho/);
   assert.match(camera, /As fotos chegaram, mas não foi possível identificar rostos nelas/);

@@ -5336,31 +5336,22 @@ function KioskScreen({
     async function loadFaceProfileSources() {
       try {
         const registered = await listFaceIdSources(companyId);
-        const sources = (await Promise.all(
-          registered.flatMap((employee) => employee.photoPaths.slice(0, 3).map(async (photoPath) => {
-            try {
-              const photoUrl = await getStorageFileUrl(photoPath);
-              return {
-                employeeId: employee.employeeId,
-                name: employee.name,
-                photoUrl,
-                punchMode: employee.punchMode || "automatic",
-                schedule: employee.schedule
-                  ? {
-                      breakEnd: employee.schedule.breakEnd || "13:00",
-                      breakStart: employee.schedule.breakStart || "11:30",
-                      end: employee.schedule.end || "17:15",
-                      periods: employee.schedule.periods,
-                      start: employee.schedule.start || "07:00",
-                      toleranceMinutes: employee.schedule.toleranceMinutes || 10,
-                    }
-                  : undefined,
-              } satisfies FaceProfileSource;
-            } catch {
-              return null;
-            }
-          })),
-        )).filter((source): source is NonNullable<typeof source> => Boolean(source));
+        const sources = registered.flatMap((employee) => employee.photoUrls.slice(0, 3).map((photoUrl) => ({
+          employeeId: employee.employeeId,
+          name: employee.name,
+          photoUrl,
+          punchMode: employee.punchMode || "automatic",
+          schedule: employee.schedule
+            ? {
+                breakEnd: employee.schedule.breakEnd || "13:00",
+                breakStart: employee.schedule.breakStart || "11:30",
+                end: employee.schedule.end || "17:15",
+                periods: employee.schedule.periods,
+                start: employee.schedule.start || "07:00",
+                toleranceMinutes: employee.schedule.toleranceMinutes || 10,
+              }
+            : undefined,
+        } satisfies FaceProfileSource)));
 
         if (mounted) setFaceProfileSources(sources);
       } catch (error) {

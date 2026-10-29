@@ -43,7 +43,7 @@ export async function createFaceIdRecord(record: Omit<FaceIdRecord, "id">) {
 export type FaceIdSource = {
   employeeId: string;
   name: string;
-  photoPaths: string[];
+  photoUrls: string[];
   punchMode?: "automatic" | "manual";
   schedule?: {
     breakEnd?: string;
