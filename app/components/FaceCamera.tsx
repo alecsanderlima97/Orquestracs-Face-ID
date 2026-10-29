@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { FACE_ID_REQUIRED_CAPTURES } from "@/lib/face-id/config";
 
 const FACE_PROFILES_KEY = "orquestracs-face-id-local-profiles";
 const REMOTE_FACE_CACHE_KEY = "orquestracs-face-id-remote-descriptors-v1";
 const MATCH_THRESHOLD = 0.5;
-const MAX_CAPTURES_PER_EMPLOYEE = 5;
 const AUTO_RECOGNITION_INTERVAL_MS = 500;
 
 type FaceApiModule = typeof import("@vladmandic/face-api");
@@ -351,7 +351,7 @@ export function FaceCamera({
       const descriptors = [
         ...(existing?.descriptors || []),
         Array.from(detection.descriptor),
-      ].slice(-MAX_CAPTURES_PER_EMPLOYEE);
+      ].slice(-FACE_ID_REQUIRED_CAPTURES);
       const profile: StoredFaceProfile = {
         ...employee,
         descriptors,
@@ -377,7 +377,7 @@ export function FaceCamera({
         return;
       }
       updateMessage(
-        `${employee.name}: captura ${descriptors.length}/${MAX_CAPTURES_PER_EMPLOYEE} salva neste aparelho.`,
+        `${employee.name}: captura ${descriptors.length}/${FACE_ID_REQUIRED_CAPTURES} sincronizada no Firebase.`,
       );
     } finally {
       setProcessing(false);

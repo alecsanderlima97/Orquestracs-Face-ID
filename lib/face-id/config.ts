@@ -1,0 +1,1 @@
+export const FACE_ID_REQUIRED_CAPTURES = 3;

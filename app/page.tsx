@@ -19,6 +19,7 @@ import {
 import { clearLocalFaceProfile, FaceCamera, type FaceProfileSource, type RecognizedFace } from "@/app/components/FaceCamera";
 import AdminCentral from "@/app/components/AdminCentral";
 import { auth } from "@/lib/firebase/client";
+import { FACE_ID_REQUIRED_CAPTURES } from "@/lib/face-id/config";
 import { getCompany, getMainCompany, saveMainCompany, saveTenantCompany, uploadCompanyLogo } from "@/lib/services/companies";
 import type {
   AttendanceJustification,
@@ -110,7 +111,9 @@ type EmployeeRow = {
   cbo?: string;
   cpf: string;
   department?: string;
+  documentId?: string;
   employeeId?: string;
+  faceCaptureCount?: number;
   externalPunchAllowed?: boolean;
   faceIdStatus?: "not_registered" | "registered";
   lastPunch: string;
@@ -167,7 +170,6 @@ type HoleriteImportDraft = {
 };
 
 const LOCAL_EMPLOYEES_KEY = "orquestracs-face-id-local-employees-v2";
-const REQUIRED_FACE_CAPTURES = 3;
 
 function getLocalEmployees() {
   try {
@@ -192,7 +194,9 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
     cbo: String(employee.cbo || ""),
     cpf: String(employee.cpf || "Nao informado"),
     department: String(employee.department || "Geral"),
+    documentId: String(employee.documentId || fallbackId),
     employeeId: String(employee.employeeId || employee.id || fallbackId),
+    faceCaptureCount: Number(employee.faceCaptureCount || 0),
     externalPunchAllowed: employee.externalPunchAllowed === true,
     faceIdStatus: (employee.faceIdStatus || "not_registered") as LocalEmployee["faceIdStatus"],
     lastPunch: String(employee.lastPunch || "Sem batida hoje"),
@@ -219,7 +223,9 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
   };
 }
 
-function employeeDocumentId(employee: Pick<LocalEmployee, "employeeId" | "name" | "registration">) {
+function employeeDocumentId(employee: Pick<LocalEmployee, "documentId" | "employeeId" | "name" | "registration">) {
+  if (employee.documentId) return employee.documentId;
+
   const registration = onlyDigits(employee.registration || "");
   if (registration) return `matricula-${registration}`;
 
@@ -4184,7 +4190,8 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
       cbo: employeeForm.cbo || "",
       cpf: employeeForm.cpf || "Não informado",
       department: employeeForm.department || "Geral",
-      employeeId: editingEmployeeId || crypto.randomUUID(),
+      documentId: selectedEmployee?.documentId,
+      employeeId: selectedEmployee?.employeeId || crypto.randomUUID(),
       externalPunchAllowed: employeeForm.externalPunchAllowed,
       faceIdStatus: selectedEmployee?.faceIdStatus || "not_registered",
       lastPunch: "Sem batida hoje",
@@ -4205,7 +4212,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
       : [employee, ...localEmployees];
 
     const employeeWithoutPin = Object.fromEntries(
-      Object.entries(employee).filter(([key]) => key !== "pin"),
+      Object.entries(employee).filter(([key]) => key !== "pin" && key !== "documentId"),
     );
     await upsertEmployee(companyId, documentId, {
       ...employeeWithoutPin,
@@ -4369,13 +4376,13 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
         photoPath,
       });
 
-      const completed = captureCount >= REQUIRED_FACE_CAPTURES;
+      const completed = captureCount >= FACE_ID_REQUIRED_CAPTURES;
       const updated = localEmployees.map((employee) =>
         employee.employeeId === employeeAtStart.employeeId
           ? {
               ...employee,
               faceIdStatus: completed ? "registered" as const : employee.faceIdStatus,
-              status: completed ? "Face ID cadastrado" : `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}`,
+              status: completed ? "Face ID cadastrado" : `Face ID ${captureCount}/${FACE_ID_REQUIRED_CAPTURES}`,
             }
           : employee,
       );
@@ -4390,7 +4397,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
           faceIdStatus: completed ? "registered" : current.faceIdStatus,
           ...(completed
             ? { faceRegisteredAt: new Date().toISOString(), status: "Face ID cadastrado" }
-            : { status: `Face ID ${captureCount}/${REQUIRED_FACE_CAPTURES}` }),
+            : { status: `Face ID ${captureCount}/${FACE_ID_REQUIRED_CAPTURES}` }),
         });
       }
 
@@ -4410,7 +4417,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
         return;
       }
 
-      onAction(`${employeeAtStart.name}: captura ${captureCount}/${REQUIRED_FACE_CAPTURES} sincronizada no Firebase.`);
+      onAction(`${employeeAtStart.name}: captura ${captureCount}/${FACE_ID_REQUIRED_CAPTURES} sincronizada no Firebase.`);
     } catch (error) {
       console.error("Não foi possível sincronizar o cadastro facial.", error);
       onAction("A captura foi feita neste aparelho, mas não foi salva no Firebase. Verifique sua sessão e tente novamente.");
@@ -4743,7 +4750,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
             <div>
               <p className="text-sm font-semibold text-[#b7d7ce]">Face ID de {selectedEmployee!.name}</p>
               <p className="mt-2 text-xs leading-5 text-white/65">
-                Faça {REQUIRED_FACE_CAPTURES} capturas com boa luz. Ao concluir, a câmera será encerrada e você confirmará o próximo nome manualmente.
+                Faça {FACE_ID_REQUIRED_CAPTURES} capturas com boa luz. Ao concluir, a câmera será encerrada e você confirmará o próximo nome manualmente.
               </p>
               <p className="mt-3 text-xs font-semibold text-white">
                 Status: {selectedEmployee!.faceIdStatus === "registered" ? "Face ID cadastrado" : "Aguardando captura"}

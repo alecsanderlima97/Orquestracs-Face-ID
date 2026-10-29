@@ -157,10 +157,11 @@ test("mantem navegacao responsiva para celular e tablet", async () => {
 });
 
 test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", async () => {
-  const [page, camera, css] = await Promise.all([
+  const [page, camera, css, faceConfig] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/FaceCamera.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../lib/face-id/config.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(page, /kioskMode/);
@@ -194,6 +195,12 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(camera, /Falha ao carregar ou comparar os perfis faciais/);
   assert.match(camera, /onProfileUpdated\?\.\(descriptors\.length, await captureFrame\(\)\)/);
   assert.match(camera, /não foi sincronizada com o sistema/);
+  assert.match(faceConfig, /FACE_ID_REQUIRED_CAPTURES = 3/);
+  assert.match(camera, /slice\(-FACE_ID_REQUIRED_CAPTURES\)/);
+  assert.match(page, /FACE_ID_REQUIRED_CAPTURES/);
+  assert.match(page, /documentId: String\(employee\.documentId \|\| fallbackId\)/);
+  assert.match(page, /if \(employee\.documentId\) return employee\.documentId/);
+  assert.match(page, /employeeId: selectedEmployee\?\.employeeId \|\| crypto\.randomUUID\(\)/);
   assert.match(page, /listFaceIdRecords\(companyId, employee\.employeeId\)/);
   assert.match(page, /faceRecords\.slice\(0, 3\)/);
   assert.match(page, /if \(!photoPaths\.length && employee\.profilePhotoPath\)/);
