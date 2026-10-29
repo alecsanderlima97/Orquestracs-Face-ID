@@ -32,7 +32,7 @@ import type {
   PunchStatus,
   PunchType,
 } from "@/lib/models";
-import { createFaceIdRecord, listFaceIdRecords, uploadFacePhoto } from "@/lib/services/face-id";
+import { createFaceIdRecord, listFaceIdSources, uploadFacePhoto } from "@/lib/services/face-id";
 import { saveEmployeePin, verifyEmployeePin } from "@/lib/services/employee-pins";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
@@ -5335,55 +5335,32 @@ function KioskScreen({
 
     async function loadFaceProfileSources() {
       try {
-        const saved = await listEmployees(companyId);
-        const registered = saved
-          .map((employee) => toLocalEmployee(employee as unknown as Record<string, unknown>, employee.id))
-          .filter((employee) => employee.active !== false && employee.faceIdStatus === "registered");
-
+        const registered = await listFaceIdSources(companyId);
         const sources = (await Promise.all(
-          registered.map(async (employee) => {
+          registered.flatMap((employee) => employee.photoPaths.slice(0, 3).map(async (photoPath) => {
             try {
-              let photoPaths: string[] = [];
-              try {
-                const employeeIds = [...new Set([employee.employeeId, employee.documentId].filter((id): id is string => Boolean(id)))];
-                const recordGroups = await Promise.all(employeeIds.map(async (id) => {
-                  try {
-                    return await listFaceIdRecords(companyId, id);
-                  } catch (error) {
-                    console.warn(`Não foi possível consultar as capturas faciais de ${employee.name}.`, error);
-                    return [];
-                  }
-                }));
-                photoPaths = [...new Set(recordGroups.flat().map((record) => record.photoPath).filter(Boolean))].slice(0, 3);
-              } catch (error) {
-                console.warn(`Não foi possível consultar o histórico facial de ${employee.name}.`, error);
-              }
-              if (!photoPaths.length && employee.profilePhotoPath) {
-                photoPaths = [employee.profilePhotoPath];
-              }
-
-              const employeeSources: FaceProfileSource[] = [];
-              for (const photoPath of [...new Set(photoPaths.filter(Boolean))]) {
-                try {
-                  const photoUrl = await getStorageFileUrl(photoPath);
-                  employeeSources.push({
-                    employeeId: employee.employeeId,
-                    name: employee.name,
-                    photoUrl,
-                    punchMode: employee.punchMode || "automatic",
-                    schedule: employee.schedule,
-                  });
-                } catch {
-                  // Tenta a próxima captura histórica quando a foto resumida não existe mais.
-                }
-              }
-              return employeeSources;
+              const photoUrl = await getStorageFileUrl(photoPath);
+              return {
+                employeeId: employee.employeeId,
+                name: employee.name,
+                photoUrl,
+                punchMode: employee.punchMode || "automatic",
+                schedule: employee.schedule
+                  ? {
+                      breakEnd: employee.schedule.breakEnd || "13:00",
+                      breakStart: employee.schedule.breakStart || "11:30",
+                      end: employee.schedule.end || "17:15",
+                      periods: employee.schedule.periods,
+                      start: employee.schedule.start || "07:00",
+                      toleranceMinutes: employee.schedule.toleranceMinutes || 10,
+                    }
+                  : undefined,
+              } satisfies FaceProfileSource;
             } catch {
-              return [];
+              return null;
             }
-          }),
-        ))
-          .flat();
+          })),
+        )).filter((source): source is NonNullable<typeof source> => Boolean(source));
 
         if (mounted) setFaceProfileSources(sources);
       } catch (error) {

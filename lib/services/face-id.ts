@@ -40,6 +40,30 @@ export async function createFaceIdRecord(record: Omit<FaceIdRecord, "id">) {
   return { id: result.data.faceId };
 }
 
+export type FaceIdSource = {
+  employeeId: string;
+  name: string;
+  photoPaths: string[];
+  punchMode?: "automatic" | "manual";
+  schedule?: {
+    breakEnd?: string;
+    breakStart?: string;
+    end?: string;
+    periods?: Array<{ start: string; end: string }>;
+    start?: string;
+    toleranceMinutes?: number;
+  };
+};
+
+export async function listFaceIdSources(companyId: string) {
+  const callable = httpsCallable<
+    { companyId: string },
+    { companyId: string; sources: FaceIdSource[] }
+  >(functions, "listFaceIdSources");
+  const result = await callable({ companyId });
+  return result.data.sources;
+}
+
 export async function listFaceIdRecords(companyId: string, employeeId: string) {
   const snapshot = await getDocs(query(faceIdRef(companyId, employeeId), orderBy("createdAt", "desc")));
   return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as FaceIdRecord);
