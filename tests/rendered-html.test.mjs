@@ -170,6 +170,8 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(page, /autoStart/);
   assert.match(page, /recognitionPaused=\{Boolean\(recognizedEmployee \|\| confirmation \|\| sequenceLoading\)\}/);
   assert.match(page, /speakPunchConfirmation/);
+  assert.match(page, /voiceschanged/);
+  assert.match(page, /speakWithAvailableVoice/);
   assert.match(page, /Aguardando o próximo funcionário/);
   assert.match(page, /kiosk-clock-header/);
   assert.match(page, /onExit=\{handleKioskExit\}/);
@@ -201,8 +203,9 @@ test("mantem a sala de ponto isolada e sincroniza perfis faciais do cadastro", a
   assert.match(page, /documentId: String\(employee\.documentId \|\| fallbackId\)/);
   assert.match(page, /if \(employee\.documentId\) return employee\.documentId/);
   assert.match(page, /employeeId: selectedEmployee\?\.employeeId \|\| crypto\.randomUUID\(\)/);
-  assert.match(page, /listFaceIdRecords\(companyId, employee\.employeeId\)/);
-  assert.match(page, /faceRecords\.slice\(0, 3\)/);
+  assert.match(page, /new Set\(\[employee\.employeeId, employee\.documentId\]/);
+  assert.match(page, /listFaceIdRecords\(companyId, id\)/);
+  assert.match(page, /recordGroups\.flat\(\)/);
   assert.match(page, /if \(!photoPaths\.length && employee\.profilePhotoPath\)/);
   assert.match(camera, /referência\(s\) facial/);
   assert.match(page, /Editar foto principal/);

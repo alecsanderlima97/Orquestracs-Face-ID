@@ -5345,8 +5345,16 @@ function KioskScreen({
             try {
               let photoPaths: string[] = [];
               try {
-                const faceRecords = await listFaceIdRecords(companyId, employee.employeeId);
-                photoPaths = faceRecords.slice(0, 3).map((record) => record.photoPath);
+                const employeeIds = [...new Set([employee.employeeId, employee.documentId].filter((id): id is string => Boolean(id)))];
+                const recordGroups = await Promise.all(employeeIds.map(async (id) => {
+                  try {
+                    return await listFaceIdRecords(companyId, id);
+                  } catch (error) {
+                    console.warn(`Não foi possível consultar as capturas faciais de ${employee.name}.`, error);
+                    return [];
+                  }
+                }));
+                photoPaths = [...new Set(recordGroups.flat().map((record) => record.photoPath).filter(Boolean))].slice(0, 3);
               } catch (error) {
                 console.warn(`Não foi possível consultar o histórico facial de ${employee.name}.`, error);
               }
@@ -5398,22 +5406,33 @@ function KioskScreen({
   }, []);
 
   function speak(message: string) {
-    if (!("speechSynthesis" in window)) return;
+    const speech = window.speechSynthesis;
+    if (!speech) return;
 
-    window.speechSynthesis.cancel();
+    speech.cancel();
     const voiceMessage = new SpeechSynthesisUtterance(message);
     voiceMessage.lang = "pt-BR";
-    const portugueseVoices = window.speechSynthesis
-      .getVoices()
-      .filter((voice) => voice.lang.toLowerCase().startsWith("pt"));
-    const naturalVoice =
-      portugueseVoices.find((voice) => /natural|online|francisca|luciana|maria/i.test(voice.name)) ||
-      portugueseVoices[0];
-    if (naturalVoice) voiceMessage.voice = naturalVoice;
     voiceMessage.rate = 1.16;
     voiceMessage.pitch = 1.03;
     voiceMessage.volume = 0.92;
-    window.speechSynthesis.speak(voiceMessage);
+    voiceMessage.onerror = (event) => console.warn("A voz do navegador não foi reproduzida.", event.error);
+    let spoken = false;
+    const speakWithAvailableVoice = () => {
+      if (spoken) return;
+      spoken = true;
+      const portugueseVoices = speech.getVoices().filter((voice) => voice.lang.toLowerCase().startsWith("pt"));
+      const naturalVoice =
+        portugueseVoices.find((voice) => /natural|online|francisca|luciana|maria/i.test(voice.name)) ||
+        portugueseVoices[0];
+      if (naturalVoice) voiceMessage.voice = naturalVoice;
+      speech.speak(voiceMessage);
+    };
+    if (speech.getVoices().length) {
+      speakWithAvailableVoice();
+    } else {
+      speech.addEventListener("voiceschanged", speakWithAvailableVoice, { once: true });
+      window.setTimeout(speakWithAvailableVoice, 700);
+    }
   }
 
   function voiceName(name: string) {

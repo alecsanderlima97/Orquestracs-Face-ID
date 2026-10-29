@@ -103,6 +103,7 @@ export function FaceCamera({
   const [message, setMessage] = useState("Ative a câmera para começar.");
   const remoteProfilesRef = useRef<StoredFaceProfile[] | null>(null);
   const remoteProfilesPromiseRef = useRef<Promise<StoredFaceProfile[]> | null>(null);
+  const remoteProfilesMessageRef = useRef("");
   const replacementStartedRef = useRef(false);
   const startInFlightRef = useRef(false);
   const processingRef = useRef(false);
@@ -112,6 +113,7 @@ export function FaceCamera({
 
   useEffect(() => {
     remoteProfilesRef.current = null;
+    remoteProfilesMessageRef.current = "";
   }, [profileSources]);
 
   useEffect(() => {
@@ -271,6 +273,7 @@ export function FaceCamera({
 
     if (!profileSources.length) {
       remoteProfilesRef.current = [];
+      remoteProfilesMessageRef.current = "O cadastro aparece como ativo, mas não há fotos faciais vinculadas. Refaça o Face ID do colaborador para sincronizar as imagens.";
       return [];
     }
 
@@ -279,6 +282,8 @@ export function FaceCamera({
         loadCachedRemoteProfiles().map((profile) => [profile.sourceKey, profile]),
       );
       const syncedProfiles: StoredFaceProfile[] = [];
+      let loadFailures = 0;
+      let undetectableImages = 0;
 
       for (let index = 0; index < profileSources.length; index += 4) {
         const batch = await Promise.all(profileSources.slice(index, index + 4).map(async (source) => {
@@ -295,7 +300,10 @@ export function FaceCamera({
               )
               .withFaceLandmarks()
               .withFaceDescriptor();
-            if (!detection) return null;
+            if (!detection) {
+              undetectableImages += 1;
+              return null;
+            }
 
             return {
               ...source,
@@ -304,6 +312,7 @@ export function FaceCamera({
               sourceKey,
             };
           } catch (error) {
+            loadFailures += 1;
             console.warn(`Não foi possível sincronizar o rosto de ${source.name}.`, error);
             return null;
           }
@@ -313,6 +322,17 @@ export function FaceCamera({
 
       saveCachedRemoteProfiles(syncedProfiles);
       remoteProfilesRef.current = syncedProfiles;
+      if (!syncedProfiles.length && profileSources.length) {
+        const status = loadFailures
+          ? "Não foi possível baixar as fotos faciais neste aparelho. Confira a conexão e o acesso ao Firebase."
+          : undetectableImages
+            ? "As fotos chegaram, mas não foi possível identificar rostos nelas. Recadastre o Face ID com imagens nítidas."
+            : "O cadastro consta como ativo, mas não há fotos faciais vinculadas. Recadastre o Face ID deste colaborador.";
+        remoteProfilesMessageRef.current = status;
+        updateMessage(status);
+      } else {
+        remoteProfilesMessageRef.current = "";
+      }
       return syncedProfiles;
     })();
     remoteProfilesPromiseRef.current = loadPromise;
@@ -396,7 +416,7 @@ export function FaceCamera({
         ? [...getProfiles(), ...(await loadRemoteProfiles(faceApi))]
         : getProfiles();
       if (!profiles.length) {
-        const status = "Nenhum perfil facial sincronizado. Verifique o cadastro do Face ID ou use PIN + foto.";
+        const status = remoteProfilesMessageRef.current || "Nenhum perfil facial sincronizado. Verifique o cadastro do Face ID ou use PIN + foto.";
         if (automatic) updateAutomaticMessage(status);
         else updateMessage(status);
         return;
