@@ -2,7 +2,7 @@
 // Execução: PIN_PEPPER=<valor-de-teste> firebase emulators:exec --only firestore,functions --project demo-orquestracs-face-id "node tests/punch-flow-emulator.test.mjs"
 import crypto from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { initializeTestEnvironment } from "@firebase/rules-unit-testing";
 import { dayKeyFor } from "../functions/punch-guard.js";
 
@@ -65,8 +65,12 @@ try {
       cpf: "12345678909",
       employeeId,
       name: "Colaborador A",
-      pinHash: digest("4321"),
+      pinConfigured: true,
       schedule: { end: "17:15", periods: [{ start: "07:00", end: "11:30" }, { start: "13:00", end: "17:15" }], start: "07:00" },
+    });
+    await setDoc(doc(db, `companies/${companyId}/employeePins/${employeeId}`), {
+      employeeId,
+      pinHash: digest("4321"),
     });
   });
 
@@ -119,6 +123,24 @@ try {
     throw new Error(`Etapa duplicada no mesmo dia deveria ser bloqueada: ${JSON.stringify(duplicateStage.body)}`);
   }
   console.log("ok: etapa duplicada no mesmo dia bloqueada pelo servidor");
+
+  // 6a) Gravacao do PIN pelo servidor: hash vai para employeePins e sai do cadastro do colaborador.
+  const setPin = await call("setEmployeePin", { companyId, employeeId, pin: "2468" });
+  if (!setPin.ok || setPin.body?.result?.pinConfigured !== true) {
+    throw new Error(`setEmployeePin deveria gravar o PIN: ${JSON.stringify(setPin.body)}`);
+  }
+  const acceptedPin = await call("verifyEmployeePin", { companyId, pin: "2468" });
+  if (!acceptedPin.ok || acceptedPin.body?.result?.employeeId !== employeeId) {
+    throw new Error(`PIN recem-gravado deveria ser aceito: ${JSON.stringify(acceptedPin.body)}`);
+  }
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const snapshot = await getDoc(doc(context.firestore(), `companies/${companyId}/employees/${employeeId}`));
+    const data = snapshot.data() || {};
+    if ("pinHash" in data || "pinUpdatedAt" in data || "pin" in data || data.pinConfigured !== true) {
+      throw new Error("Cadastro do colaborador nao deveria conter hash do PIN");
+    }
+  });
+  console.log("ok: PIN gravado no servidor e ausente do cadastro do colaborador");
 
   // 6) PIN: cinco falhas seguidas bloqueiam novas tentativas.
   for (let index = 0; index < 5; index += 1) {

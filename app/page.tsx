@@ -203,7 +203,7 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
     name: String(employee.name || "Colaborador sem nome"),
     phone: String(employee.phone || ""),
     pin: "",
-    pinConfigured: Boolean(employee.pinHash || employee.pin || employee.pinConfigured),
+    pinConfigured: Boolean(employee.pinConfigured || employee.pin),
     profilePhotoPath: String(employee.profilePhotoPath || ""),
     punchMode: (employee.punchMode || "automatic") as LocalEmployee["punchMode"],
     registration: String(employee.registration || ""),

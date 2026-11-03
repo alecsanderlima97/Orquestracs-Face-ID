@@ -424,7 +424,7 @@ export const setEmployeePin = onCall(callableOptions, async (request) => {
 
   const digest = pinDigest(companyId, pin);
   const duplicate = await db
-    .collection(`companies/${companyId}/employees`)
+    .collection(`companies/${companyId}/employeePins`)
     .where("pinHash", "==", digest)
     .limit(2)
     .get();
@@ -432,10 +432,17 @@ export const setEmployeePin = onCall(callableOptions, async (request) => {
     throw new HttpsError("already-exists", "Este PIN ja pertence a outro colaborador.");
   }
 
-  await employeeRef.update({
-    pin: FieldValue.delete(),
+  // O hash fica em coleção bloqueada para o navegador; o colaborador guarda apenas o indicador.
+  await db.doc(`companies/${companyId}/employeePins/${employeeId}`).set({
+    employeeId,
     pinHash: digest,
     pinUpdatedAt: FieldValue.serverTimestamp(),
+  });
+  await employeeRef.update({
+    pin: FieldValue.delete(),
+    pinHash: FieldValue.delete(),
+    pinUpdatedAt: FieldValue.delete(),
+    pinConfigured: true,
   });
 
   return { employeeId, pinConfigured: true };
@@ -449,7 +456,7 @@ export const verifyEmployeePin = onCall(callableOptions, async (request) => {
   await requireManager(request, companyId);
   const { attemptRef, nowMs } = await assertPinAttemptsAllowed(companyId, request.auth.uid);
   const matches = await db
-    .collection(`companies/${companyId}/employees`)
+    .collection(`companies/${companyId}/employeePins`)
     .where("pinHash", "==", pinDigest(companyId, pin))
     .limit(2)
     .get();
@@ -461,10 +468,12 @@ export const verifyEmployeePin = onCall(callableOptions, async (request) => {
   if (matches.size > 1) throw new HttpsError("failed-precondition", "PIN duplicado. Procure o responsavel.");
   await resetPinAttempts(attemptRef);
 
-  const employee = matches.docs[0];
-  const data = employee.data();
+  const employeeId = matches.docs[0].id;
+  const employeeSnapshot = await db.doc(`companies/${companyId}/employees/${employeeId}`).get();
+  if (!employeeSnapshot.exists) throw new HttpsError("not-found", "PIN nao encontrado.");
+  const data = employeeSnapshot.data();
   return {
-    employeeId: normalizedText(data.employeeId) || employee.id,
+    employeeId: normalizedText(data.employeeId) || employeeId,
     externalPunchAllowed: data.externalPunchAllowed === true,
     name: normalizedText(data.name) || "Colaborador",
   };
@@ -1142,7 +1151,7 @@ export const listOwnRepReceipts = onCall(callableOptions, async (request) => {
   await requireTenantMember(request, companyId);
   const { attemptRef, nowMs } = await assertPinAttemptsAllowed(companyId, request.auth.uid);
   const matches = await db
-    .collection(`companies/${companyId}/employees`)
+    .collection(`companies/${companyId}/employeePins`)
     .where("pinHash", "==", pinDigest(companyId, pin))
     .limit(2)
     .get();
@@ -1153,9 +1162,11 @@ export const listOwnRepReceipts = onCall(callableOptions, async (request) => {
   if (matches.size > 1) throw new HttpsError("failed-precondition", "PIN duplicado. Procure o responsavel.");
   await resetPinAttempts(attemptRef);
 
-  const employeeSnapshot = matches.docs[0];
+  const pinEmployeeId = matches.docs[0].id;
+  const employeeSnapshot = await db.doc(`companies/${companyId}/employees/${pinEmployeeId}`).get();
+  if (!employeeSnapshot.exists) throw new HttpsError("not-found", "PIN nao encontrado.");
   const employee = employeeSnapshot.data();
-  const employeeId = normalizedText(employee.employeeId) || employeeSnapshot.id;
+  const employeeId = normalizedText(employee.employeeId) || pinEmployeeId;
   const start = Timestamp.fromDate(new Date(Date.now() - (48 * 60 * 60 * 1000)));
   const recentSnapshot = await db
     .collection(`companies/${companyId}/arpRecords`)
