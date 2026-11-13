@@ -3,10 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { FACE_ID_REQUIRED_CAPTURES } from "@/lib/face-id/config";
 
-const FACE_PROFILES_KEY = "orquestracs-face-id-local-profiles";
-const REMOTE_FACE_CACHE_KEY = "orquestracs-face-id-remote-descriptors-v1";
+// Chaves antigas que guardavam descritores faciais em texto puro no navegador. Sao removidas.
+const LEGACY_FACE_STORAGE_KEYS = ["orquestracs-face-id-local-profiles", "orquestracs-face-id-remote-descriptors-v1"];
 const MATCH_THRESHOLD = 0.5;
 const AUTO_RECOGNITION_INTERVAL_MS = 500;
+// Prova de presença: o rosto precisa se mover levemente na janela de amostras antes de qualquer match.
+const PRESENCE_WINDOW_SIZE = 8;
+const PRESENCE_MIN_SAMPLES = 6;
+const PRESENCE_MIN_MOVEMENT = 0.05;
 
 type FaceApiModule = typeof import("@vladmandic/face-api");
 
@@ -37,19 +41,22 @@ type StoredFaceProfile = RecognizedFace & {
 
 let faceApiPromise: Promise<FaceApiModule> | null = null;
 
+// Descritores faciais vivem apenas na memória da aba. Nunca são gravados em localStorage.
+const localFaceProfiles = new Map<string, StoredFaceProfile>();
+const remoteDescriptorCache = new Map<string, StoredFaceProfile>();
+
+if (typeof window !== "undefined") {
+  for (const key of LEGACY_FACE_STORAGE_KEYS) window.localStorage.removeItem(key);
+}
+
 function loadCachedRemoteProfiles() {
-  try {
-    return JSON.parse(window.localStorage.getItem(REMOTE_FACE_CACHE_KEY) || "[]") as StoredFaceProfile[];
-  } catch {
-    return [];
-  }
+  return Array.from(remoteDescriptorCache.values());
 }
 
 function saveCachedRemoteProfiles(profiles: StoredFaceProfile[]) {
-  try {
-    window.localStorage.setItem(REMOTE_FACE_CACHE_KEY, JSON.stringify(profiles));
-  } catch (error) {
-    console.warn("Não foi possível manter o cache facial neste aparelho.", error);
+  remoteDescriptorCache.clear();
+  for (const profile of profiles) {
+    if (profile.sourceKey) remoteDescriptorCache.set(profile.sourceKey, profile);
   }
 }
 
@@ -66,19 +73,15 @@ type FaceCameraProps = {
   onStatus?: (message: string) => void;
   profileSources?: FaceProfileSource[];
   replaceProfile?: boolean;
+  captureRef?: { current: (() => Promise<Blob | undefined>) | null };
 };
 
 function getProfiles() {
-  try {
-    return JSON.parse(window.localStorage.getItem(FACE_PROFILES_KEY) || "[]") as StoredFaceProfile[];
-  } catch {
-    return [];
-  }
+  return Array.from(localFaceProfiles.values());
 }
 
 export function clearLocalFaceProfile(employeeId: string) {
-  const profiles = getProfiles().filter((profile) => profile.employeeId !== employeeId);
-  window.localStorage.setItem(FACE_PROFILES_KEY, JSON.stringify(profiles));
+  localFaceProfiles.delete(employeeId);
 }
 
 export function FaceCamera({
@@ -94,6 +97,7 @@ export function FaceCamera({
   onStatus,
   profileSources = [],
   replaceProfile = false,
+  captureRef,
 }: FaceCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -110,6 +114,7 @@ export function FaceCamera({
   const lastRecognitionDescriptorRef = useRef<Float32Array | null>(null);
   const faceAwayFramesRef = useRef(0);
   const lastAutomaticMessageRef = useRef("");
+  const presenceSamplesRef = useRef<Array<{ x: number; y: number }>>([]);
 
   useEffect(() => {
     remoteProfilesRef.current = null;
@@ -123,6 +128,10 @@ export function FaceCamera({
   useEffect(() => {
     onCameraState?.(cameraState);
   }, [cameraState, onCameraState]);
+
+  useEffect(() => {
+    if (captureRef) captureRef.current = captureFrame;
+  });
 
   useEffect(() => {
     if (!autoStart || cameraState !== "idle") return;
@@ -364,10 +373,8 @@ export function FaceCamera({
         return;
       }
 
-      const profiles = getProfiles();
-      const existingIndex = profiles.findIndex((profile) => profile.employeeId === employee.employeeId);
       const replacingNow = replaceProfile && !replacementStartedRef.current;
-      const existing = !replacingNow && existingIndex >= 0 ? profiles[existingIndex] : null;
+      const existing = replacingNow ? null : localFaceProfiles.get(employee.employeeId) || null;
       const descriptors = [
         ...(existing?.descriptors || []),
         Array.from(detection.descriptor),
@@ -378,17 +385,8 @@ export function FaceCamera({
         updatedAt: new Date().toISOString(),
       };
 
-      const nextProfiles = replacingNow
-        ? profiles.filter((profile) => profile.employeeId !== employee.employeeId)
-        : profiles;
-      if (existingIndex >= 0 && !replacingNow) {
-        profiles[existingIndex] = profile;
-      } else {
-        nextProfiles.push(profile);
-      }
-
       replacementStartedRef.current = true;
-      window.localStorage.setItem(FACE_PROFILES_KEY, JSON.stringify(nextProfiles));
+      localFaceProfiles.set(employee.employeeId, profile);
       try {
         await onProfileUpdated?.(descriptors.length, await captureFrame());
       } catch (error) {
@@ -404,17 +402,39 @@ export function FaceCamera({
     }
   }
 
+  function recordPresenceSample(detection: { landmarks: { getNose: () => Array<{ x: number; y: number }> }; detection: { box: { width: number } } }) {
+    const nose = detection.landmarks.getNose()[3];
+    const width = detection.detection.box.width || 1;
+    presenceSamplesRef.current.push({ x: nose.x / width, y: nose.y / width });
+    if (presenceSamplesRef.current.length > PRESENCE_WINDOW_SIZE) presenceSamplesRef.current.shift();
+  }
+
+  function hasPresenceMovement() {
+    const samples = presenceSamplesRef.current;
+    if (samples.length < PRESENCE_MIN_SAMPLES) return false;
+    const xs = samples.map((sample) => sample.x);
+    const ys = samples.map((sample) => sample.y);
+    const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+    return span >= PRESENCE_MIN_MOVEMENT;
+  }
+
   async function recognizeFace(automatic = false) {
     if (processingRef.current) return;
     processingRef.current = true;
     setProcessing(true);
-    if (!automatic) updateMessage("Comparando o rosto...");
+    if (!automatic) {
+      presenceSamplesRef.current = [];
+      updateMessage("Comparando o rosto...");
+    }
 
     try {
       const faceApi = faceApiRef.current;
+      // Só perfis da empresa ativa (presentes em profileSources) podem ser usados para comparação.
+      const allowedEmployeeIds = new Set(profileSources.map((source) => source.employeeId));
+      const localProfiles = getProfiles().filter((profile) => allowedEmployeeIds.has(profile.employeeId));
       const profiles = faceApi
-        ? [...getProfiles(), ...(await loadRemoteProfiles(faceApi))]
-        : getProfiles();
+        ? [...localProfiles, ...(await loadRemoteProfiles(faceApi))]
+        : localProfiles;
       if (!profiles.length) {
         const status = remoteProfilesMessageRef.current || "Nenhum perfil facial sincronizado. Verifique o cadastro do Face ID ou use PIN + foto.";
         if (automatic) updateAutomaticMessage(status);
@@ -422,9 +442,23 @@ export function FaceCamera({
         return;
       }
 
+      if (!automatic && !hasPresenceMovement()) {
+        updateMessage("Mova levemente a cabeça para confirmar sua presença...");
+        for (let attempt = 0; attempt < PRESENCE_MIN_SAMPLES + 4 && !hasPresenceMovement(); attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 400));
+          const sample = await readDescriptor();
+          if (sample) recordPresenceSample(sample);
+        }
+        if (!hasPresenceMovement()) {
+          updateMessage("Presença não confirmada. Olhe para a câmera, mova levemente a cabeça e tente novamente.");
+          return;
+        }
+      }
+
       const detection = await readDescriptor();
       if (!detection) {
         if (automatic) {
+          presenceSamplesRef.current = [];
           updateAutomaticMessage("Reconhecimento ativo. Aguardando um rosto em frente à câmera...");
           faceAwayFramesRef.current += 1;
           if (faceAwayFramesRef.current >= 2) {
@@ -438,6 +472,7 @@ export function FaceCamera({
       }
 
       if (!faceApi) return;
+      recordPresenceSample(detection);
 
       if (automatic && lastRecognitionDescriptorRef.current) {
         const distanceFromPrevious = faceApi.euclideanDistance(
@@ -470,6 +505,12 @@ export function FaceCamera({
 
       if (bestMatch && bestMatch.distance <= MATCH_THRESHOLD) {
         const match = bestMatch as { distance: number; profile: StoredFaceProfile };
+        if (!hasPresenceMovement()) {
+          const status = "Confirme sua presença: mova levemente a cabeça diante da câmera.";
+          if (automatic) updateAutomaticMessage(status);
+          else updateMessage(status);
+          return;
+        }
         lastRecognitionDescriptorRef.current = detection.descriptor;
         faceAwayFramesRef.current = 0;
         lastAutomaticMessageRef.current = "";
@@ -506,6 +547,8 @@ export function FaceCamera({
   useEffect(() => {
     if (!autoRecognize || cameraState !== "ready" || recognitionPaused) return;
 
+    // Cada reinicio do reconhecimento exige nova prova de presenca.
+    presenceSamplesRef.current = [];
     let cancelled = false;
     let timer: number | undefined;
 
