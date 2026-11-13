@@ -18,6 +18,7 @@ import {
 } from "firebase/auth";
 import { clearLocalFaceProfile, FaceCamera, type FaceProfileSource, type RecognizedFace } from "@/app/components/FaceCamera";
 import AdminCentral from "@/app/components/AdminCentral";
+import { VoiceGuide } from "@/app/components/VoiceGuide";
 import { auth } from "@/lib/firebase/client";
 import { FACE_ID_REQUIRED_CAPTURES } from "@/lib/face-id/config";
 import { getCompany, getMainCompany, saveMainCompany, saveTenantCompany, uploadCompanyLogo } from "@/lib/services/companies";
@@ -2192,6 +2193,13 @@ export default function Home() {
         <span className="assistant-launcher-short">?</span>
         <span className="assistant-launcher-label">Assistente Face ID</span>
       </button>}
+
+      <VoiceGuide
+        active={active}
+        hidden={kioskMode || assistantOpen}
+        onNavigate={(section) => go(section as Section)}
+        sections={visibleNavItems}
+      />
 
       {assistantOpen && !kioskMode && (
         <AssistantPanel
