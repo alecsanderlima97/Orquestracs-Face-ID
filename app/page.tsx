@@ -888,6 +888,22 @@ function getPunchTiming(employee: RecognizedFace, punchType: string, bankHoursEn
   };
 }
 
+function describeFaceSaveError(error: unknown) {
+  const code = typeof error === "object" && error && "code" in error ? String((error as { code: unknown }).code) : "";
+  const known: Record<string, string> = {
+    "functions/not-found": "Colaborador não encontrado no servidor: salve o cadastro do colaborador antes do Face ID.",
+    "functions/permission-denied": "Seu usuário não tem permissão de proprietário ou administrador nesta empresa.",
+    "functions/unauthenticated": "Sua sessão expirou. Saia e entre novamente.",
+    "functions/invalid-argument": "Dados da captura incompletos. Confirme o aceite biométrico e tente de novo.",
+    "functions/internal": "Falha no servidor ao registrar a captura.",
+    "functions/unavailable": "Sem conexão com o servidor. Verifique a internet do aparelho.",
+    "storage/unauthorized": "O armazenamento recusou a foto: confira se seu usuário é proprietário ou administrador.",
+    "storage/retry-limit-exceeded": "Conexão instável ao enviar a foto. Tente novamente.",
+  };
+  if (known[code]) return `${known[code]} (código: ${code})`;
+  return code ? `Verifique sua sessão e tente novamente. (código: ${code})` : "Verifique sua sessão e a internet e tente novamente.";
+}
+
 function getLastEmployeePunch(employeeId: string) {
   return getLocalRecords()
     .filter(
@@ -4428,7 +4444,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
       onAction(`${employeeAtStart.name}: captura ${captureCount}/${FACE_ID_REQUIRED_CAPTURES} sincronizada no Firebase.`);
     } catch (error) {
       console.error("Não foi possível sincronizar o cadastro facial.", error);
-      onAction("A captura foi feita neste aparelho, mas não foi salva no Firebase. Verifique sua sessão e tente novamente.");
+      onAction(`A captura foi feita neste aparelho, mas não foi salva no Firebase. ${describeFaceSaveError(error)}`);
       throw error;
     } finally {
       setFaceSaving(false);
