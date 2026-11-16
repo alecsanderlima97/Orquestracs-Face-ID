@@ -4648,7 +4648,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
           </div>
         )}
         {false && showFaceCamera && selectedEmployee && (
-          <div className="mt-5 grid gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="mt-5 grid items-start gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white md:grid-cols-[minmax(0,1fr)_260px]">
             <FaceCamera
               compact
                employee={{
@@ -4756,7 +4756,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
           </div>
         )}
         {showFaceCamera && selectedEmployee && (
-          <div className="mt-5 grid gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="mt-5 grid items-start gap-4 rounded-lg border border-[#cfe3dc] bg-[#101923] p-4 text-white md:grid-cols-[minmax(0,1fr)_260px]">
             <FaceCamera
               compact
               employee={{
