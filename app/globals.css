@@ -1028,13 +1028,11 @@ a {
 }
 
 .sidebar-nav-glyph {
-  display: none;
+  display: block;
   width: 18px;
+  height: 18px;
   flex: 0 0 18px;
   color: currentcolor;
-  font-size: 11px;
-  font-weight: 900;
-  text-align: center;
 }
 
 .app-sidebar-collapsed {
@@ -3020,17 +3018,45 @@ button.dashboard-shortcut:hover {
   font-size: 13px;
 }
 
-@media (max-width: 900px) {
-  .voice-guide,
-  .voice-guide-launcher {
-    right: 14px;
-    bottom: 72px;
-  }
-}
+
 
 @media (prefers-reduced-motion: reduce) {
   .voice-guide-avatar.is-speaking i {
     animation: none;
     height: 14px;
+  }
+}
+
+/* Tablet (inclusive deitado): botoes flutuantes compactos para nao cobrir formularios */
+@media (max-width: 1180px) {
+  .assistant-launcher {
+    right: 14px;
+    bottom: 14px;
+    display: grid;
+    width: 48px;
+    height: 48px;
+    place-items: center;
+    padding: 0;
+  }
+
+  .assistant-launcher-short {
+    display: inline;
+    font-size: 18px;
+  }
+
+  .assistant-launcher-label {
+    display: none;
+  }
+
+  .voice-guide-launcher {
+    right: 70px;
+    bottom: 18px;
+    height: 40px;
+    padding: 0 14px;
+  }
+
+  .voice-guide {
+    right: 14px;
+    bottom: 72px;
   }
 }

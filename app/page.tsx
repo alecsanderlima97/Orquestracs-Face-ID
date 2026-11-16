@@ -888,6 +888,38 @@ function getPunchTiming(employee: RecognizedFace, punchType: string, bankHoursEn
   };
 }
 
+const SIDEBAR_ICON_PATHS: Record<string, string[]> = {
+  Painel: ["M3 3h7v9H3z", "M14 3h7v5h-7z", "M14 12h7v9h-7z", "M3 16h7v5H3z"],
+  Empresa: ["M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16", "M16 9h2a2 2 0 0 1 2 2v10", "M3 21h18", "M8 7h4", "M8 11h4", "M8 15h4"],
+  Colaboradores: ["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "M22 21v-2a4 4 0 0 0-3-3.87", "M16 3.13a4 4 0 0 1 0 7.75"],
+  "Sala de ponto": ["M3 7V5a2 2 0 0 1 2-2h2", "M17 3h2a2 2 0 0 1 2 2v2", "M21 17v2a2 2 0 0 1-2 2h-2", "M7 21H5a2 2 0 0 1-2-2v-2", "M9 9h.01", "M15 9h.01", "M8 14s1.5 2 4 2 4-2 4-2"],
+  "Ponto externo": ["M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z", "M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"],
+  "Banco de horas": ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M12 6v6l4 2"],
+  "Fechamento mensal": ["M8 2v4", "M16 2v4", "M3 10h18", "M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "M9 16l2 2 4-4"],
+  Relatorios: ["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M8 13h8", "M8 17h5"],
+  "LGPD e auditoria": ["M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", "M9 12l2 2 4-4"],
+  Configuracoes: ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"],
+  Admin: ["M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6z", "M12 8v4", "M12 16h.01"],
+};
+
+function SidebarIcon({ section }: { section: string }) {
+  const paths = SIDEBAR_ICON_PATHS[section] || SIDEBAR_ICON_PATHS.Painel;
+  return (
+    <svg
+      aria-hidden="true"
+      className="sidebar-nav-glyph"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.8}
+      viewBox="0 0 24 24"
+    >
+      {paths.map((d) => <path d={d} key={d} />)}
+    </svg>
+  );
+}
+
 function describeFaceSaveError(error: unknown) {
   const code = typeof error === "object" && error && "code" in error ? String((error as { code: unknown }).code) : "";
   const known: Record<string, string> = {
@@ -948,7 +980,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(min-width: 901px) and (max-width: 1180px)");
+    const mediaQuery = window.matchMedia("(min-width: 768px) and (max-width: 1180px)");
     const syncSidebarMode = () => {
       setSidebarAutoCompact(mediaQuery.matches);
       setSidebarAutoOverride(null);
@@ -1911,7 +1943,7 @@ export default function Home() {
   return (
     <TenantIdContext.Provider value={activeCompanyId}>
       <main className={`app-shell min-h-screen overflow-x-hidden text-[#17202a] ${kioskMode ? "kiosk-app-shell" : "bg-[#f4f6f8]"}`}>
-      <div className={`sticky top-0 z-30 border-b border-[#d9e0e7] bg-white/95 px-3 py-2 shadow-sm backdrop-blur lg:hidden ${kioskMode ? "hidden" : ""}`}>
+      <div className={`sticky top-0 z-30 border-b border-[#d9e0e7] bg-white/95 px-3 py-2 shadow-sm backdrop-blur md:hidden ${kioskMode ? "hidden" : ""}`}>
         <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-3">
           <button
             aria-expanded={mobileMenuOpen}
@@ -2014,8 +2046,8 @@ export default function Home() {
         </div>
       )}
 
-      <div className={kioskMode ? "kiosk-content-shell" : `app-layout mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:gap-6 lg:px-6 ${sidebarIsCollapsed ? "app-layout-collapsed lg:grid-cols-[76px_minmax(0,1fr)]" : "lg:grid-cols-[292px_minmax(0,1fr)]"}`}>
-        <aside className={kioskMode ? "hidden" : `app-sidebar app-sidebar-collapsible hidden rounded-lg border border-[#d9e0e7] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:block lg:h-[calc(100vh-2rem)] ${sidebarIsCollapsed ? "app-sidebar-collapsed" : ""}`}>
+      <div className={kioskMode ? "kiosk-content-shell" : `app-layout mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:gap-6 lg:px-6 ${sidebarIsCollapsed ? "app-layout-collapsed md:grid-cols-[76px_minmax(0,1fr)]" : "md:grid-cols-[260px_minmax(0,1fr)] lg:grid-cols-[292px_minmax(0,1fr)]"}`}>
+        <aside className={kioskMode ? "hidden" : `app-sidebar app-sidebar-collapsible hidden rounded-lg border border-[#d9e0e7] p-4 text-white shadow-sm md:sticky md:top-3 md:block md:h-[calc(100vh-1.5rem)] lg:top-4 lg:h-[calc(100vh-2rem)] ${sidebarIsCollapsed ? "app-sidebar-collapsed" : ""}`}>
           <div className="flex h-full flex-col">
             <div className="app-sidebar-heading border-b border-white/10 pb-5">
               <div className="app-sidebar-brand-row">
@@ -2082,7 +2114,7 @@ export default function Home() {
                   title={item}
                   type="button"
                 >
-                  <span aria-hidden="true" className="sidebar-nav-glyph">{item.slice(0, 1)}</span>
+                  <SidebarIcon section={item} />
                   <span className="sidebar-nav-label">{item}</span>
                 </button>
               ))}
@@ -2098,17 +2130,15 @@ export default function Home() {
         </aside>
 
         <section className={kioskMode ? "kiosk-content-section" : centralAdminMode ? "app-main-content min-w-0" : "app-main-content grid min-w-0 gap-4 sm:gap-5"}>
-          <header className={kioskMode || centralAdminMode || active === "Painel" ? "hidden" : "app-header rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5"}>
-            <div className="flex items-start justify-between gap-4">
+          <header className={kioskMode || centralAdminMode || active === "Painel" ? "hidden" : "app-header rounded-lg border border-[#d9e0e7] bg-white px-4 py-3 shadow-sm sm:px-5"}>
+            <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
-                  Orquestracs Face ID
-                </p>
-                <h1 className="mt-1 text-xl font-semibold text-[#101923] sm:text-2xl">
-                  {active === "Painel" ? "Controle de jornada" : title}
+                <h1 className="truncate text-lg font-semibold text-[#101923] sm:text-xl">
+                  {title}
                 </h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-[#667085]">
-                  Ponto inteligente com reconhecimento facial, auditoria e fechamento mensal.
+                <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs font-medium text-[#667085]" title={notice}>
+                  <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#2d6c5d]" />
+                  <span className="truncate">{notice}</span>
                 </p>
               </div>
 
@@ -2119,13 +2149,6 @@ export default function Home() {
               >
                 Sair
               </button>
-            </div>
-
-            <div className="mt-3 flex items-center gap-2 text-xs font-medium text-[#667085]">
-              <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#edf5f2] text-[11px] font-bold text-[#18594c]">
-                i
-              </span>
-              <p className="leading-5">{notice}</p>
             </div>
           </header>
 
