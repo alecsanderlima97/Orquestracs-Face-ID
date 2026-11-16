@@ -3159,3 +3159,211 @@ button.dashboard-shortcut:hover {
   width: auto;
   flex-wrap: nowrap;
 }
+
+/* Sala de ponto minima: horario, periodo e camera; opcoes no painel lateral */
+.kiosk-stage {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  height: calc(100dvh - 2 * clamp(14px, 2.4vw, 28px));
+}
+
+.kiosk-topline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px 18px;
+  text-align: center;
+}
+
+.kiosk-topline .kiosk-time {
+  font-size: clamp(34px, 5.4vw, 60px);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.kiosk-period {
+  border-radius: 999px;
+  background: #dcebe6;
+  padding: 6px 16px;
+  color: #143f37;
+  font-size: clamp(16px, 2.2vw, 22px);
+  font-weight: 800;
+}
+
+.kiosk-topline .kiosk-date-line {
+  flex-basis: 100%;
+  color: #a9c4bd;
+  font-size: 13px;
+  text-transform: capitalize;
+}
+
+.kiosk-stage .kiosk-camera-shell {
+  min-height: 0;
+}
+
+.kiosk-stage .kiosk-camera-shell > div {
+  display: grid;
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr) auto;
+  padding: 0;
+}
+
+.kiosk-stage .kiosk-camera-shell > div > div:first-child {
+  aspect-ratio: auto;
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.kiosk-stage .kiosk-camera-shell video {
+  min-height: 0;
+}
+
+.kiosk-stage .kiosk-camera-shell > div > p {
+  min-height: 0;
+  margin: 0;
+  padding: 8px 12px;
+  text-align: center;
+}
+
+.kiosk-stage .kiosk-camera-shell > div > div:last-child {
+  display: none;
+}
+
+.kiosk-overlay-card {
+  position: absolute;
+  left: 50%;
+  bottom: 52px;
+  z-index: 5;
+  width: min(460px, calc(100% - 32px));
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  transform: translateX(-50%);
+  border: 1px solid #2b4d5d;
+  border-radius: 16px;
+  background: rgb(11 21 31 / 94%);
+  padding: 16px;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 45%);
+}
+
+.kiosk-overlay-name {
+  margin: 0 0 10px;
+  font-size: 22px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.kiosk-failure-card {
+  text-align: center;
+}
+
+.kiosk-failure-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.kiosk-failure-text {
+  margin: 6px 0 14px;
+  color: #cce1dc;
+  font-size: 14px;
+}
+
+.kiosk-failure-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.kiosk-drawer-handle {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  z-index: 20;
+  display: grid;
+  width: 30px;
+  height: 72px;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-right: 0;
+  border-radius: 12px 0 0 12px;
+  background: rgb(255 255 255 / 8%);
+  color: #dcefeb;
+  font-size: 24px;
+}
+
+.kiosk-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(5 10 15 / 55%);
+}
+
+.kiosk-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  width: min(360px, 88vw);
+  overflow-y: auto;
+  border-left: 1px solid #1d3442;
+  background: #0f1b24;
+  padding: 18px;
+  color: white;
+  animation: kiosk-drawer-in 180ms ease-out;
+}
+
+@keyframes kiosk-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.kiosk-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.kiosk-drawer-head .kiosk-brand-wordmark {
+  width: 140px;
+}
+
+.kiosk-drawer-close {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 8%);
+  color: white;
+  font-size: 22px;
+}
+
+.kiosk-drawer .kiosk-camera-badge {
+  justify-self: start;
+}
+
+.kiosk-drawer-exit {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.kiosk-drawer-handle:focus-visible,
+.kiosk-drawer-close:focus-visible {
+  outline: 3px solid #f2a33a;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kiosk-drawer {
+    animation: none;
+  }
+}
