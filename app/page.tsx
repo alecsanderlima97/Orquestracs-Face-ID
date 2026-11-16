@@ -5313,16 +5313,12 @@ function KioskScreen({
   canExitWithGoogle,
   canExitWithPassword,
   dateLabel,
-  locationLabel,
   onAction,
   onExit,
   onRegister,
   pin,
   setPin,
   timeLabel,
-  weatherDetail,
-  weatherIcon,
-  weatherLabel,
 }: {
   bankHoursEnabled: boolean;
   canExitWithGoogle: boolean;
@@ -5348,7 +5344,6 @@ function KioskScreen({
   const [recognizedPhoto, setRecognizedPhoto] = useState<Blob | undefined>();
   const [cameraState, setCameraState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [blockingMessage, setBlockingMessage] = useState("");
-  const [kioskDetailsOpen, setKioskDetailsOpen] = useState(false);
   const [pinFallbackOpen, setPinFallbackOpen] = useState(false);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [exitPassword, setExitPassword] = useState("");
@@ -5585,35 +5580,16 @@ function KioskScreen({
 
   return (
     <section className="kiosk-screen min-h-[100dvh] text-white">
-      <header className="kiosk-clock-header">
-        <div className="kiosk-brand-lockup">
-          <img alt="Orquestracs Face ID" className="kiosk-brand-wordmark" src="/orquestracs-face-id-wordmark.svg" />
-        </div>
-        <div className="kiosk-title-block">
-          <p className="kiosk-eyebrow">Orquestracs Face ID</p>
-          <h1>Sala de ponto</h1>
-          <p>Reconhecimento facial e confirmação da jornada</p>
+      <header className="kiosk-clock-header kiosk-header-compact">
+        <img alt="Orquestracs Face ID" className="kiosk-brand-wordmark" src="/orquestracs-face-id-wordmark.svg" />
+        <div className="kiosk-compact-clock">
+          <span className="kiosk-time">{timeLabel}</span>
+          <span className="kiosk-date-line">{dateLabel}</span>
         </div>
         <div className="kiosk-header-actions">
-          <div className="kiosk-clock-card">
-            <span aria-hidden="true" className="kiosk-weather-icon">{weatherIcon}</span>
-            <div className="min-w-0">
-              <p className="kiosk-card-label">Momento e clima</p>
-              <div className="kiosk-clock-line">
-                <span className="kiosk-weather-label">{weatherLabel}</span>
-                <span className="kiosk-time">{timeLabel}</span>
-              </div>
-              <p className="kiosk-date-line">{dateLabel} · {weatherDetail}</p>
-              <p className="kiosk-location-line">{locationLabel}</p>
-            </div>
-          </div>
-          <div className={`kiosk-system-status ${cameraStatusClass}`}>
-            <span className="kiosk-status-dot" aria-hidden="true" />
-            <div>
-              <strong>{cameraStatusLabel}</strong>
-              <span>Reconhecimento automático</span>
-            </div>
-          </div>
+          <span className={`kiosk-camera-badge ${cameraStatusClass}`}>
+            <span className="kiosk-status-dot" aria-hidden="true" /> {cameraStatusLabel}
+          </span>
           <button
             className="kiosk-exit-button"
             onClick={() => {
@@ -5628,33 +5604,8 @@ function KioskScreen({
         </div>
       </header>
 
-      <div className="kiosk-workspace md:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="kiosk-workspace kiosk-workspace-clean">
         <div className="kiosk-recognition-panel">
-          <div className="kiosk-stepper" aria-label="Etapas do registro">
-            {[
-              ["1", "Reconhecimento", "Posicione o rosto"],
-              ["2", "Identificação", "Validando funcionário"],
-              ["3", "Confirmar", "Confirme o ponto"],
-            ].map(([step, label, detail], index) => (
-              <div className={`kiosk-step ${index === 0 && !recognizedEmployee ? "is-active" : recognizedEmployee && index === 1 ? "is-active" : confirmation && index === 2 ? "is-active" : ""}`} key={step}>
-                <span className="kiosk-step-icon">{index === 0 ? "◉" : index === 1 ? "♙" : "✓"}</span>
-                <strong>{step}. {label}</strong>
-                <span>{detail}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="kiosk-camera-heading">
-            <div>
-              <p className="kiosk-eyebrow">Reconhecimento automático</p>
-              <h2>Fique em frente à câmera</h2>
-              <p>O sistema identifica o funcionário sem tocar na tela.</p>
-            </div>
-            <span className={`kiosk-camera-badge ${cameraStatusClass}`}>
-              <span className="kiosk-status-dot" aria-hidden="true" /> {cameraStatusLabel}
-            </span>
-          </div>
-
           <div className="kiosk-camera-shell">
             <FaceCamera
               autoRecognize
@@ -5666,39 +5617,11 @@ function KioskScreen({
               recognitionPaused={Boolean(recognizedEmployee || confirmation || sequenceLoading)}
             />
           </div>
-          <div className="kiosk-live-status">
-            <span className="kiosk-live-item"><span className="kiosk-status-dot" aria-hidden="true" /> {cameraState === "ready" ? "Aguardando o próximo funcionário..." : "Câmera em preparação"}</span>
-            <span className="kiosk-live-item"><span className="kiosk-status-dot" aria-hidden="true" /> Conexão protegida</span>
-            <span className="kiosk-live-item"><span className="kiosk-status-dot" aria-hidden="true" /> Registro em tempo real</span>
           </div>
-        </div>
 
         <aside className="kiosk-side-panel">
-          <div className="kiosk-side-card kiosk-last-card">
-            <div className="kiosk-side-heading"><span aria-hidden="true">◷</span><h2>Última marcação</h2></div>
-            <div className="kiosk-last-record">
-              <span className="kiosk-avatar">{confirmation ? confirmation.employeeName.split(" ").map((part) => part[0]).slice(0, 2).join("") : "--"}</span>
-              <div className="min-w-0">
-                <strong>{confirmation ? confirmation.employeeName : "Aguardando funcionário"}</strong>
-                <span>{confirmation ? `${confirmation.type} · hoje às ${confirmation.time}` : "Nenhuma marcação nesta sessão"}</span>
-              </div>
-              <span className="kiosk-record-icon" aria-hidden="true">✓</span>
-            </div>
-          </div>
-
-          <div className="kiosk-side-card kiosk-next-card">
-            <div className="kiosk-side-heading"><span aria-hidden="true">▣</span><h2>Próxima marcação</h2></div>
-            <div className="kiosk-next-record">
-              <span className="kiosk-next-icon" aria-hidden="true">{selectedPresentation.icon}</span>
-              <div className="min-w-0">
-                <strong>{journeyFinished ? "Jornada encerrada" : selectedPunch}</strong>
-                <span>{journeyFinished ? "Todas as marcações foram realizadas" : selectedPresentation.description}</span>
-              </div>
-            </div>
-          </div>
-
           <div className="kiosk-side-card kiosk-identification-card" ref={confirmPanelRef}>
-            <div className="kiosk-side-heading"><span aria-hidden="true">♙</span><h2>{manualSelection ? "Escolha a marcação" : "Marcação identificada"}</h2></div>
+            <div className="kiosk-side-heading"><span aria-hidden="true">♙</span><h2>{manualSelection ? "Escolha a marcação" : recognizedEmployee ? "Marcação identificada" : "Próxima marcação"}</h2></div>
             <div className="mt-3 grid gap-3">
               {manualSelection ? (
                 <div className="grid grid-cols-2 gap-3">
@@ -5876,34 +5799,7 @@ function KioskScreen({
             )}
           </div>
 
-          <div className="kiosk-side-card kiosk-light-card kiosk-details-card">
-            <button
-              aria-expanded={kioskDetailsOpen}
-              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-              onClick={() => setKioskDetailsOpen((open) => !open)}
-              type="button"
-            >
-              <span className="text-sm font-semibold">Detalhes do registro</span>
-              <span className="grid h-8 w-8 place-items-center rounded-md border border-[#cfe3dc] bg-white font-semibold">
-                {kioskDetailsOpen ? "-" : "+"}
-              </span>
-            </button>
-            {kioskDetailsOpen && (
-            <div className="grid gap-2 border-t border-[#cfe3dc] p-4 text-xs leading-5">
-              <span>Funcionario identificado</span>
-              <span>Foto da batida</span>
-              <span>Horario do servidor</span>
-              <span>Status: no horario, atraso ou fora da jornada</span>
-              <span>Log inviolavel</span>
-            </div>
-            )}
-          </div>
-          <div className="kiosk-side-card kiosk-digital-card">
-            <div className="kiosk-side-heading"><span aria-hidden="true">◎</span><h2>Leitor digital</h2></div>
-            <p>Disponível após a escolha e validação do equipamento.</p>
-            <span className="kiosk-coming-soon">Em breve</span>
-          </div>
-        </aside>
+          </aside>
       </div>
       {exitDialogOpen && (
         <div className="kiosk-exit-backdrop" role="presentation">

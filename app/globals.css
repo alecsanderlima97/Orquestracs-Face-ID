@@ -3060,3 +3060,102 @@ button.dashboard-shortcut:hover {
     bottom: 72px;
   }
 }
+
+/* Sala de ponto limpa: camera grande e confirmacao ao lado, tudo em uma tela */
+.kiosk-header-compact {
+  gap: 16px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+}
+
+.kiosk-header-compact .kiosk-brand-wordmark {
+  width: min(150px, 30vw);
+}
+
+.kiosk-compact-clock {
+  display: grid;
+  justify-items: center;
+  line-height: 1.1;
+}
+
+.kiosk-compact-clock .kiosk-time {
+  font-size: clamp(28px, 4.2vw, 44px);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.kiosk-compact-clock .kiosk-date-line {
+  margin-top: 2px;
+  color: #a9c4bd;
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.kiosk-header-compact .kiosk-header-actions {
+  align-items: center;
+  gap: 10px;
+}
+
+.kiosk-workspace-clean {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 14px;
+  align-items: start;
+}
+
+.kiosk-workspace-clean .kiosk-recognition-panel {
+  padding: 10px;
+}
+
+.kiosk-workspace-clean .kiosk-camera-shell video {
+  min-height: 0;
+}
+
+.kiosk-workspace-clean .kiosk-camera-shell > div {
+  padding: 0;
+}
+
+.kiosk-workspace-clean .kiosk-camera-shell > div > div:first-child {
+  aspect-ratio: auto;
+  max-width: none;
+  height: calc(100dvh - 230px);
+  min-height: 260px;
+}
+
+.kiosk-workspace-clean .kiosk-camera-shell > div > p {
+  padding-inline: 12px;
+}
+
+.kiosk-workspace-clean .kiosk-camera-shell > div > div:last-child {
+  padding: 0 12px 12px;
+}
+
+.kiosk-workspace-clean .kiosk-side-panel {
+  max-height: calc(100dvh - 110px);
+  overflow-y: auto;
+}
+
+@media (max-width: 767px) {
+  .kiosk-workspace-clean {
+    grid-template-columns: 1fr;
+  }
+
+  .kiosk-workspace-clean .kiosk-camera-shell > div > div:first-child {
+    height: 52dvh;
+  }
+
+  .kiosk-workspace-clean .kiosk-side-panel {
+    max-height: none;
+  }
+}
+
+.kiosk-screen .kiosk-header-compact {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.kiosk-screen .kiosk-header-compact .kiosk-header-actions {
+  order: 0;
+  width: auto;
+  flex-wrap: nowrap;
+}
