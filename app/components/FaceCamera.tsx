@@ -63,6 +63,7 @@ type FaceCameraProps = {
   onCameraState?: (state: "idle" | "loading" | "ready" | "error") => void;
   onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void | Promise<void>;
   onRecognized?: (employee: RecognizedFace, photoBlob?: Blob) => void;
+  onUnrecognized?: () => void;
   onStatus?: (message: string) => void;
   profileSources?: FaceProfileSource[];
   replaceProfile?: boolean;
@@ -91,6 +92,7 @@ export function FaceCamera({
   onCameraState,
   onProfileUpdated,
   onRecognized,
+  onUnrecognized,
   onStatus,
   profileSources = [],
   replaceProfile = false,
@@ -487,6 +489,7 @@ export function FaceCamera({
         );
       } else {
         const status = "Rosto detectado, mas não reconhecido. Ajuste a posição ou use PIN + foto.";
+        if (automatic) onUnrecognized?.();
         if (automatic) updateAutomaticMessage(status);
         else updateMessage(status);
       }

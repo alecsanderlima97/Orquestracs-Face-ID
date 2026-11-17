@@ -888,6 +888,38 @@ function getPunchTiming(employee: RecognizedFace, punchType: string, bankHoursEn
   };
 }
 
+const SIDEBAR_ICON_PATHS: Record<string, string[]> = {
+  Painel: ["M3 3h7v9H3z", "M14 3h7v5h-7z", "M14 12h7v9h-7z", "M3 16h7v5H3z"],
+  Empresa: ["M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16", "M16 9h2a2 2 0 0 1 2 2v10", "M3 21h18", "M8 7h4", "M8 11h4", "M8 15h4"],
+  Colaboradores: ["M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2", "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "M22 21v-2a4 4 0 0 0-3-3.87", "M16 3.13a4 4 0 0 1 0 7.75"],
+  "Sala de ponto": ["M3 7V5a2 2 0 0 1 2-2h2", "M17 3h2a2 2 0 0 1 2 2v2", "M21 17v2a2 2 0 0 1-2 2h-2", "M7 21H5a2 2 0 0 1-2-2v-2", "M9 9h.01", "M15 9h.01", "M8 14s1.5 2 4 2 4-2 4-2"],
+  "Ponto externo": ["M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z", "M12 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"],
+  "Banco de horas": ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M12 6v6l4 2"],
+  "Fechamento mensal": ["M8 2v4", "M16 2v4", "M3 10h18", "M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "M9 16l2 2 4-4"],
+  Relatorios: ["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M8 13h8", "M8 17h5"],
+  "LGPD e auditoria": ["M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", "M9 12l2 2 4-4"],
+  Configuracoes: ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"],
+  Admin: ["M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6z", "M12 8v4", "M12 16h.01"],
+};
+
+function SidebarIcon({ section }: { section: string }) {
+  const paths = SIDEBAR_ICON_PATHS[section] || SIDEBAR_ICON_PATHS.Painel;
+  return (
+    <svg
+      aria-hidden="true"
+      className="sidebar-nav-glyph"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={1.8}
+      viewBox="0 0 24 24"
+    >
+      {paths.map((d) => <path d={d} key={d} />)}
+    </svg>
+  );
+}
+
 function describeFaceSaveError(error: unknown) {
   const code = typeof error === "object" && error && "code" in error ? String((error as { code: unknown }).code) : "";
   const known: Record<string, string> = {
@@ -948,7 +980,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(min-width: 901px) and (max-width: 1180px)");
+    const mediaQuery = window.matchMedia("(min-width: 768px) and (max-width: 1180px)");
     const syncSidebarMode = () => {
       setSidebarAutoCompact(mediaQuery.matches);
       setSidebarAutoOverride(null);
@@ -1911,7 +1943,7 @@ export default function Home() {
   return (
     <TenantIdContext.Provider value={activeCompanyId}>
       <main className={`app-shell min-h-screen overflow-x-hidden text-[#17202a] ${kioskMode ? "kiosk-app-shell" : "bg-[#f4f6f8]"}`}>
-      <div className={`sticky top-0 z-30 border-b border-[#d9e0e7] bg-white/95 px-3 py-2 shadow-sm backdrop-blur lg:hidden ${kioskMode ? "hidden" : ""}`}>
+      <div className={`sticky top-0 z-30 border-b border-[#d9e0e7] bg-white/95 px-3 py-2 shadow-sm backdrop-blur md:hidden ${kioskMode ? "hidden" : ""}`}>
         <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-3">
           <button
             aria-expanded={mobileMenuOpen}
@@ -2014,8 +2046,8 @@ export default function Home() {
         </div>
       )}
 
-      <div className={kioskMode ? "kiosk-content-shell" : `app-layout mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:gap-6 lg:px-6 ${sidebarIsCollapsed ? "app-layout-collapsed lg:grid-cols-[76px_minmax(0,1fr)]" : "lg:grid-cols-[292px_minmax(0,1fr)]"}`}>
-        <aside className={kioskMode ? "hidden" : `app-sidebar app-sidebar-collapsible hidden rounded-lg border border-[#d9e0e7] p-4 text-white shadow-sm lg:sticky lg:top-4 lg:block lg:h-[calc(100vh-2rem)] ${sidebarIsCollapsed ? "app-sidebar-collapsed" : ""}`}>
+      <div className={kioskMode ? "kiosk-content-shell" : `app-layout mx-auto grid max-w-[1480px] gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:gap-6 lg:px-6 ${sidebarIsCollapsed ? "app-layout-collapsed md:grid-cols-[76px_minmax(0,1fr)]" : "md:grid-cols-[260px_minmax(0,1fr)] lg:grid-cols-[292px_minmax(0,1fr)]"}`}>
+        <aside className={kioskMode ? "hidden" : `app-sidebar app-sidebar-collapsible hidden rounded-lg border border-[#d9e0e7] p-4 text-white shadow-sm md:sticky md:top-3 md:block md:h-[calc(100vh-1.5rem)] lg:top-4 lg:h-[calc(100vh-2rem)] ${sidebarIsCollapsed ? "app-sidebar-collapsed" : ""}`}>
           <div className="flex h-full flex-col">
             <div className="app-sidebar-heading border-b border-white/10 pb-5">
               <div className="app-sidebar-brand-row">
@@ -2082,7 +2114,7 @@ export default function Home() {
                   title={item}
                   type="button"
                 >
-                  <span aria-hidden="true" className="sidebar-nav-glyph">{item.slice(0, 1)}</span>
+                  <SidebarIcon section={item} />
                   <span className="sidebar-nav-label">{item}</span>
                 </button>
               ))}
@@ -2098,17 +2130,15 @@ export default function Home() {
         </aside>
 
         <section className={kioskMode ? "kiosk-content-section" : centralAdminMode ? "app-main-content min-w-0" : "app-main-content grid min-w-0 gap-4 sm:gap-5"}>
-          <header className={kioskMode || centralAdminMode || active === "Painel" ? "hidden" : "app-header rounded-lg border border-[#d9e0e7] bg-white px-4 py-4 shadow-sm sm:px-5"}>
-            <div className="flex items-start justify-between gap-4">
+          <header className={kioskMode || centralAdminMode || active === "Painel" ? "hidden" : "app-header rounded-lg border border-[#d9e0e7] bg-white px-4 py-3 shadow-sm sm:px-5"}>
+            <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#2d6c5d]">
-                  Orquestracs Face ID
-                </p>
-                <h1 className="mt-1 text-xl font-semibold text-[#101923] sm:text-2xl">
-                  {active === "Painel" ? "Controle de jornada" : title}
+                <h1 className="truncate text-lg font-semibold text-[#101923] sm:text-xl">
+                  {title}
                 </h1>
-                <p className="mt-2 max-w-2xl text-sm leading-6 text-[#667085]">
-                  Ponto inteligente com reconhecimento facial, auditoria e fechamento mensal.
+                <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs font-medium text-[#667085]" title={notice}>
+                  <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#2d6c5d]" />
+                  <span className="truncate">{notice}</span>
                 </p>
               </div>
 
@@ -2119,13 +2149,6 @@ export default function Home() {
               >
                 Sair
               </button>
-            </div>
-
-            <div className="mt-3 flex items-center gap-2 text-xs font-medium text-[#667085]">
-              <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[#edf5f2] text-[11px] font-bold text-[#18594c]">
-                i
-              </span>
-              <p className="leading-5">{notice}</p>
             </div>
           </header>
 
@@ -5290,16 +5313,12 @@ function KioskScreen({
   canExitWithGoogle,
   canExitWithPassword,
   dateLabel,
-  locationLabel,
   onAction,
   onExit,
   onRegister,
   pin,
   setPin,
   timeLabel,
-  weatherDetail,
-  weatherIcon,
-  weatherLabel,
 }: {
   bankHoursEnabled: boolean;
   canExitWithGoogle: boolean;
@@ -5325,7 +5344,6 @@ function KioskScreen({
   const [recognizedPhoto, setRecognizedPhoto] = useState<Blob | undefined>();
   const [cameraState, setCameraState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [blockingMessage, setBlockingMessage] = useState("");
-  const [kioskDetailsOpen, setKioskDetailsOpen] = useState(false);
   const [pinFallbackOpen, setPinFallbackOpen] = useState(false);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
   const [exitPassword, setExitPassword] = useState("");
@@ -5338,6 +5356,11 @@ function KioskScreen({
   } | null>(null);
   const [faceProfileSources, setFaceProfileSources] = useState<FaceProfileSource[]>([]);
   const confirmPanelRef = useRef<HTMLDivElement>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [failurePrompt, setFailurePrompt] = useState(false);
+  const failCountRef = useRef(0);
+  const lastFailAtRef = useRef(0);
+  const touchStartXRef = useRef<number | null>(null);
   const resetTimerRef = useRef<number | null>(null);
 
   async function confirmKioskExit(method: "google" | "password") {
@@ -5462,6 +5485,32 @@ function KioskScreen({
     }, 150);
   }
 
+  // Conta tentativas sem reconhecimento (no maximo uma a cada 1,5 s) e oferece o PIN na terceira.
+  function registerUnrecognized() {
+    if (failurePrompt || recognizedEmployee || confirmation) return;
+    const now = Date.now();
+    if (now - lastFailAtRef.current < 1500) return;
+    lastFailAtRef.current = now;
+    failCountRef.current += 1;
+    if (failCountRef.current >= 3) {
+      failCountRef.current = 0;
+      setFailurePrompt(true);
+      speak("Não reconhecemos seu rosto. Tente de novo ou digite seu PIN.");
+    }
+  }
+
+  function retryRecognition() {
+    failCountRef.current = 0;
+    lastFailAtRef.current = 0;
+    setFailurePrompt(false);
+  }
+
+  function openPinFromPrompt() {
+    retryRecognition();
+    setPinFallbackOpen(true);
+    setDrawerOpen(true);
+  }
+
   function resetRecognition(message = "Reconhecimento cancelado. Tente novamente.") {
     setRecognizedEmployee(null);
     setSelectedPunch("Entrada 1");
@@ -5477,9 +5526,7 @@ function KioskScreen({
   function usePinFallback() {
     resetRecognition("Use o PIN do colaborador para registrar.");
     setPinFallbackOpen(true);
-    window.setTimeout(() => {
-      document.getElementById("kiosk-pin-fallback")?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 100);
+    setDrawerOpen(true);
   }
 
   async function confirmPunch() {
@@ -5562,120 +5609,54 @@ function KioskScreen({
 
   return (
     <section className="kiosk-screen min-h-[100dvh] text-white">
-      <header className="kiosk-clock-header">
-        <div className="kiosk-brand-lockup">
-          <img alt="Orquestracs Face ID" className="kiosk-brand-wordmark" src="/orquestracs-face-id-wordmark.svg" />
+      <div
+        className="kiosk-stage"
+        onTouchEnd={(event) => {
+          const start = touchStartXRef.current;
+          touchStartXRef.current = null;
+          if (start === null) return;
+          const delta = event.changedTouches[0].clientX - start;
+          if (delta < -70) setDrawerOpen(true);
+        }}
+        onTouchStart={(event) => {
+          touchStartXRef.current = event.touches[0].clientX;
+        }}
+      >
+        <div className="kiosk-topline">
+          <span className="kiosk-time">{timeLabel}</span>
+          <span className="kiosk-period">
+            <span aria-hidden="true" className="kiosk-period-dot" />
+            {journeyFinished ? "Jornada encerrada" : selectedPunch}
+          </span>
+          <span className="kiosk-date-line">{dateLabel}<span className="kiosk-live-chip"><span aria-hidden="true" className="kiosk-status-dot" />{cameraState === "ready" ? "Reconhecimento ativo" : "Preparando câmera"}</span></span>
         </div>
-        <div className="kiosk-title-block">
-          <p className="kiosk-eyebrow">Orquestracs Face ID</p>
-          <h1>Sala de ponto</h1>
-          <p>Reconhecimento facial e confirmação da jornada</p>
-        </div>
-        <div className="kiosk-header-actions">
-          <div className="kiosk-clock-card">
-            <span aria-hidden="true" className="kiosk-weather-icon">{weatherIcon}</span>
-            <div className="min-w-0">
-              <p className="kiosk-card-label">Momento e clima</p>
-              <div className="kiosk-clock-line">
-                <span className="kiosk-weather-label">{weatherLabel}</span>
-                <span className="kiosk-time">{timeLabel}</span>
-              </div>
-              <p className="kiosk-date-line">{dateLabel} · {weatherDetail}</p>
-              <p className="kiosk-location-line">{locationLabel}</p>
-            </div>
-          </div>
-          <div className={`kiosk-system-status ${cameraStatusClass}`}>
-            <span className="kiosk-status-dot" aria-hidden="true" />
-            <div>
-              <strong>{cameraStatusLabel}</strong>
-              <span>Reconhecimento automático</span>
-            </div>
-          </div>
-          <button
-            className="kiosk-exit-button"
-            onClick={() => {
-              setExitError("");
-              setExitPassword("");
-              setExitDialogOpen(true);
-            }}
-            type="button"
-          >
-            Sair
-          </button>
-        </div>
-      </header>
 
-      <div className="kiosk-workspace md:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="kiosk-recognition-panel">
-          <div className="kiosk-stepper" aria-label="Etapas do registro">
-            {[
-              ["1", "Reconhecimento", "Posicione o rosto"],
-              ["2", "Identificação", "Validando funcionário"],
-              ["3", "Confirmar", "Confirme o ponto"],
-            ].map(([step, label, detail], index) => (
-              <div className={`kiosk-step ${index === 0 && !recognizedEmployee ? "is-active" : recognizedEmployee && index === 1 ? "is-active" : confirmation && index === 2 ? "is-active" : ""}`} key={step}>
-                <span className="kiosk-step-icon">{index === 0 ? "◉" : index === 1 ? "♙" : "✓"}</span>
-                <strong>{step}. {label}</strong>
-                <span>{detail}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="kiosk-camera-heading">
-            <div>
-              <p className="kiosk-eyebrow">Reconhecimento automático</p>
-              <h2>Fique em frente à câmera</h2>
-              <p>O sistema identifica o funcionário sem tocar na tela.</p>
+        <div className="kiosk-camera-shell">
+            <div aria-hidden="true" className={`kiosk-scan-frame ${cameraState === "ready" && !recognizedEmployee && !confirmation ? "is-scanning" : ""}`}>
+              <span className="kiosk-scan-corner is-tl" />
+              <span className="kiosk-scan-corner is-tr" />
+              <span className="kiosk-scan-corner is-bl" />
+              <span className="kiosk-scan-corner is-br" />
+              <span className="kiosk-scan-line" />
             </div>
-            <span className={`kiosk-camera-badge ${cameraStatusClass}`}>
-              <span className="kiosk-status-dot" aria-hidden="true" /> {cameraStatusLabel}
-            </span>
-          </div>
-
-          <div className="kiosk-camera-shell">
             <FaceCamera
               autoRecognize
               autoStart
               onCameraState={setCameraState}
-              onRecognized={identifyFace}
+              onRecognized={(employee, photo) => {
+                failCountRef.current = 0;
+                void identifyFace(employee, photo);
+              }}
+              onUnrecognized={registerUnrecognized}
               onStatus={onAction}
               profileSources={faceProfileSources}
-              recognitionPaused={Boolean(recognizedEmployee || confirmation || sequenceLoading)}
+              recognitionPaused={Boolean(recognizedEmployee || confirmation || sequenceLoading || failurePrompt || drawerOpen)}
             />
-          </div>
-          <div className="kiosk-live-status">
-            <span className="kiosk-live-item"><span className="kiosk-status-dot" aria-hidden="true" /> {cameraState === "ready" ? "Aguardando o próximo funcionário..." : "Câmera em preparação"}</span>
-            <span className="kiosk-live-item"><span className="kiosk-status-dot" aria-hidden="true" /> Conexão protegida</span>
-            <span className="kiosk-live-item"><span className="kiosk-status-dot" aria-hidden="true" /> Registro em tempo real</span>
-          </div>
         </div>
 
-        <aside className="kiosk-side-panel">
-          <div className="kiosk-side-card kiosk-last-card">
-            <div className="kiosk-side-heading"><span aria-hidden="true">◷</span><h2>Última marcação</h2></div>
-            <div className="kiosk-last-record">
-              <span className="kiosk-avatar">{confirmation ? confirmation.employeeName.split(" ").map((part) => part[0]).slice(0, 2).join("") : "--"}</span>
-              <div className="min-w-0">
-                <strong>{confirmation ? confirmation.employeeName : "Aguardando funcionário"}</strong>
-                <span>{confirmation ? `${confirmation.type} · hoje às ${confirmation.time}` : "Nenhuma marcação nesta sessão"}</span>
-              </div>
-              <span className="kiosk-record-icon" aria-hidden="true">✓</span>
-            </div>
-          </div>
-
-          <div className="kiosk-side-card kiosk-next-card">
-            <div className="kiosk-side-heading"><span aria-hidden="true">▣</span><h2>Próxima marcação</h2></div>
-            <div className="kiosk-next-record">
-              <span className="kiosk-next-icon" aria-hidden="true">{selectedPresentation.icon}</span>
-              <div className="min-w-0">
-                <strong>{journeyFinished ? "Jornada encerrada" : selectedPunch}</strong>
-                <span>{journeyFinished ? "Todas as marcações foram realizadas" : selectedPresentation.description}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="kiosk-side-card kiosk-identification-card" ref={confirmPanelRef}>
-            <div className="kiosk-side-heading"><span aria-hidden="true">♙</span><h2>{manualSelection ? "Escolha a marcação" : "Marcação identificada"}</h2></div>
+        {Boolean(recognizedEmployee || timingWarning || blockingMessage) && !confirmation && (
+          <div className="kiosk-overlay-card" ref={confirmPanelRef}>
+            {recognizedEmployee && <p className="kiosk-overlay-name">{recognizedEmployee.name}</p>}
             <div className="mt-3 grid gap-3">
               {manualSelection ? (
                 <div className="grid grid-cols-2 gap-3">
@@ -5766,9 +5747,10 @@ function KioskScreen({
               )}
             </div>
           </div>
+        )}
 
-          {confirmation && (
-            <div aria-live="assertive" className="kiosk-confirmation-card">
+        {confirmation && (
+            <div aria-live="assertive" className="kiosk-confirmation-card kiosk-overlay-card">
               <span aria-hidden="true" className="block text-6xl">✓</span>
               <p className="mt-3 text-2xl font-black">PONTO REGISTRADO</p>
               <p className="mt-2 text-lg font-bold">{confirmation.employeeName}</p>
@@ -5776,7 +5758,50 @@ function KioskScreen({
             </div>
           )}
 
-          <div className="kiosk-side-card kiosk-light-card" id="kiosk-pin-fallback">
+        {failurePrompt && (
+          <div aria-live="assertive" className="kiosk-overlay-card kiosk-failure-card" role="alertdialog">
+            <p className="kiosk-failure-title">Não reconhecemos seu rosto</p>
+            <p className="kiosk-failure-text">Olhe direto para a câmera, com o rosto iluminado, ou use o seu PIN.</p>
+            <div className="kiosk-failure-actions">
+              <button className="kiosk-confirm-button" onClick={retryRecognition} type="button">Tentar de novo</button>
+              <button className="kiosk-pin-button" onClick={openPinFromPrompt} type="button">Digitar PIN</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <button
+        aria-label="Abrir mais opções da sala de ponto"
+        className="kiosk-drawer-handle"
+        onClick={() => setDrawerOpen(true)}
+        type="button"
+      >
+        <span aria-hidden="true">‹</span>
+      </button>
+
+      {drawerOpen && (
+        <div className="kiosk-drawer-backdrop" onClick={() => setDrawerOpen(false)} role="presentation">
+          <aside
+            aria-label="Mais opções da sala de ponto"
+            className="kiosk-drawer"
+            onClick={(event) => event.stopPropagation()}
+            onTouchEnd={(event) => {
+              const start = touchStartXRef.current;
+              touchStartXRef.current = null;
+              if (start !== null && event.changedTouches[0].clientX - start > 70) setDrawerOpen(false);
+            }}
+            onTouchStart={(event) => {
+              touchStartXRef.current = event.touches[0].clientX;
+            }}
+          >
+            <div className="kiosk-drawer-head">
+              <img alt="Orquestracs Face ID" className="kiosk-brand-wordmark" src="/orquestracs-face-id-wordmark.svg" />
+              <button aria-label="Fechar opções" className="kiosk-drawer-close" onClick={() => setDrawerOpen(false)} type="button">×</button>
+            </div>
+            <span className={`kiosk-camera-badge ${cameraStatusClass}`}>
+              <span className="kiosk-status-dot" aria-hidden="true" /> {cameraStatusLabel}
+            </span>
+            <div className="kiosk-side-card kiosk-light-card" id="kiosk-pin-fallback">
             <button
               aria-expanded={pinFallbackOpen}
               className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
@@ -5852,36 +5877,21 @@ function KioskScreen({
             </div>
             )}
           </div>
-
-          <div className="kiosk-side-card kiosk-light-card kiosk-details-card">
             <button
-              aria-expanded={kioskDetailsOpen}
-              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-              onClick={() => setKioskDetailsOpen((open) => !open)}
+              className="kiosk-exit-button kiosk-drawer-exit"
+              onClick={() => {
+                setExitError("");
+                setExitPassword("");
+                setDrawerOpen(false);
+                setExitDialogOpen(true);
+              }}
               type="button"
             >
-              <span className="text-sm font-semibold">Detalhes do registro</span>
-              <span className="grid h-8 w-8 place-items-center rounded-md border border-[#cfe3dc] bg-white font-semibold">
-                {kioskDetailsOpen ? "-" : "+"}
-              </span>
+              Sair da sala de ponto
             </button>
-            {kioskDetailsOpen && (
-            <div className="grid gap-2 border-t border-[#cfe3dc] p-4 text-xs leading-5">
-              <span>Funcionario identificado</span>
-              <span>Foto da batida</span>
-              <span>Horario do servidor</span>
-              <span>Status: no horario, atraso ou fora da jornada</span>
-              <span>Log inviolavel</span>
-            </div>
-            )}
-          </div>
-          <div className="kiosk-side-card kiosk-digital-card">
-            <div className="kiosk-side-heading"><span aria-hidden="true">◎</span><h2>Leitor digital</h2></div>
-            <p>Disponível após a escolha e validação do equipamento.</p>
-            <span className="kiosk-coming-soon">Em breve</span>
-          </div>
-        </aside>
-      </div>
+          </aside>
+        </div>
+      )}
       {exitDialogOpen && (
         <div className="kiosk-exit-backdrop" role="presentation">
           <section aria-labelledby="kiosk-exit-title" aria-modal="true" className="kiosk-exit-dialog" role="dialog">
