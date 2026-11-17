@@ -72,6 +72,41 @@ try {
     email: "other@example.com",
     userId: "wrong-user",
   }));
+
+  // Pontos, biometria e configuracao REP-P: o navegador nao pode alterar nem ler estados internos.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const db = context.firestore();
+    await Promise.all([
+      setDoc(doc(db, "tenants/tenant-a/users/reader-a"), { role: "reader" }),
+      setDoc(doc(db, "companies/tenant-a"), { name: "Empresa A", repP: { mode: "pilot" }, inpiRegistration: "" }),
+      setDoc(doc(db, "companies/tenant-a/employees/employee-a/faceId/face-1"), {
+        photoPath: "companies/tenant-a/employees/employee-a/face-id/p.webp",
+      }),
+      setDoc(doc(db, "companies/tenant-a/punchGuard/employee-a"), { lastOccurredAtMs: 1 }),
+      setDoc(doc(db, "companies/tenant-a/pinAttempts/user-a"), { failures: 0 }),
+      setDoc(doc(db, "companies/tenant-a/employeePins/employee-a"), { employeeId: "employee-a", pinHash: "hash-a" }),
+      setDoc(doc(db, "companies/tenant-a/punches/punch-a"), { employeeId: "employee-a", type: "entry" }),
+    ]);
+  });
+
+  const readerA = testEnv.authenticatedContext("reader-a", { email: "reader-a@example.com" }).firestore();
+  await assertFails(getDoc(doc(readerA, "companies/tenant-a/employees/employee-a/faceId/face-1")));
+  await assertSucceeds(getDoc(doc(dbA, "companies/tenant-a/employees/employee-a/faceId/face-1")));
+  await assertFails(getDoc(doc(dbA, "companies/tenant-a/punchGuard/employee-a")));
+  await assertFails(setDoc(doc(dbA, "companies/tenant-a/punchGuard/employee-a"), { lastOccurredAtMs: 0 }));
+  await assertFails(getDoc(doc(dbA, "companies/tenant-a/pinAttempts/user-a")));
+  await assertFails(setDoc(doc(dbA, "companies/tenant-a/pinAttempts/user-a"), { failures: 0 }));
+  await assertFails(getDoc(doc(readerA, "companies/tenant-a/employeePins/employee-a")));
+  await assertFails(getDoc(doc(dbA, "companies/tenant-a/employeePins/employee-a")));
+  await assertFails(setDoc(doc(dbA, "companies/tenant-a/employeePins/employee-a"), { pinHash: "novo" }));
+  await assertFails(updateDoc(doc(dbA, "companies/tenant-a/employees/employee-a"), { pinHash: "novo" }));
+  await assertSucceeds(updateDoc(doc(dbA, "companies/tenant-a/employees/employee-a"), { pinConfigured: true }));
+  await assertFails(updateDoc(doc(dbA, "companies/tenant-a"), { repP: { mode: "production" } }));
+  await assertFails(updateDoc(doc(dbA, "companies/tenant-a"), { inpiRegistration: "123" }));
+  await assertSucceeds(updateDoc(doc(dbA, "companies/tenant-a"), { name: "Empresa A revisada" }));
+  // Positivo: fechar o coringa nao pode bloquear leituras legitimas de colecoes com regra explicita.
+  await assertSucceeds(getDoc(doc(dbA, "companies/tenant-a/punches/punch-a")));
+  await assertFails(getDoc(doc(readerA, "companies/tenant-a/receiptAccessLogs/log-1")));
 } finally {
   await testEnv.cleanup();
 }
