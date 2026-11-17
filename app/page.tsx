@@ -5625,12 +5625,20 @@ function KioskScreen({
         <div className="kiosk-topline">
           <span className="kiosk-time">{timeLabel}</span>
           <span className="kiosk-period">
+            <span aria-hidden="true" className="kiosk-period-dot" />
             {journeyFinished ? "Jornada encerrada" : selectedPunch}
           </span>
-          <span className="kiosk-date-line">{dateLabel}</span>
+          <span className="kiosk-date-line">{dateLabel}<span className="kiosk-live-chip"><span aria-hidden="true" className="kiosk-status-dot" />{cameraState === "ready" ? "Reconhecimento ativo" : "Preparando câmera"}</span></span>
         </div>
 
         <div className="kiosk-camera-shell">
+            <div aria-hidden="true" className={`kiosk-scan-frame ${cameraState === "ready" && !recognizedEmployee && !confirmation ? "is-scanning" : ""}`}>
+              <span className="kiosk-scan-corner is-tl" />
+              <span className="kiosk-scan-corner is-tr" />
+              <span className="kiosk-scan-corner is-bl" />
+              <span className="kiosk-scan-corner is-br" />
+              <span className="kiosk-scan-line" />
+            </div>
             <FaceCamera
               autoRecognize
               autoStart
