@@ -70,6 +70,7 @@ type FaceCameraProps = {
   onCameraState?: (state: "idle" | "loading" | "ready" | "error") => void;
   onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void | Promise<void>;
   onRecognized?: (employee: RecognizedFace, photoBlob?: Blob) => void;
+  onUnrecognized?: () => void;
   onStatus?: (message: string) => void;
   profileSources?: FaceProfileSource[];
   replaceProfile?: boolean;
@@ -94,6 +95,7 @@ export function FaceCamera({
   onCameraState,
   onProfileUpdated,
   onRecognized,
+  onUnrecognized,
   onStatus,
   profileSources = [],
   replaceProfile = false,
@@ -528,6 +530,7 @@ export function FaceCamera({
         );
       } else {
         const status = "Rosto detectado, mas não reconhecido. Ajuste a posição ou use PIN + foto.";
+        if (automatic) onUnrecognized?.();
         if (automatic) updateAutomaticMessage(status);
         else updateMessage(status);
       }
@@ -568,10 +571,14 @@ export function FaceCamera({
 
   return (
     <div className={`rounded-lg border border-white/10 bg-[#0b121a] ${compact ? "p-3" : "p-5"}`}>
-      <div className={`relative overflow-hidden rounded-lg bg-black ${compact ? "min-h-[190px]" : "min-h-[360px]"}`}>
+      <div
+        className={`relative mx-auto w-full overflow-hidden rounded-lg bg-black ${
+          compact ? "aspect-[4/3] max-w-[calc(52vh*4/3)] min-h-[180px]" : "aspect-[4/3] max-w-[calc(62vh*4/3)] min-h-[240px]"
+        }`}
+      >
         <video
           aria-label="Visualização da câmera frontal"
-          className="h-full min-h-[inherit] w-full object-cover"
+          className="absolute inset-0 h-full w-full object-cover"
           muted
           playsInline
           ref={videoRef}
@@ -582,7 +589,7 @@ export function FaceCamera({
           </div>
         )}
         {cameraState === "ready" && (
-          <div className="pointer-events-none absolute inset-[12%] rounded-[42%] border-4 border-[#b7d7ce]/80" />
+          <div className="pointer-events-none absolute left-1/2 top-1/2 aspect-[3/4] h-[80%] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border-4 border-[#b7d7ce]/80" />
         )}
       </div>
 
