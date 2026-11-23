@@ -5432,12 +5432,9 @@ function KioskScreen({
     return name.trim().split(/\s+/)[0] || "colaborador";
   }
 
-  function speakPunchConfirmation(type: string, name: string) {
-    const firstName = voiceName(name);
-    const message = type === "Saída 2"
-      ? `Ponto registrado, ${firstName}. Jornada encerrada.`
-      : `Ponto registrado, ${firstName}.`;
-    speak(message);
+  // Voz minima no quiosque: o nome ao reconhecer e "Confirmado" ao registrar.
+  function speakPunchConfirmation() {
+    speak("Confirmado.");
   }
 
   async function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
@@ -5452,11 +5449,11 @@ function KioskScreen({
     if (employee.punchMode !== "manual" && nextPunch) setSelectedPunch(nextPunch);
     onAction(`${employee.name} reconhecido. Sequência atualizada pela última batida registrada.`);
     if (nextPunch === null) {
-      speak(`${voiceName(employee.name)}, jornada encerrada.`);
+      speak(voiceName(employee.name));
     } else if (employee.punchMode === "manual") {
-      speak(`${voiceName(employee.name)}, escolha a marcação.`);
+      speak(voiceName(employee.name));
     } else {
-      speak(`${voiceName(employee.name)}, confirme o ponto.`);
+      speak(voiceName(employee.name));
     }
     window.setTimeout(() => {
       confirmPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -5482,7 +5479,6 @@ function KioskScreen({
     if (failCountRef.current >= 3) {
       failCountRef.current = 0;
       setFailurePrompt(true);
-      speak("Não reconhecemos seu rosto. Tente de novo ou digite seu PIN.");
     }
   }
 
@@ -5507,7 +5503,6 @@ function KioskScreen({
     setBlockingMessage("");
     setConfirmation(null);
     onAction(message);
-    speak(message);
   }
 
   function usePinFallback() {
@@ -5520,7 +5515,6 @@ function KioskScreen({
     if (!recognizedEmployee || confirmation) {
       if (!recognizedEmployee) {
         onAction("Faça o reconhecimento do rosto antes de confirmar.");
-        speak("Primeiro faça o reconhecimento do rosto.");
       }
       return;
     }
@@ -5528,7 +5522,6 @@ function KioskScreen({
     const lastPunch = getLastEmployeePunch(recognizedEmployee.employeeId);
     if (lastPunch && Date.now() - Date.parse(lastPunch.savedAt) < 2 * 60 * 1000) {
       setBlockingMessage("Seu ponto já foi registrado agora há pouco.");
-      speak("Ponto já registrado.");
       return;
     }
 
@@ -5554,7 +5547,7 @@ function KioskScreen({
       time,
       type: selectedPunch,
     });
-    speakPunchConfirmation(selectedPunch, recognizedEmployee.name);
+    speakPunchConfirmation();
 
     resetTimerRef.current = window.setTimeout(() => {
       setConfirmation(null);
@@ -5656,7 +5649,6 @@ function KioskScreen({
                         onClick={() => {
                           setSelectedPunch(option.value);
                           setBlockingMessage("");
-                          speak(option.label);
                         }}
                         type="button"
                       >
@@ -5777,17 +5769,12 @@ function KioskScreen({
                     setSequenceLoading(false);
                     if (!nextPunch) {
                       setBlockingMessage("Todas as marcações previstas para hoje já foram registradas.");
-                      speak("A jornada de hoje já foi encerrada.");
                       return;
                     }
                     const resolvedPunch = nextPunch;
                     setSelectedPunch(resolvedPunch);
                     if (await onRegister(resolvedPunch)) {
-                      const time = new Date().toLocaleTimeString("pt-BR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      });
-                      speak(`${resolvedPunch} registrada com sucesso às ${time}.`);
+                      speak("Confirmado.");
                     }
                     return;
                   } catch {
@@ -5795,11 +5782,7 @@ function KioskScreen({
                   }
 
                   if (await onRegister(selectedPunch)) {
-                    const time = new Date().toLocaleTimeString("pt-BR", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    });
-                    speak(`${selectedPunch} registrada com sucesso às ${time}.`);
+                    speak("Confirmado.");
                   }
                   })();
                 }}
