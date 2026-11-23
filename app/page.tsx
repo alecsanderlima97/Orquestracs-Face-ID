@@ -801,34 +801,12 @@ function minutesFromTime(value: string) {
   return hours * 60 + minutes;
 }
 
-function formatDurationShort(totalMinutes: number) {
-  const sign = totalMinutes < 0 ? "-" : "";
-  const absolute = Math.abs(totalMinutes);
-  const hours = Math.floor(absolute / 60);
-  const minutes = absolute % 60;
-
-  if (!hours) return `${sign}${minutes} min`;
-  if (!minutes) return `${sign}${hours}h`;
-  return `${sign}${hours}h${String(minutes).padStart(2, "0")}`;
-}
-
 function formatDurationClock(totalMinutes: number) {
   const sign = totalMinutes < 0 ? "-" : "";
   const absolute = Math.abs(totalMinutes);
   const hours = Math.floor(absolute / 60);
   const minutes = absolute % 60;
   return `${sign}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-}
-
-function formatDurationSpeech(totalMinutes: number) {
-  const absolute = Math.abs(totalMinutes);
-  const hours = Math.floor(absolute / 60);
-  const minutes = absolute % 60;
-  const parts = [];
-
-  if (hours) parts.push(`${hours} ${hours === 1 ? "hora" : "horas"}`);
-  if (minutes) parts.push(`${minutes} ${minutes === 1 ? "minuto" : "minutos"}`);
-  return parts.join(" e ") || "0 minuto";
 }
 
 function getPunchTiming(employee: RecognizedFace, punchType: string, bankHoursEnabled = true) {
@@ -5454,12 +5432,9 @@ function KioskScreen({
     return name.trim().split(/\s+/)[0] || "colaborador";
   }
 
-  function speakPunchConfirmation(type: string, name: string) {
-    const firstName = voiceName(name);
-    const message = type === "Saída 2"
-      ? `Ponto registrado, ${firstName}. Jornada encerrada.`
-      : `Ponto registrado, ${firstName}.`;
-    speak(message);
+  // Voz minima no quiosque: o nome ao reconhecer e "Confirmado" ao registrar.
+  function speakPunchConfirmation() {
+    speak("Confirmado.");
   }
 
   async function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
@@ -5474,16 +5449,25 @@ function KioskScreen({
     if (employee.punchMode !== "manual" && nextPunch) setSelectedPunch(nextPunch);
     onAction(`${employee.name} reconhecido. Sequência atualizada pela última batida registrada.`);
     if (nextPunch === null) {
-      speak(`${voiceName(employee.name)}, jornada encerrada.`);
+      speak(voiceName(employee.name));
     } else if (employee.punchMode === "manual") {
-      speak(`${voiceName(employee.name)}, escolha a marcação.`);
+      speak(voiceName(employee.name));
     } else {
-      speak(`${voiceName(employee.name)}, confirme o ponto.`);
+      speak(voiceName(employee.name));
     }
     window.setTimeout(() => {
       confirmPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 150);
   }
+
+  // Sem confirmacao, a tela volta sozinha para o proximo colaborador.
+  useEffect(() => {
+    if (!recognizedEmployee || confirmation) return;
+    const waitMs = blockingMessage || journeyFinished ? 4000 : 15000;
+    const timer = window.setTimeout(() => resetRecognition("Pronto. Próximo colaborador."), waitMs);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recognizedEmployee, confirmation, blockingMessage, journeyFinished]);
 
   // Conta tentativas sem reconhecimento (no maximo uma a cada 1,5 s) e oferece o PIN na terceira.
   function registerUnrecognized() {
@@ -5495,7 +5479,6 @@ function KioskScreen({
     if (failCountRef.current >= 3) {
       failCountRef.current = 0;
       setFailurePrompt(true);
-      speak("Não reconhecemos seu rosto. Tente de novo ou digite seu PIN.");
     }
   }
 
@@ -5520,7 +5503,6 @@ function KioskScreen({
     setBlockingMessage("");
     setConfirmation(null);
     onAction(message);
-    speak(message);
   }
 
   function usePinFallback() {
@@ -5533,33 +5515,28 @@ function KioskScreen({
     if (!recognizedEmployee || confirmation) {
       if (!recognizedEmployee) {
         onAction("Faça o reconhecimento do rosto antes de confirmar.");
-        speak("Primeiro faça o reconhecimento do rosto.");
       }
       return;
     }
 
     const lastPunch = getLastEmployeePunch(recognizedEmployee.employeeId);
     if (lastPunch && Date.now() - Date.parse(lastPunch.savedAt) < 2 * 60 * 1000) {
-      setBlockingMessage("A última batida foi realizada há menos de 2 minutos.");
-      speak("Batida já registrada. Aguarde um pouco.");
+      setBlockingMessage("Seu ponto já foi registrado agora há pouco.");
       return;
     }
 
+    // Atraso/antecipacao continua registrado junto da batida, mas sem pedir um segundo toque no quiosque.
     const timing = getPunchTiming(recognizedEmployee, selectedPunch, bankHoursEnabled);
-    if (!timingWarning && timing.outsideTolerance) {
-      const warning = {
-        currentTime: timing.currentTime,
-        differenceMinutes: timing.differenceMinutes,
-        expectedTime: timing.expectedTime,
-        timingLabel: timing.timingLabel,
-      };
-      setTimingWarning(warning);
-      const direction = timing.differenceMinutes < 0 ? "antes" : "depois";
-      speak(`${timing.timingLabel}. ${formatDurationSpeech(timing.differenceMinutes)} ${direction} do horário. Confirme novamente.`);
-      return;
-    }
+    const exception = timing.outsideTolerance
+      ? {
+          currentTime: timing.currentTime,
+          differenceMinutes: timing.differenceMinutes,
+          expectedTime: timing.expectedTime,
+          timingLabel: timing.timingLabel,
+        }
+      : undefined;
 
-    if (!(await onRegister(selectedPunch, recognizedEmployee, timingWarning || undefined, recognizedPhoto))) return;
+    if (!(await onRegister(selectedPunch, recognizedEmployee, exception, recognizedPhoto))) return;
 
     const time = new Date().toLocaleTimeString("pt-BR", {
       hour: "2-digit",
@@ -5570,7 +5547,7 @@ function KioskScreen({
       time,
       type: selectedPunch,
     });
-    speakPunchConfirmation(selectedPunch, recognizedEmployee.name);
+    speakPunchConfirmation();
 
     resetTimerRef.current = window.setTimeout(() => {
       setConfirmation(null);
@@ -5590,8 +5567,6 @@ function KioskScreen({
     label: value,
     value,
   }));
-  const selectedPresentation =
-    punchOptions.find((option) => option.value === selectedPunch) || punchOptions[0];
   const manualSelection = recognizedEmployee?.punchMode === "manual";
 
   const cameraStatusLabel = cameraState === "ready"
@@ -5624,10 +5599,6 @@ function KioskScreen({
       >
         <div className="kiosk-topline">
           <span className="kiosk-time">{timeLabel}</span>
-          <span className="kiosk-period">
-            <span aria-hidden="true" className="kiosk-period-dot" />
-            {journeyFinished ? "Jornada encerrada" : selectedPunch}
-          </span>
           <span className="kiosk-date-line">{dateLabel}<span className="kiosk-live-chip"><span aria-hidden="true" className="kiosk-status-dot" />{cameraState === "ready" ? "Reconhecimento ativo" : "Preparando câmera"}</span></span>
         </div>
 
@@ -5655,106 +5626,60 @@ function KioskScreen({
         </div>
 
         {Boolean(recognizedEmployee || timingWarning || blockingMessage) && !confirmation && (
-          <div className="kiosk-overlay-card" ref={confirmPanelRef}>
+          <div className="kiosk-overlay-card kiosk-simple-card" ref={confirmPanelRef}>
             {recognizedEmployee && <p className="kiosk-overlay-name">{recognizedEmployee.name}</p>}
-            <div className="mt-3 grid gap-3">
-              {manualSelection ? (
-                <div className="grid grid-cols-2 gap-3">
-                  {punchOptions.map((option) => (
-                    <button
-                      aria-pressed={selectedPunch === option.value}
-                      className={`min-h-24 rounded-xl border-2 p-3 text-center transition ${
-                        selectedPunch === option.value
-                          ? "border-[#7ee2c4] bg-[#dcebe6] text-[#143f37]"
-                          : "border-white/20 bg-white/[0.06] text-white"
-                      }`}
-                      key={option.value}
-                      onClick={() => {
-                        setSelectedPunch(option.value);
-                        setTimingWarning(null);
-                        setBlockingMessage("");
-                        speak(option.label);
-                      }}
-                      type="button"
-                    >
-                      <span aria-hidden="true" className="block text-3xl">{option.icon}</span>
-                      <span className="mt-2 block text-sm font-bold">{option.label}</span>
-                      <span className="mt-1 block text-[11px] opacity-75">{option.description}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="kiosk-punch-card">
-                  <span aria-hidden="true" className="block text-6xl">
-                    {journeyFinished ? "✅" : selectedPresentation.icon}
-                  </span>
-                  <span className="mt-3 block text-2xl font-black">
-                    {journeyFinished ? "JORNADA ENCERRADA" : selectedPunch.toUpperCase()}
-                  </span>
-                  <span className="mt-2 block text-sm font-semibold">
-                    {journeyFinished
-                      ? "Todas as marcações de hoje já foram realizadas."
-                      : `${selectedPresentation.description}. Calculado pela sequência do dia.`}
-                  </span>
-                </div>
-              )}
-              {timingWarning && (
-                <div aria-live="assertive" className="rounded-xl border-4 border-[#f5b942] bg-[#fff4d6] p-5 text-center text-[#6b4500]">
-                  <span aria-hidden="true" className="block text-5xl">⚠️</span>
-                    <p className="mt-2 text-xl font-black">{timingWarning.timingLabel.toUpperCase()}</p>
-                  <p className="mt-3 text-base font-bold">
-                    Previsto: {timingWarning.expectedTime} • Agora: {timingWarning.currentTime}
-                  </p>
-                  <p className="mt-2 text-sm">
-                    {formatDurationShort(Math.abs(timingWarning.differenceMinutes))}{" "}
-                    {timingWarning.differenceMinutes < 0 ? "antes" : "depois"} do horário previsto.
-                  </p>
-                  <p className="mt-3 text-sm font-bold">Toque novamente para registrar mesmo assim.</p>
-                </div>
-              )}
-              {blockingMessage && (
-                <div aria-live="assertive" className="rounded-xl border-4 border-[#ef6b6b] bg-[#ffe5e5] p-5 text-center text-[#7a2020]">
-                  <span aria-hidden="true" className="block text-5xl">✋</span>
-                  <p className="mt-2 text-xl font-black">BATIDA NÃO REGISTRADA</p>
-                  <p className="mt-2 text-sm font-semibold">{blockingMessage}</p>
-                </div>
-              )}
-              <button
-                className="kiosk-confirm-button"
-                disabled={!recognizedEmployee || sequenceLoading || journeyFinished || Boolean(confirmation) || Boolean(blockingMessage)}
-                onClick={() => void confirmPunch()}
-                type="button"
-              >
-                {timingWarning ? "⚠ CONFIRMAR MESMO ASSIM" : "✓ CONFIRMAR PONTO"}
+            {blockingMessage || journeyFinished ? (
+              <>
+                <p aria-live="assertive" className="kiosk-simple-notice">
+                  {journeyFinished ? "Todas as batidas de hoje já foram feitas." : blockingMessage}
+                </p>
+                <button className="kiosk-big-button is-secondary" onClick={() => resetRecognition("Pronto.")} type="button">
+                  OK
+                </button>
+              </>
+            ) : (
+              <>
+                {manualSelection && (
+                  <div className="kiosk-manual-options">
+                    {punchOptions.map((option) => (
+                      <button
+                        aria-pressed={selectedPunch === option.value}
+                        className={selectedPunch === option.value ? "is-selected" : ""}
+                        key={option.value}
+                        onClick={() => {
+                          setSelectedPunch(option.value);
+                          setBlockingMessage("");
+                        }}
+                        type="button"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <button
+                  className="kiosk-big-button"
+                  disabled={!recognizedEmployee || sequenceLoading || Boolean(confirmation)}
+                  onClick={() => void confirmPunch()}
+                  type="button"
+                >
+                  {sequenceLoading ? "Aguarde..." : "Confirmar"}
+                </button>
+              </>
+            )}
+            {recognizedEmployee && !confirmation && (
+              <button className="kiosk-not-me" onClick={usePinFallback} type="button">
+                Não é você? <strong>Digitar PIN</strong>
               </button>
-              {recognizedEmployee && !confirmation && (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <button
-                    className="kiosk-cancel-button"
-                    onClick={() => resetRecognition()}
-                    type="button"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    className="kiosk-pin-button"
-                    onClick={usePinFallback}
-                    type="button"
-                  >
-                    Nao sou eu / usar PIN
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
           </div>
         )}
 
         {confirmation && (
             <div aria-live="assertive" className="kiosk-confirmation-card kiosk-overlay-card">
-              <span aria-hidden="true" className="block text-6xl">✓</span>
-              <p className="mt-3 text-2xl font-black">PONTO REGISTRADO</p>
-              <p className="mt-2 text-lg font-bold">{confirmation.employeeName}</p>
-              <p className="mt-1 text-base">{confirmation.type} • {confirmation.time}</p>
+              <span aria-hidden="true" className="kiosk-check-icon" />
+              <p className="kiosk-confirm-title">Ponto registrado</p>
+              <p className="kiosk-confirm-name">{confirmation.employeeName}</p>
             </div>
           )}
 
@@ -5844,17 +5769,12 @@ function KioskScreen({
                     setSequenceLoading(false);
                     if (!nextPunch) {
                       setBlockingMessage("Todas as marcações previstas para hoje já foram registradas.");
-                      speak("A jornada de hoje já foi encerrada.");
                       return;
                     }
                     const resolvedPunch = nextPunch;
                     setSelectedPunch(resolvedPunch);
                     if (await onRegister(resolvedPunch)) {
-                      const time = new Date().toLocaleTimeString("pt-BR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      });
-                      speak(`${resolvedPunch} registrada com sucesso às ${time}.`);
+                      speak("Confirmado.");
                     }
                     return;
                   } catch {
@@ -5862,11 +5782,7 @@ function KioskScreen({
                   }
 
                   if (await onRegister(selectedPunch)) {
-                    const time = new Date().toLocaleTimeString("pt-BR", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    });
-                    speak(`${selectedPunch} registrada com sucesso às ${time}.`);
+                    speak("Confirmado.");
                   }
                   })();
                 }}
