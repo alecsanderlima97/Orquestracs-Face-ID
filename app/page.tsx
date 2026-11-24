@@ -4406,10 +4406,16 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
       });
 
       const completed = captureCount >= FACE_ID_REQUIRED_CAPTURES;
+      // A primeira captura do Face ID vira a foto do perfil quando o colaborador ainda nao tem uma.
+      const useAsProfile = !employeeAtStart.profilePhotoPath;
+      if (useAsProfile) {
+        setEmployeePhotoUrls((urls) => ({ ...urls, [employeeAtStart.employeeId]: URL.createObjectURL(photoBlob) }));
+      }
       const updated = localEmployees.map((employee) =>
         employee.employeeId === employeeAtStart.employeeId
           ? {
               ...employee,
+              ...(useAsProfile ? { profilePhotoPath: photoPath } : {}),
               faceIdStatus: completed ? "registered" as const : employee.faceIdStatus,
               status: completed ? "Face ID cadastrado" : `Face ID ${captureCount}/${FACE_ID_REQUIRED_CAPTURES}`,
             }
@@ -4424,6 +4430,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
         await upsertEmployee(companyId, employeeDocumentId(current), {
           faceCaptureCount: captureCount,
           faceIdStatus: completed ? "registered" : current.faceIdStatus,
+          ...(useAsProfile ? { profilePhotoPath: photoPath } : {}),
           ...(completed
             ? { faceRegisteredAt: new Date().toISOString(), status: "Face ID cadastrado" }
             : { status: `Face ID ${captureCount}/${FACE_ID_REQUIRED_CAPTURES}` }),
