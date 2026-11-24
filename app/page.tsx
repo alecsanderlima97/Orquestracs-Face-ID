@@ -204,7 +204,7 @@ function toLocalEmployee(employee: Record<string, unknown>, fallbackId: string):
     name: String(employee.name || "Colaborador sem nome"),
     phone: String(employee.phone || ""),
     pin: "",
-    pinConfigured: Boolean(employee.pinHash || employee.pin || employee.pinConfigured),
+    pinConfigured: Boolean(employee.pinConfigured || employee.pin),
     profilePhotoPath: String(employee.profilePhotoPath || ""),
     punchMode: (employee.punchMode || "automatic") as LocalEmployee["punchMode"],
     registration: String(employee.registration || ""),
@@ -642,6 +642,7 @@ type PunchContext = {
   externalReason?: string;
   location?: PunchLocation;
   origin?: "kiosk" | "external";
+  intentKey?: string;
 };
 
 type ScheduledPunch = `Entrada ${1 | 2 | 3 | 4}` | `Saída ${1 | 2 | 3 | 4}`;
@@ -1616,21 +1617,24 @@ export default function Home() {
       }
     }
     const punchId = crypto.randomUUID();
-    let photoPath = employee ? "face-id-local-profile" : "pending-storage-photo";
+    if (!photoBlob) {
+      setNotice("Não foi possível capturar a foto de evidência. Ative a câmera e tente novamente.");
+      return false;
+    }
 
-    if (photoBlob) {
-      try {
-        photoPath = await uploadPunchPhoto({
-          blob: photoBlob,
-          companyId: activeCompanyId,
-          employeeId,
-          occurredAt,
-          punchId,
-        });
-      } catch (error) {
-        console.error(error);
-        setNotice("A foto nao foi salva no Storage. A batida continuara com evidencia pendente.");
-      }
+    let photoPath = "";
+    try {
+      photoPath = await uploadPunchPhoto({
+        blob: photoBlob,
+        companyId: activeCompanyId,
+        employeeId,
+        occurredAt,
+        punchId,
+      });
+    } catch (error) {
+      console.error(error);
+      setNotice("A foto de evidência não foi salva. A batida não foi registrada. Tente novamente.");
+      return false;
     }
 
     const external = context.origin === "external";
@@ -1651,7 +1655,7 @@ export default function Home() {
     try {
       const registered = await registerRepPunch({
         companyId: activeCompanyId,
-        idempotencyKey: `${activeCompanyId}:${employeeId}:${punchId}`,
+        idempotencyKey: `${activeCompanyId}:${employeeId}:${context.intentKey || punchId}`,
         ...punchPayload,
       });
       setLastPunchReceipt(registered.receipt);
@@ -4402,10 +4406,16 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
       });
 
       const completed = captureCount >= FACE_ID_REQUIRED_CAPTURES;
+      // A primeira captura do Face ID vira a foto do perfil quando o colaborador ainda nao tem uma.
+      const useAsProfile = !employeeAtStart.profilePhotoPath;
+      if (useAsProfile) {
+        setEmployeePhotoUrls((urls) => ({ ...urls, [employeeAtStart.employeeId]: URL.createObjectURL(photoBlob) }));
+      }
       const updated = localEmployees.map((employee) =>
         employee.employeeId === employeeAtStart.employeeId
           ? {
               ...employee,
+              ...(useAsProfile ? { profilePhotoPath: photoPath } : {}),
               faceIdStatus: completed ? "registered" as const : employee.faceIdStatus,
               status: completed ? "Face ID cadastrado" : `Face ID ${captureCount}/${FACE_ID_REQUIRED_CAPTURES}`,
             }
@@ -4420,6 +4430,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
         await upsertEmployee(companyId, employeeDocumentId(current), {
           faceCaptureCount: captureCount,
           faceIdStatus: completed ? "registered" : current.faceIdStatus,
+          ...(useAsProfile ? { profilePhotoPath: photoPath } : {}),
           ...(completed
             ? { faceRegisteredAt: new Date().toISOString(), status: "Face ID cadastrado" }
             : { status: `Face ID ${captureCount}/${FACE_ID_REQUIRED_CAPTURES}` }),
@@ -5340,6 +5351,9 @@ function KioskScreen({
   const lastFailAtRef = useRef(0);
   const touchStartXRef = useRef<number | null>(null);
   const resetTimerRef = useRef<number | null>(null);
+  const submittingRef = useRef(false);
+  const punchIntentRef = useRef<string | null>(null);
+  const faceCaptureRef = useRef<(() => Promise<Blob | undefined>) | null>(null);
 
   async function confirmKioskExit(method: "google" | "password") {
     setExitLoading(true);
@@ -5438,6 +5452,7 @@ function KioskScreen({
   }
 
   async function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
+    punchIntentRef.current = null;
     setSequenceLoading(true);
     const nextPunch = await resolveNextPunch(employee.employeeId, companyId, employee.schedule);
     setSequenceLoading(false);
@@ -5495,6 +5510,7 @@ function KioskScreen({
   }
 
   function resetRecognition(message = "Reconhecimento cancelado. Tente novamente.") {
+    punchIntentRef.current = null;
     setRecognizedEmployee(null);
     setSelectedPunch("Entrada 1");
     setJourneyFinished(false);
@@ -5511,11 +5527,49 @@ function KioskScreen({
     setDrawerOpen(true);
   }
 
+  async function verifyPinAndIdentify() {
+    if (sequenceLoading || confirmation || submittingRef.current) return;
+    setSequenceLoading(true);
+    try {
+      const verified = await verifyEmployeePin(companyId, pin.trim());
+      const savedEmployees = await listEmployees(companyId);
+      const registered = savedEmployees.find((employee) => employee.id === verified.employeeId);
+      const local = registered
+        ? toLocalEmployee(registered as unknown as Record<string, unknown>, registered.id)
+        : undefined;
+      const photo = await faceCaptureRef.current?.();
+      setSequenceLoading(false);
+      if (!photo) {
+        setBlockingMessage("Não foi possível capturar a foto de evidência. Ative a câmera e tente novamente.");
+        return;
+      }
+      await identifyFace({
+        employeeId: verified.employeeId,
+        externalPunchAllowed: verified.externalPunchAllowed,
+        name: verified.name,
+        punchMode: local?.punchMode || "automatic",
+        schedule: local?.schedule as RecognizedFace["schedule"],
+      }, photo);
+    } catch (error) {
+      console.error(error);
+      setSequenceLoading(false);
+      const message = error instanceof Error && error.message.includes("Muitas tentativas")
+        ? "Muitas tentativas de PIN. Procure o responsável."
+        : "PIN não reconhecido. Confira os números ou procure o responsável.";
+      setBlockingMessage(message);
+    }
+  }
+
   async function confirmPunch() {
+    if (submittingRef.current) return;
     if (!recognizedEmployee || confirmation) {
       if (!recognizedEmployee) {
         onAction("Faça o reconhecimento do rosto antes de confirmar.");
       }
+      return;
+    }
+    if (!recognizedPhoto) {
+      setBlockingMessage("Sem foto de evidência. Ative a câmera e reconheça novamente.");
       return;
     }
 
@@ -5536,7 +5590,21 @@ function KioskScreen({
         }
       : undefined;
 
-    if (!(await onRegister(selectedPunch, recognizedEmployee, exception, recognizedPhoto))) return;
+    // A mesma intenção de batida reaproveita a chave: reenvio após falha de rede não duplica o registro.
+    if (!punchIntentRef.current) punchIntentRef.current = crypto.randomUUID();
+    submittingRef.current = true;
+    setSequenceLoading(true);
+    let saved = false;
+    try {
+      saved = await onRegister(selectedPunch, recognizedEmployee, exception, recognizedPhoto, {
+        intentKey: punchIntentRef.current,
+      });
+    } finally {
+      submittingRef.current = false;
+      setSequenceLoading(false);
+    }
+    if (!saved) return;
+    punchIntentRef.current = null;
 
     const time = new Date().toLocaleTimeString("pt-BR", {
       hour: "2-digit",
@@ -5613,6 +5681,7 @@ function KioskScreen({
             <FaceCamera
               autoRecognize
               autoStart
+              captureRef={faceCaptureRef}
               onCameraState={setCameraState}
               onRecognized={(employee, photo) => {
                 failCountRef.current = 0;
@@ -5754,41 +5823,10 @@ function KioskScreen({
               </Field>
               <button
                 className="secondary-button"
-                onClick={() => {
-                  void (async () => {
-                  let nextPunch: string | null = selectedPunch;
-                  try {
-                    setSequenceLoading(true);
-                    const verified = await verifyEmployeePin(companyId, pin.trim());
-                    const savedEmployees = await listEmployees(companyId);
-                    const registered = savedEmployees.find((employee) => employee.id === verified.employeeId);
-                    const employeeSchedule = registered
-                      ? toLocalEmployee(registered as unknown as Record<string, unknown>, registered.id).schedule
-                      : undefined;
-                    nextPunch = await resolveNextPunch(verified.employeeId, companyId, employeeSchedule);
-                    setSequenceLoading(false);
-                    if (!nextPunch) {
-                      setBlockingMessage("Todas as marcações previstas para hoje já foram registradas.");
-                      return;
-                    }
-                    const resolvedPunch = nextPunch;
-                    setSelectedPunch(resolvedPunch);
-                    if (await onRegister(resolvedPunch)) {
-                      speak("Confirmado.");
-                    }
-                    return;
-                  } catch {
-                    setSequenceLoading(false);
-                  }
-
-                  if (await onRegister(selectedPunch)) {
-                    speak("Confirmado.");
-                  }
-                  })();
-                }}
+                onClick={() => void verifyPinAndIdentify()}
                 type="button"
               >
-                Registrar por PIN + foto
+                Verificar PIN e tirar foto
               </button>
             </div>
             )}

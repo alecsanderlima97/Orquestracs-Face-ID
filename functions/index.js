@@ -6,6 +6,14 @@ import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
+import {
+  dayKeyFor,
+  evaluatePinAttempts,
+  evaluatePunchGuard,
+  isValidPunchPhotoPath,
+  nextPunchGuard,
+  recordPinFailure,
+} from "./punch-guard.js";
 
 initializeApp();
 
@@ -371,6 +379,36 @@ function aeJSequence(type) {
   return ["entry", "lunch_out"].includes(type) ? "1" : "2";
 }
 
+// Limite de tentativas de PIN por operador: impede tentativa e erro em massa.
+async function assertPinAttemptsAllowed(companyId, uid) {
+  const attemptRef = db.doc(`companies/${companyId}/pinAttempts/${uid}`);
+  const nowMs = Date.now();
+  const check = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(attemptRef);
+    return evaluatePinAttempts({ state: snapshot.data(), nowMs });
+  });
+  if (check.locked) {
+    const minutes = Math.ceil(check.retryAfterMs / 60000);
+    throw new HttpsError(
+      "resource-exhausted",
+      `Muitas tentativas de PIN. Aguarde ${minutes} minuto(s) ou procure o responsavel.`,
+    );
+  }
+  return { attemptRef, nowMs };
+}
+
+async function registerPinFailure(attemptRef, nowMs) {
+  const snapshot = await attemptRef.get();
+  await attemptRef.set({
+    ...recordPinFailure({ state: snapshot.data(), nowMs }),
+    updatedAt: Timestamp.fromMillis(nowMs),
+  });
+}
+
+async function resetPinAttempts(attemptRef) {
+  await attemptRef.set({ failures: 0, updatedAt: Timestamp.now(), windowStartMs: 0 });
+}
+
 export const setEmployeePin = onCall(callableOptions, async (request) => {
   const companyId = normalizedText(request.data?.companyId);
   const employeeId = normalizedText(request.data?.employeeId);
@@ -386,7 +424,7 @@ export const setEmployeePin = onCall(callableOptions, async (request) => {
 
   const digest = pinDigest(companyId, pin);
   const duplicate = await db
-    .collection(`companies/${companyId}/employees`)
+    .collection(`companies/${companyId}/employeePins`)
     .where("pinHash", "==", digest)
     .limit(2)
     .get();
@@ -394,10 +432,17 @@ export const setEmployeePin = onCall(callableOptions, async (request) => {
     throw new HttpsError("already-exists", "Este PIN ja pertence a outro colaborador.");
   }
 
-  await employeeRef.update({
-    pin: FieldValue.delete(),
+  // O hash fica em coleção bloqueada para o navegador; o colaborador guarda apenas o indicador.
+  await db.doc(`companies/${companyId}/employeePins/${employeeId}`).set({
+    employeeId,
     pinHash: digest,
     pinUpdatedAt: FieldValue.serverTimestamp(),
+  });
+  await employeeRef.update({
+    pin: FieldValue.delete(),
+    pinHash: FieldValue.delete(),
+    pinUpdatedAt: FieldValue.delete(),
+    pinConfigured: true,
   });
 
   return { employeeId, pinConfigured: true };
@@ -409,19 +454,26 @@ export const verifyEmployeePin = onCall(callableOptions, async (request) => {
   if (!companyId) throw new HttpsError("invalid-argument", "Empresa obrigatoria.");
 
   await requireManager(request, companyId);
+  const { attemptRef, nowMs } = await assertPinAttemptsAllowed(companyId, request.auth.uid);
   const matches = await db
-    .collection(`companies/${companyId}/employees`)
+    .collection(`companies/${companyId}/employeePins`)
     .where("pinHash", "==", pinDigest(companyId, pin))
     .limit(2)
     .get();
 
-  if (matches.empty) throw new HttpsError("not-found", "PIN nao encontrado.");
+  if (matches.empty) {
+    await registerPinFailure(attemptRef, nowMs);
+    throw new HttpsError("not-found", "PIN nao encontrado.");
+  }
   if (matches.size > 1) throw new HttpsError("failed-precondition", "PIN duplicado. Procure o responsavel.");
+  await resetPinAttempts(attemptRef);
 
-  const employee = matches.docs[0];
-  const data = employee.data();
+  const employeeId = matches.docs[0].id;
+  const employeeSnapshot = await db.doc(`companies/${companyId}/employees/${employeeId}`).get();
+  if (!employeeSnapshot.exists) throw new HttpsError("not-found", "PIN nao encontrado.");
+  const data = employeeSnapshot.data();
   return {
-    employeeId: normalizedText(data.employeeId) || employee.id,
+    employeeId: normalizedText(data.employeeId) || employeeId,
     externalPunchAllowed: data.externalPunchAllowed === true,
     name: normalizedText(data.name) || "Colaborador",
   };
@@ -463,6 +515,9 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
   ]);
   if (!companySnapshot.exists) throw new HttpsError("failed-precondition", "Cadastre a empresa antes de registrar ponto.");
   if (!employeeSnapshot) throw new HttpsError("not-found", "Colaborador nao encontrado.");
+  if (!isValidPunchPhotoPath({ photoPath, companyId, employeeId: requestedEmployeeId })) {
+    throw new HttpsError("failed-precondition", "Evidencia fotografica ausente ou invalida. A marcacao nao foi registrada.");
+  }
 
   const company = companySnapshot.data();
   const employee = employeeSnapshot.data();
@@ -491,6 +546,7 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
   const employeeId = normalizedText(employee.employeeId) || employeeSnapshot.id;
   const stateRef = db.doc(`companies/${companyId}/repState/main`);
   const idempotencyRef = db.doc(`companies/${companyId}/repIdempotency/${idempotencyKey}`);
+  const guardRef = db.doc(`companies/${companyId}/punchGuard/${employeeId}`);
   const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
   const punchRef = db.collection(`companies/${companyId}/punches`).doc();
   const arpRef = db.doc(`companies/${companyId}/arpRecords/${punchRef.id}`);
@@ -502,6 +558,15 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
     if (idempotencySnapshot.exists) {
       return { ...idempotencySnapshot.data()?.result, reused: true };
     }
+    const guardSnapshot = await transaction.get(guardRef);
+    const punchDayKey = dayKeyFor(now.toDate());
+    const guardCheck = evaluatePunchGuard({
+      dayKey: punchDayKey,
+      guard: guardSnapshot.data() || null,
+      nowMs: now.toMillis(),
+      scheduledPunch: scheduledPunch || null,
+    });
+    if (!guardCheck.ok) throw new HttpsError("failed-precondition", guardCheck.message);
     const auditStateSnapshot = await transaction.get(auditStateRef);
     const state = stateSnapshot.data() || {};
     const nsr = Number(state.lastNsr || 0) + 1;
@@ -549,6 +614,12 @@ export const registerRepPunch = onCall(callableOptions, async (request) => {
       lastNsr: nsr,
       updatedAt: now,
     }, { merge: true });
+    transaction.set(guardRef, nextPunchGuard({
+      dayKey: punchDayKey,
+      guard: guardSnapshot.data() || null,
+      nowMs: now.toMillis(),
+      scheduledPunch: scheduledPunch || null,
+    }));
     const auditEvent = {
       action: "punch.registered",
       actorEmail: normalizedText(request.auth.token.email).toLowerCase(),
@@ -904,7 +975,7 @@ export const registerFaceIdCapture = onCall(callableOptions, async (request) => 
 export const listFaceIdSources = onCall(adminCallableOptions, async (request) => {
   const companyId = normalizedText(request.data?.companyId);
   if (!companyId) throw new HttpsError("invalid-argument", "Empresa obrigatoria.");
-  await requireTenantMember(request, companyId);
+  await requireManager(request, companyId);
 
   const employeesSnapshot = await db.collection(`companies/${companyId}/employees`).get();
   const eligibleEmployees = employeesSnapshot.docs.filter((employeeSnapshot) => {
@@ -1078,17 +1149,24 @@ export const listOwnRepReceipts = onCall(callableOptions, async (request) => {
   if (!companyId) throw new HttpsError("invalid-argument", "Empresa obrigatoria.");
 
   await requireTenantMember(request, companyId);
+  const { attemptRef, nowMs } = await assertPinAttemptsAllowed(companyId, request.auth.uid);
   const matches = await db
-    .collection(`companies/${companyId}/employees`)
+    .collection(`companies/${companyId}/employeePins`)
     .where("pinHash", "==", pinDigest(companyId, pin))
     .limit(2)
     .get();
-  if (matches.empty) throw new HttpsError("not-found", "PIN nao encontrado.");
+  if (matches.empty) {
+    await registerPinFailure(attemptRef, nowMs);
+    throw new HttpsError("not-found", "PIN nao encontrado.");
+  }
   if (matches.size > 1) throw new HttpsError("failed-precondition", "PIN duplicado. Procure o responsavel.");
+  await resetPinAttempts(attemptRef);
 
-  const employeeSnapshot = matches.docs[0];
+  const pinEmployeeId = matches.docs[0].id;
+  const employeeSnapshot = await db.doc(`companies/${companyId}/employees/${pinEmployeeId}`).get();
+  if (!employeeSnapshot.exists) throw new HttpsError("not-found", "PIN nao encontrado.");
   const employee = employeeSnapshot.data();
-  const employeeId = normalizedText(employee.employeeId) || employeeSnapshot.id;
+  const employeeId = normalizedText(employee.employeeId) || pinEmployeeId;
   const start = Timestamp.fromDate(new Date(Date.now() - (48 * 60 * 60 * 1000)));
   const recentSnapshot = await db
     .collection(`companies/${companyId}/arpRecords`)

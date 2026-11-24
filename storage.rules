@@ -49,7 +49,8 @@ service firebase.storage {
     }
 
     match /companies/{companyId}/employees/{employeeId}/face-id/{fileName} {
-      allow read: if canReadTenant(companyId);
+      // Fotos faciais de cadastro: somente administracao.
+      allow read: if canWriteTenant(companyId);
       allow create, update: if canWriteTenant(companyId) && validImage();
       allow delete: if false;
     }
@@ -75,9 +76,9 @@ service firebase.storage {
       allow update, delete: if false;
     }
 
+    // Sem coringa de leitura: todo caminho usado pelo app tem regra explicita acima (regras sao aditivas).
     match /companies/{companyId}/{allPaths=**} {
-      allow read: if canReadTenant(companyId);
-      allow write: if false;
+      allow read, write: if false;
     }
   }
 }

@@ -35,7 +35,11 @@ service cloud.firestore {
 
     match /companies/{companyId} {
       allow read: if canReadTenant(companyId);
-      allow create, update: if canWriteTenant(companyId);
+      allow create: if canWriteTenant(companyId);
+      // Configuracao de conformidade REP-P (modo, INPI) so muda por operacao controlada, nao pelo navegador.
+      allow update: if isPlatformOwner()
+        || (canWriteTenant(companyId)
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(["repP", "inpiRegistration"]));
       allow delete: if false;
 
       match /employees/{employeeId} {
@@ -47,7 +51,8 @@ service cloud.firestore {
         allow delete: if false;
 
         match /faceId/{recordId} {
-          allow read: if canReadTenant(companyId);
+          // Dados biometricos: somente administracao (owner/admin) le o historico de captura.
+          allow read: if canWriteTenant(companyId);
           allow create: if false;
           allow update, delete: if false;
         }
@@ -76,6 +81,19 @@ service cloud.firestore {
 
       match /repIdempotency/{requestId} {
         allow read, create, update, delete: if false;
+      }
+
+      // Estados internos do servidor: nunca lidos ou escritos pelo navegador.
+      match /punchGuard/{employeeId} {
+        allow read, write: if false;
+      }
+
+      match /pinAttempts/{userId} {
+        allow read, write: if false;
+      }
+
+      match /employeePins/{employeeId} {
+        allow read, write: if false;
       }
 
       match /auditState/{stateId} {
@@ -108,9 +126,10 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      // Sem coringa de leitura: toda subcolecao lida pelo app tem regra explicita acima (regras sao aditivas).
+      // Colecoes nao listadas (ex.: receiptAccessLogs, escrita apenas pelo servidor) ficam bloqueadas.
       match /{document=**} {
-        allow read: if canReadTenant(companyId);
-        allow write: if false;
+        allow read, write: if false;
       }
     }
 

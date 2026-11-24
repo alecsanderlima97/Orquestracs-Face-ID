@@ -99,7 +99,7 @@ export type Employee = {
   admissionDate: string;
   role: string;
   department?: string;
-  pinHash: string;
+  pinConfigured?: boolean;
   journeyMode: "collective" | "individual";
   collectiveJourneyId?: string;
   individualJourney?: IndividualJourney;
