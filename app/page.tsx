@@ -3763,6 +3763,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
   const [selectedEmployee, setSelectedEmployee] = useState<LocalEmployee | null>(null);
   const [selectedEmployeePunches, setSelectedEmployeePunches] = useState<Punch[]>([]);
   const [selectedEmployeePunchesLoading, setSelectedEmployeePunchesLoading] = useState(false);
+  const [showAllPunches, setShowAllPunches] = useState(false);
   const [employeePhotoUrls, setEmployeePhotoUrls] = useState<Record<string, string>>({});
   const [holeriteImportDraft, setHoleriteImportDraft] = useState<HoleriteImportDraft | null>(null);
   const [holeriteImportLoading, setHoleriteImportLoading] = useState(false);
@@ -4456,8 +4457,9 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
       onAction(`${employeeAtStart.name}: captura ${captureCount}/${FACE_ID_REQUIRED_CAPTURES} sincronizada no Firebase.`);
     } catch (error) {
       console.error("Não foi possível sincronizar o cadastro facial.", error);
-      onAction(`A captura foi feita neste aparelho, mas não foi salva no Firebase. ${describeFaceSaveError(error)}`);
-      throw error;
+      const reason = describeFaceSaveError(error);
+      onAction(`A captura foi feita neste aparelho, mas não foi salva no Firebase. ${reason}`);
+      throw new Error(reason);
     } finally {
       setFaceSaving(false);
     }
@@ -4875,14 +4877,21 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
               {selectedEmployeePunchesLoading ? (
                 <p className="text-sm font-semibold text-[#667085]">Carregando batidas...</p>
               ) : selectedEmployeePunches.length ? (
-                selectedEmployeePunches.slice(0, 8).map((punch) => (
-                  <div className="grid gap-2 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] p-3 text-sm md:grid-cols-4" key={punch.id}>
-                    <span className="font-semibold text-[#101923]">{formatPunchType(punch.type)}</span>
-                    <span className="text-[#667085]">{formatPunchDateTime(punch)}</span>
-                    <span className="text-[#667085]">{formatPunchStatus(punch.status)}</span>
-                    <span className="truncate text-xs text-[#667085]">{punch.photoPath}</span>
-                  </div>
-                ))
+                <>
+                  {selectedEmployeePunches.slice(0, showAllPunches ? 30 : 3).map((punch) => (
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-md border border-[#e3e8ee] bg-[#fbfcfd] px-3 py-2 text-sm" key={punch.id}>
+                      <span className="font-semibold text-[#101923]">{formatPunchType(punch.type)}</span>
+                      <span className="text-[#667085]">{formatPunchDateTime(punch)}</span>
+                      <span className="text-[#667085]">{formatPunchStatus(punch.status)}</span>
+                      <span className="text-xs text-[#667085]">{punch.photoPath?.startsWith("companies/") ? "Com foto" : "Sem foto"}</span>
+                    </div>
+                  ))}
+                  {selectedEmployeePunches.length > 3 && (
+                    <button className="secondary-button justify-self-start" onClick={() => setShowAllPunches((value) => !value)} type="button">
+                      {showAllPunches ? "Mostrar menos" : `Ver todas (${selectedEmployeePunches.length})`}
+                    </button>
+                  )}
+                </>
               ) : (
                 <p className="rounded-md border border-[#efd9a8] bg-[#fff8e9] p-3 text-sm font-semibold text-[#8a5a00]">
                   Nenhuma batida encontrada para este colaborador.
@@ -4896,7 +4905,7 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
               {selectedEmployee.faceIdStatus === "registered" ? "Refazer Face ID" : "Cadastrar Face ID"}
             </button>
             <button className="secondary-button border-[#e5b6b1] bg-[#fff5f3] text-[#a33a3a] hover:border-[#c94c43] hover:bg-[#ffe9e6]" disabled={!canEdit} onClick={() => void resetFaceId(selectedEmployee)} type="button">Limpar Face ID</button>
-            <label className={`secondary-button ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
+            <label className={`secondary-button inline-flex items-center justify-center text-center ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
               Editar foto principal
               <input
                 accept="image/*"

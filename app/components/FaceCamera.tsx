@@ -393,7 +393,8 @@ export function FaceCamera({
         await onProfileUpdated?.(descriptors.length, await captureFrame());
       } catch (error) {
         console.error("Não foi possível sincronizar a captura facial.", error);
-        updateMessage("A captura foi feita, mas não foi sincronizada com o sistema. Tente novamente.");
+        const reason = error instanceof Error && error.message ? ` ${error.message}` : " Tente novamente.";
+        updateMessage(`A captura foi feita, mas não foi salva.${reason}`);
         return;
       }
       updateMessage(
