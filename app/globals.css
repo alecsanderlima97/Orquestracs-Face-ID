@@ -1160,13 +1160,24 @@ a {
 
 .dashboard-live-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
+  min-width: 0;
 }
 
 .dashboard-logout-button {
+  flex-shrink: 0;
   min-height: 40px;
   white-space: nowrap;
+}
+
+/* Tela estreita: relogio e "Sair da conta" ocupam a largura sem cortar o botao. */
+@media (max-width: 900px) {
+  .dashboard-live-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 .dashboard-live-meta span,
