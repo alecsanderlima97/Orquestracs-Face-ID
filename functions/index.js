@@ -14,6 +14,7 @@ import {
   nextPunchGuard,
   recordPinFailure,
 } from "./punch-guard.js";
+import { activeSamples, appendSample } from "./face-adaptive.js";
 
 initializeApp();
 
@@ -65,6 +66,15 @@ function timestampMillis(value) {
   if (value && typeof value.toMillis === "function") return value.toMillis();
   if (value instanceof Date) return value.getTime();
   return 0;
+}
+
+// faceRegisteredAt chega como texto ISO (gravado pelo app) ou Timestamp.
+function registeredAtMillis(value) {
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return timestampMillis(value);
 }
 
 function wait(milliseconds) {
@@ -1037,7 +1047,14 @@ export const listFaceIdSources = onCall(adminCallableOptions, async (request) =>
     }))).filter(Boolean);
     if (!photoUrls.length) continue;
 
+    const adaptiveSnapshot = await db.doc(`companies/${companyId}/faceAdaptive/${employeeSnapshot.id}`).get();
+    const adaptiveDescriptors = activeSamples(
+      adaptiveSnapshot.data()?.samples,
+      registeredAtMillis(employee.faceRegisteredAt),
+    ).map((sample) => sample.descriptor);
+
     sources.push({
+      adaptiveDescriptors,
       employeeId,
       name: normalizedText(employee.name) || "Colaborador",
       photoUrls,
@@ -1047,6 +1064,92 @@ export const listFaceIdSources = onCall(adminCallableOptions, async (request) =>
   }
 
   return { companyId, sources };
+});
+
+// Aprendizado do reconhecimento: guarda os numeros do rosto (nunca a foto) de uma batida
+// confirmada com certeza alta. No maximo 1 por dia e as 5 mais recentes por colaborador.
+export const addAdaptiveFaceSample = onCall(adminCallableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const employeeId = normalizedText(request.data?.employeeId);
+  if (!companyId || !employeeId) throw new HttpsError("invalid-argument", "Empresa e colaborador sao obrigatorios.");
+  await requireManager(request, companyId);
+
+  const employeeSnapshot = await findEmployee(companyId, employeeId);
+  const employee = employeeSnapshot?.data() || {};
+  if (!employeeSnapshot || employee.active === false || employee.faceIdStatus !== "registered") {
+    return { added: false, reason: "not-registered" };
+  }
+
+  const adaptiveRef = db.doc(`companies/${companyId}/faceAdaptive/${employeeSnapshot.id}`);
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const actorEmail = normalizedText(request.auth.token.email).toLowerCase();
+  return db.runTransaction(async (transaction) => {
+    const [adaptiveSnapshot, auditStateSnapshot] = await Promise.all([
+      transaction.get(adaptiveRef),
+      transaction.get(auditStateRef),
+    ]);
+    const result = appendSample({
+      descriptor: request.data?.descriptor,
+      distance: request.data?.distance,
+      now: new Date(),
+      registeredAtMs: registeredAtMillis(employee.faceRegisteredAt),
+      samples: adaptiveSnapshot.data()?.samples,
+    });
+    if (!result.ok) return { added: false, reason: result.reason };
+
+    const updatedAt = Timestamp.now();
+    transaction.set(adaptiveRef, {
+      companyId,
+      employeeId,
+      samples: result.samples,
+      updatedAt,
+      updatedBy: request.auth.uid,
+    });
+    await appendAuditEvent(transaction, companyId, {
+      action: "face_id.adaptive_sample_added",
+      actorEmail,
+      actorUserId: request.auth.uid,
+      entityId: employeeSnapshot.id,
+      entityType: "face_id",
+      metadata: { employeeId, sampleCount: result.samples.length },
+      createdAt: updatedAt,
+    }, auditStateSnapshot);
+    return { added: true, sampleCount: result.samples.length };
+  });
+});
+
+// Apaga o que o reconhecimento aprendeu de um colaborador (usado no "Limpar Face ID" e no botao proprio).
+export const clearAdaptiveFaceSamples = onCall(adminCallableOptions, async (request) => {
+  const companyId = normalizedText(request.data?.companyId);
+  const employeeId = normalizedText(request.data?.employeeId);
+  if (!companyId || !employeeId) throw new HttpsError("invalid-argument", "Empresa e colaborador sao obrigatorios.");
+  await requireManager(request, companyId);
+
+  const employeeSnapshot = await findEmployee(companyId, employeeId);
+  if (!employeeSnapshot) throw new HttpsError("not-found", "Colaborador nao encontrado.");
+
+  const adaptiveRef = db.doc(`companies/${companyId}/faceAdaptive/${employeeSnapshot.id}`);
+  const auditStateRef = db.doc(`companies/${companyId}/auditState/main`);
+  const actorEmail = normalizedText(request.auth.token.email).toLowerCase();
+  await db.runTransaction(async (transaction) => {
+    const [adaptiveSnapshot, auditStateSnapshot] = await Promise.all([
+      transaction.get(adaptiveRef),
+      transaction.get(auditStateRef),
+    ]);
+    const removed = Array.isArray(adaptiveSnapshot.data()?.samples) ? adaptiveSnapshot.data().samples.length : 0;
+    transaction.delete(adaptiveRef);
+    const createdAt = Timestamp.now();
+    await appendAuditEvent(transaction, companyId, {
+      action: "face_id.adaptive_samples_cleared",
+      actorEmail,
+      actorUserId: request.auth.uid,
+      entityId: employeeSnapshot.id,
+      entityType: "face_id",
+      metadata: { employeeId, removed },
+      createdAt,
+    }, auditStateSnapshot);
+  });
+  return { cleared: true };
 });
 
 export const reviewAttendanceJustification = onCall(callableOptions, async (request) => {

@@ -16,7 +16,13 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { clearLocalFaceProfile, FaceCamera, type FaceProfileSource, type RecognizedFace } from "@/app/components/FaceCamera";
+import {
+  clearLocalFaceProfile,
+  FaceCamera,
+  type FaceLearningSample,
+  type FaceProfileSource,
+  type RecognizedFace,
+} from "@/app/components/FaceCamera";
 import AdminCentral from "@/app/components/AdminCentral";
 import { VoiceGuide } from "@/app/components/VoiceGuide";
 import { auth } from "@/lib/firebase/client";
@@ -33,7 +39,13 @@ import type {
   PunchStatus,
   PunchType,
 } from "@/lib/models";
-import { createFaceIdRecord, listFaceIdSources, uploadFacePhoto } from "@/lib/services/face-id";
+import {
+  addAdaptiveFaceSample,
+  clearAdaptiveFaceSamples,
+  createFaceIdRecord,
+  listFaceIdSources,
+  uploadFacePhoto,
+} from "@/lib/services/face-id";
 import { saveEmployeePin, verifyEmployeePin } from "@/lib/services/employee-pins";
 import { listEmployees, upsertEmployee } from "@/lib/services/employees";
 import { uploadPunchPhoto } from "@/lib/services/punch-photos";
@@ -4326,6 +4338,9 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
         status: "Face ID pendente",
       });
       clearLocalFaceProfile(employee.employeeId);
+      await clearAdaptiveFaceSamples(companyId, employee.employeeId).catch((error) =>
+        console.warn("Aprendizado do reconhecimento nao foi limpo.", error),
+      );
       const updated = localEmployees.map((item) =>
         item.employeeId === employee.employeeId
           ? { ...item, faceIdStatus: "not_registered" as const, status: "Face ID pendente" }
@@ -4344,6 +4359,21 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
     } catch (error) {
       console.error(error);
       onAction("Não foi possível limpar o Face ID. Verifique sua sessão e tente novamente.");
+    }
+  }
+
+  async function resetFaceLearning(employee: LocalEmployee) {
+    if (!canEdit) return;
+    const confirmed = window.confirm(
+      `Zerar o aprendizado do rosto de ${employee.name}? O reconhecimento volta a usar só as fotos do cadastro.`,
+    );
+    if (!confirmed) return;
+    try {
+      await clearAdaptiveFaceSamples(companyId, employee.employeeId);
+      onAction(`Aprendizado do rosto de ${employee.name} zerado.`);
+    } catch (error) {
+      console.error(error);
+      onAction("Não foi possível zerar o aprendizado. Verifique sua sessão e tente novamente.");
     }
   }
 
@@ -4905,6 +4935,9 @@ function EmployeesScreen({ canEdit, company, onAction }: { canEdit: boolean; com
               {selectedEmployee.faceIdStatus === "registered" ? "Refazer Face ID" : "Cadastrar Face ID"}
             </button>
             <button className="secondary-button border-[#e5b6b1] bg-[#fff5f3] text-[#a33a3a] hover:border-[#c94c43] hover:bg-[#ffe9e6]" disabled={!canEdit} onClick={() => void resetFaceId(selectedEmployee)} type="button">Limpar Face ID</button>
+            {selectedEmployee.faceIdStatus === "registered" && (
+              <button className="secondary-button" disabled={!canEdit} onClick={() => void resetFaceLearning(selectedEmployee)} type="button">Zerar aprendizado</button>
+            )}
             <label className={`secondary-button inline-flex items-center justify-center text-center ${canEdit ? "cursor-pointer" : "cursor-not-allowed opacity-50"}`}>
               Editar foto principal
               <input
@@ -5362,6 +5395,7 @@ function KioskScreen({
   const resetTimerRef = useRef<number | null>(null);
   const submittingRef = useRef(false);
   const punchIntentRef = useRef<string | null>(null);
+  const learningRef = useRef<FaceLearningSample | undefined>(undefined);
   const faceCaptureRef = useRef<(() => Promise<Blob | undefined>) | null>(null);
 
   async function confirmKioskExit(method: "google" | "password") {
@@ -5385,6 +5419,7 @@ function KioskScreen({
       try {
         const registered = await listFaceIdSources(companyId);
         const sources = registered.flatMap((employee) => employee.photoUrls.slice(0, 3).map((photoUrl) => ({
+          adaptiveDescriptors: employee.adaptiveDescriptors,
           employeeId: employee.employeeId,
           name: employee.name,
           photoUrl,
@@ -5460,8 +5495,9 @@ function KioskScreen({
     speak("Confirmado.");
   }
 
-  async function identifyFace(employee: RecognizedFace, photoBlob?: Blob) {
+  async function identifyFace(employee: RecognizedFace, photoBlob?: Blob, learning?: FaceLearningSample) {
     punchIntentRef.current = null;
+    learningRef.current = learning;
     setSequenceLoading(true);
     const nextPunch = await resolveNextPunch(employee.employeeId, companyId, employee.schedule);
     setSequenceLoading(false);
@@ -5520,6 +5556,7 @@ function KioskScreen({
 
   function resetRecognition(message = "Reconhecimento cancelado. Tente novamente.") {
     punchIntentRef.current = null;
+    learningRef.current = undefined;
     setRecognizedEmployee(null);
     setSelectedPunch("Entrada 1");
     setJourneyFinished(false);
@@ -5615,6 +5652,18 @@ function KioskScreen({
     if (!saved) return;
     punchIntentRef.current = null;
 
+    // Batida confirmada com reconhecimento de alta confianca: o rosto ajuda a melhorar o reconhecimento.
+    const learning = learningRef.current;
+    learningRef.current = undefined;
+    if (learning) {
+      void addAdaptiveFaceSample({
+        companyId,
+        descriptor: learning.descriptor,
+        distance: learning.distance,
+        employeeId: recognizedEmployee.employeeId,
+      }).catch((error) => console.warn("Aprendizado do reconhecimento nao foi salvo.", error));
+    }
+
     const time = new Date().toLocaleTimeString("pt-BR", {
       hour: "2-digit",
       minute: "2-digit",
@@ -5692,9 +5741,9 @@ function KioskScreen({
               autoStart
               captureRef={faceCaptureRef}
               onCameraState={setCameraState}
-              onRecognized={(employee, photo) => {
+              onRecognized={(employee, photo, learning) => {
                 failCountRef.current = 0;
-                void identifyFace(employee, photo);
+                void identifyFace(employee, photo, learning);
               }}
               onUnrecognized={registerUnrecognized}
               onStatus={onAction}

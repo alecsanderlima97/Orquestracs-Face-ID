@@ -6,6 +6,9 @@ import { FACE_ID_REQUIRED_CAPTURES } from "@/lib/face-id/config";
 // Chaves antigas que guardavam descritores faciais em texto puro no navegador. Sao removidas.
 const LEGACY_FACE_STORAGE_KEYS = ["orquestracs-face-id-local-profiles", "orquestracs-face-id-remote-descriptors-v1"];
 const MATCH_THRESHOLD = 0.5;
+// Aprendizado: so com certeza alta em relacao as fotos do cadastro e sem colaborador parecido por perto.
+const LEARNING_MAX_DISTANCE = 0.4;
+const LEARNING_MIN_MARGIN = 0.1;
 const AUTO_RECOGNITION_INTERVAL_MS = 500;
 // Prova de presença: o rosto precisa se mover levemente na janela de amostras antes de qualquer match.
 const PRESENCE_WINDOW_SIZE = 8;
@@ -31,12 +34,21 @@ export type RecognizedFace = {
 
 export type FaceProfileSource = RecognizedFace & {
   photoUrl: string;
+  // Descritores aprendidos em batidas confirmadas (numeros do rosto, sem foto).
+  adaptiveDescriptors?: number[][];
+};
+
+// Amostra que o quiosque pode enviar para o aprendizado depois que a batida for confirmada.
+export type FaceLearningSample = {
+  descriptor: number[];
+  distance: number;
 };
 
 type StoredFaceProfile = RecognizedFace & {
   descriptors: number[][];
   updatedAt: string;
   sourceKey?: string;
+  adaptive?: boolean;
 };
 
 let faceApiPromise: Promise<FaceApiModule> | null = null;
@@ -69,7 +81,7 @@ type FaceCameraProps = {
   registrationAllowed?: boolean;
   onCameraState?: (state: "idle" | "loading" | "ready" | "error") => void;
   onProfileUpdated?: (captureCount: number, photoBlob?: Blob) => void | Promise<void>;
-  onRecognized?: (employee: RecognizedFace, photoBlob?: Blob) => void;
+  onRecognized?: (employee: RecognizedFace, photoBlob?: Blob, learning?: FaceLearningSample) => void;
   onUnrecognized?: () => void;
   onStatus?: (message: string) => void;
   profileSources?: FaceProfileSource[];
@@ -332,6 +344,21 @@ export function FaceCamera({
       }
 
       saveCachedRemoteProfiles(syncedProfiles);
+      // Descritores aprendidos entram como perfis extras do mesmo colaborador (sem baixar fotos).
+      const adaptiveProfiles: StoredFaceProfile[] = [];
+      const seenAdaptive = new Set<string>();
+      for (const source of profileSources) {
+        if (seenAdaptive.has(source.employeeId) || !source.adaptiveDescriptors?.length) continue;
+        seenAdaptive.add(source.employeeId);
+        adaptiveProfiles.push({
+          ...source,
+          adaptive: true,
+          descriptors: source.adaptiveDescriptors,
+          sourceKey: `${source.employeeId}|adaptive`,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      if (syncedProfiles.length) syncedProfiles.push(...adaptiveProfiles);
       remoteProfilesRef.current = syncedProfiles;
       if (!syncedProfiles.length && profileSources.length) {
         const status = loadFailures
@@ -508,6 +535,24 @@ export function FaceCamera({
 
       if (bestMatch && bestMatch.distance <= MATCH_THRESHOLD) {
         const match = bestMatch as { distance: number; profile: StoredFaceProfile };
+        // Aprende so se o rosto bate com as fotos do cadastro (nao so com o que ja foi aprendido)
+        // e se nenhum outro colaborador esta perto o bastante para gerar confusao.
+        let originalDistance = Infinity;
+        let otherDistance = Infinity;
+        for (const profile of profiles) {
+          for (const savedDescriptor of profile.descriptors) {
+            const distance = faceApi.euclideanDistance(new Float32Array(savedDescriptor), detection.descriptor);
+            if (profile.employeeId === match.profile.employeeId) {
+              if (!profile.adaptive) originalDistance = Math.min(originalDistance, distance);
+            } else {
+              otherDistance = Math.min(otherDistance, distance);
+            }
+          }
+        }
+        const learning: FaceLearningSample | undefined =
+          originalDistance <= LEARNING_MAX_DISTANCE && otherDistance - match.distance >= LEARNING_MIN_MARGIN
+            ? { descriptor: Array.from(detection.descriptor), distance: originalDistance }
+            : undefined;
         if (!hasPresenceMovement()) {
           const status = "Confirme sua presença: mova levemente a cabeça diante da câmera.";
           if (automatic) updateAutomaticMessage(status);
@@ -528,6 +573,7 @@ export function FaceCamera({
             schedule: match.profile.schedule,
           },
           await captureFrame(),
+          learning,
         );
       } else {
         const status = "Rosto detectado, mas não reconhecido. Ajuste a posição ou use PIN + foto.";

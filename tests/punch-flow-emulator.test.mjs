@@ -152,6 +152,39 @@ try {
     throw new Error(`PIN deveria estar bloqueado apos 5 falhas: ${JSON.stringify(locked.body)}`);
   }
   console.log("ok: PIN bloqueado apos 5 falhas (mesmo com PIN correto)");
+
+  // 7) Aprendizado do reconhecimento: so com certeza alta, 1 por dia, e limpeza apaga tudo.
+  const sample = Array.from({ length: 128 }, (_, index) => ((index % 5) - 2) / 20);
+  const notRegistered = await call("addAdaptiveFaceSample", { companyId, employeeId, descriptor: sample, distance: 0.3 });
+  if (notRegistered.body?.result?.added !== false) throw new Error("Sem Face ID cadastrado nao deveria aprender");
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), `companies/${companyId}/employees/${employeeId}`), {
+      faceIdStatus: "registered",
+      faceRegisteredAt: new Date(Date.now() - 60_000).toISOString(),
+    }, { merge: true });
+  });
+  const weak = await call("addAdaptiveFaceSample", { companyId, employeeId, descriptor: sample, distance: 0.45 });
+  if (weak.body?.result?.added !== false) throw new Error("Certeza baixa nao deveria aprender");
+  const learned = await call("addAdaptiveFaceSample", { companyId, employeeId, descriptor: sample, distance: 0.3 });
+  if (learned.body?.result?.added !== true) throw new Error(`Deveria aprender: ${JSON.stringify(learned.body)}`);
+  const again = await call("addAdaptiveFaceSample", { companyId, employeeId, descriptor: sample, distance: 0.3 });
+  if (again.body?.result?.reason !== "already-today") throw new Error("Segunda amostra no mesmo dia deveria ser recusada");
+  const bogus = await call("addAdaptiveFaceSample", { companyId, employeeId, descriptor: [1, 2, 3], distance: 0.1 });
+  if (bogus.body?.result?.added !== false) throw new Error("Descritor invalido nao deveria ser aceito");
+  const blockedRead = await testEnv.authenticatedContext("owner-a").firestore();
+  try {
+    await getDoc(doc(blockedRead, `companies/${companyId}/faceAdaptive/${employeeId}`));
+    throw new Error("Navegador nao deveria ler o aprendizado diretamente");
+  } catch (error) {
+    if (!/PERMISSION_DENIED|permission/i.test(String(error))) throw error;
+  }
+  const cleared = await call("clearAdaptiveFaceSamples", { companyId, employeeId });
+  if (cleared.body?.result?.cleared !== true) throw new Error("Limpeza do aprendizado falhou");
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const snapshot = await getDoc(doc(context.firestore(), `companies/${companyId}/faceAdaptive/${employeeId}`));
+    if (snapshot.exists()) throw new Error("Aprendizado deveria ter sido apagado");
+  });
+  console.log("ok: aprendizado so com certeza alta, 1 por dia, invisivel ao navegador e apagavel");
 } finally {
   await testEnv.cleanup();
 }
