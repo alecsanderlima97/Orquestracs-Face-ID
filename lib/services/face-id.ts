@@ -41,6 +41,7 @@ export async function createFaceIdRecord(record: Omit<FaceIdRecord, "id">) {
 }
 
 export type FaceIdSource = {
+  adaptiveDescriptors?: number[][];
   employeeId: string;
   name: string;
   photoUrls: string[];
@@ -67,4 +68,26 @@ export async function listFaceIdSources(companyId: string) {
 export async function listFaceIdRecords(companyId: string, employeeId: string) {
   const snapshot = await getDocs(query(faceIdRef(companyId, employeeId), orderBy("createdAt", "desc")));
   return snapshot.docs.map((item) => ({ id: item.id, ...item.data() }) as FaceIdRecord);
+}
+
+// Aprendizado do reconhecimento: envia os numeros do rosto (sem foto) de uma batida confirmada.
+export async function addAdaptiveFaceSample(input: {
+  companyId: string;
+  employeeId: string;
+  descriptor: number[];
+  distance: number;
+}) {
+  const callable = httpsCallable<typeof input, { added: boolean; reason?: string; sampleCount?: number }>(
+    functions,
+    "addAdaptiveFaceSample",
+  );
+  return (await callable(input)).data;
+}
+
+export async function clearAdaptiveFaceSamples(companyId: string, employeeId: string) {
+  const callable = httpsCallable<{ companyId: string; employeeId: string }, { cleared: boolean }>(
+    functions,
+    "clearAdaptiveFaceSamples",
+  );
+  return (await callable({ companyId, employeeId })).data;
 }
